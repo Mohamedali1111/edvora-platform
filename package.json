@@ -1,0 +1,22 @@
+{
+  "name": "edvora-platform",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Security-first bilingual EdTech SaaS platform foundation.",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22 <23",
+    "pnpm": ">=10.34.5 <11"
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @edvora/api start:dev",
+    "dev:web": "pnpm --filter @edvora/web dev",
+    "dev:mobile": "pnpm --filter @edvora/mobile start",
+    "build:api": "pnpm --filter @edvora/api build",
+    "build:web": "pnpm --filter @edvora/web build",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "check": "pnpm install --frozen-lockfile --config.confirm-modules-purge=false --config.offline=false && pnpm lint && pnpm typecheck && pnpm test && pnpm build:api && pnpm build:web"
+  }
+}

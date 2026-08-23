@@ -1,0 +1,256 @@
+# Backend Domain Model
+
+This document defines the V1 backend domain model for Edvora before Prisma, PostgreSQL, controllers, services, or product modules are introduced. It is a design source of truth, not an implementation.
+
+## Domain Overview
+
+Edvora is a multi-tenant, security-first EdTech SaaS platform. Instructors operate tenant-scoped teaching workspaces. Students use a shared Edvora identity and may study with more than one tenant over time. Platform Admin users operate the platform across tenants and own security-sensitive actions such as student device-change approvals.
+
+Core V1 backend domains:
+
+- Identity and authentication credentials
+- Users and role/capability boundaries
+- Tenants and tenant memberships
+- Student and instructor profiles
+- Student devices and device-change requests
+- Courses, sections, and ordered lesson content
+- Video/document metadata
+- Quizzes, questions, attempts, and answers
+- Enrollments/course access
+- Learning progress
+- Basic notifications
+- Security events and audit trail
+- Account status and deletion lifecycle
+
+## Ownership Boundaries
+
+Tenant-owned resources include courses, sections, lessons, videos, documents, quizzes, enrollments, tenant-scoped notifications, and instructor-facing student/course management records.
+
+Platform-owned resources include canonical user identity, platform roles, authentication credentials, platform-wide security events, device-change approval workflow, and Platform Admin operations.
+
+The backend must never rely on a client-supplied `tenantId` alone. Tenant access must be resolved from authenticated identity, tenant membership, resource ownership, and the action being attempted.
+
+## Tenant Model
+
+V1 tenant decision: a tenant represents an instructor-owned teaching workspace or academy boundary.
+
+A tenant may initially contain one instructor, but users relate to tenants through `TenantMembership` rather than a single `tenantId` on `User`. This keeps the model simple while allowing:
+
+- More than one instructor/staff user in a tenant later.
+- One student to study with more than one instructor/tenant over time.
+- Platform Admin users to remain platform-wide rather than ordinary tenant members.
+
+`TenantMembership` represents role and status within a tenant. It should support tenant roles such as `OWNER`, `INSTRUCTOR`, and later `STAFF` if needed. A student generally gains access through enrollment rather than ordinary instructor/staff membership. If tenant-level student membership becomes useful later, it must not replace enrollment as the course-access source of truth.
+
+## Canonical User / Identity Model
+
+Edvora should use one canonical `User` entity for all people. Do not create unrelated identity tables for Students, Instructors, and Platform Admins.
+
+`User` owns identity-level fields:
+
+- Stable ID.
+- Email and normalized email.
+- Account status.
+- Preferred language.
+- Platform role/capability flags.
+- Timestamps.
+- Deletion/anonymization lifecycle fields.
+
+Authentication credential material belongs to the server-side authentication layer. Password hashes, password reset state, refresh/session state, and future credential factors should not be scattered into student/instructor/admin profile records. Plaintext passwords must never be stored.
+
+Profiles are separate:
+
+- `StudentProfile` stores student-specific profile fields.
+- `InstructorProfile` stores instructor-specific profile fields.
+
+Profiles are optional one-to-one extensions of `User`. A user may have more than one profile type if the product later allows mixed usage, but authorization should still be driven by platform role, tenant membership, and resource access rather than profile existence alone.
+
+## Role and Authorization Model
+
+Authorization has three layers:
+
+1. Platform-level role/capability: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
+2. Tenant membership role/status: tenant-scoped role such as `OWNER` or `INSTRUCTOR`.
+3. Resource access: enrollment, course ownership, lesson availability, quiz attempt permissions, device authorization, and security workflow permissions.
+
+`PLATFORM_ADMIN` is platform-wide. Platform Admin can operate across tenants through explicit admin authorization paths and approve/reject device-change requests.
+
+`INSTRUCTOR` is not automatically platform-wide. Instructor access must be limited to tenants where the user has an active instructor/owner membership.
+
+`STUDENT` is not equivalent to course access. A student must authenticate, use an authorized device where required, and have an active enrollment for the course/content being accessed.
+
+Server-side authorization must derive permissions from the authenticated identity and database-backed relationships. Do not trust client-provided role claims, tenant IDs, enrollment IDs, or device claims without verification.
+
+## Key Invariants
+
+- One canonical `User` identity per person/account.
+- `normalizedEmail` is unique among active/non-deleted user identities.
+- A tenant-scoped resource belongs to exactly one tenant.
+- A tenant member may have only one active membership row per tenant.
+- A student can have active enrollments in multiple tenants.
+- V1 defaults to one approved active device per student, but device limits are policy/configurable.
+- A new device never silently replaces an approved active device.
+- Instructors cannot approve or reset student devices in V1.
+- Secure content access requires authentication, tenant/resource authorization, enrollment, device authorization where applicable, and content availability.
+- Quiz attempts remain interpretable after quiz edits.
+- Progress updates should be idempotent and retry-safe.
+- Security/audit events must not contain secrets or raw tokens.
+
+## Student Device Lifecycle
+
+Device binding is security-critical and must be enforced server-side.
+
+Recommended lifecycle:
+
+1. First login from a student device sends a client-generated installation/device identifier and platform/app metadata.
+2. The server checks device policy for the student. With no existing approved active device, the first device may be registered and approved according to V1 policy.
+3. Approved devices can be used for protected student content access.
+4. Login from a different device does not replace the active device. The backend records an unauthorized/new-device attempt and can create or expose a device-change request flow.
+5. The student submits a `DeviceChangeRequest`.
+6. A `PLATFORM_ADMIN` approves or rejects the request.
+7. Approval happens in a transaction: revoke/deactivate the previous device if required by policy, activate the requested device, close competing pending requests, and record security events.
+8. Rejection keeps the current active device unchanged.
+
+A client-generated device identifier is not permanently trustworthy and is not invasive hardware fingerprinting. It is one signal within a server-controlled authorization model. Future native device trust, root/jailbreak signals, attestation, or secure storage can be added without changing the ownership model.
+
+## Course Content Model
+
+Use a generic `Lesson` record inside a `Section`, with type-specific one-to-one detail records:
+
+- `VideoLesson`
+- `DocumentLesson`
+- `QuizLesson`
+
+This is preferable to direct polymorphic section content because ordering is simple and consistent, shared lesson lifecycle fields live in one place, type-specific metadata remains normalized, PostgreSQL/Prisma can model explicit relations cleanly, and future content types can be added without redesigning section ordering.
+
+Course hierarchy:
+
+```text
+Tenant
+-> Course
+-> Section
+-> Lesson
+   -> VideoLesson | DocumentLesson | QuizLesson
+```
+
+V1 courses should support title, optional description, thumbnail/media reference, lifecycle/status, publication visibility, timestamps, and ordered sections/lessons. Do not add pricing, checkout, marketplace, or store fields.
+
+## Video and Document Metadata
+
+Video metadata should be provider-independent: external/provider asset reference, upload/processing/playback readiness state, duration where known, failure reason/state, and storage/object reference where appropriate.
+
+Do not store permanent signed playback URLs. Secure playback authorization should be generated at runtime after authorization checks. NestJS should not stream every video byte in production.
+
+Document/PDF metadata should reference object storage/provider identity, file metadata, processing/protection state, and download/viewing policy. Do not store PDF binary data in PostgreSQL and do not duplicate files per student. Personalized watermarking should be applied at presentation/download time if implemented later.
+
+## Quiz Model and Historical Integrity
+
+V1 supports `MULTIPLE_CHOICE` and `TRUE_FALSE` questions.
+
+Recommended strategy: keep editable quiz/question/option records for current authoring state, and snapshot the assessed quiz content into attempt answer snapshot fields when an attempt starts/submits.
+
+At minimum, each submitted answer must retain question text, question type, option texts where applicable, selected answer(s), correct answer representation, points possible, and points awarded at attempt time. This avoids a large versioning engine while keeping completed attempts interpretable after instructors edit quizzes.
+
+Quiz submission should be idempotent with a client request key or attempt state transition so mobile retries do not create duplicate scored attempts.
+
+## Enrollment and Course Access
+
+Enrollment is separate from authentication.
+
+Access check concept:
+
+```text
+authenticated student
+-> authorized device
+-> active enrollment for tenant/course
+-> available course/lesson/content
+-> runtime content authorization
+```
+
+Enrollment should support active/inactive/revoked/expired state, optional start/end dates, tenant scope, granted-by user, and timestamps. No payment fields are involved.
+
+Use constraints to avoid accidental duplicate active access for the same student/course where possible.
+
+## Learning Progress
+
+Persist useful V1 progress: lesson started, lesson completed, last accessed, video resume position, watched seconds where relevant, and completion timestamp where useful.
+
+Course progress percentage can usually be derived from lesson progress and current course structure. Avoid persisting aggregate percentages unless later performance measurements justify it.
+
+Progress update endpoints should be idempotent and monotonic where appropriate. Retried mobile requests should not reduce resume position or duplicate completion events unless the request explicitly represents a valid correction.
+
+## Notifications
+
+Notifications remain provider-independent in V1.
+
+The backend should model in-app notification records with recipient, type/category, title/body or localization key payload, read timestamp, created timestamp, and optional domain reference. Do not choose push, email, SMS, or WhatsApp providers yet.
+
+## Security Events / Audit Trail
+
+Security events are distinct from ordinary analytics.
+
+Events should capture type, category/severity, actor user where applicable, target user where applicable, tenant where applicable, device/session references where applicable, timestamp, request/correlation ID, IP/user-agent summary where appropriate, and bounded structured metadata.
+
+Never store secrets, passwords, raw access tokens, refresh tokens, private keys, or unnecessary PII in event metadata.
+
+Retention should be policy-driven. Some security events may need limited retention for abuse investigation and support, but the design should not assume logs live forever.
+
+## Account Status and Deletion Lifecycle
+
+User status should support `ACTIVE`, `SUSPENDED`, `DELETION_REQUESTED`, and `DELETED`.
+
+Deletion should not be a naive cascade. The future account deletion flow should delete or anonymize direct personal profile data where appropriate, preserve minimal operational/security records when required for legitimate business/legal/abuse-prevention purposes, keep quiz attempts/enrollments interpretable where retention is justified, remove or revoke active sessions/devices, and record a security/audit event without storing sensitive deletion payloads.
+
+Final retention policy requires later legal/product review, but the schema should support both deletion and anonymization timestamps.
+
+## Concurrency-Sensitive Operations
+
+These operations must use transactions and/or concurrency controls in implementation:
+
+- Device-change approval: preserve the one-active-device policy and prevent two concurrent approvals from activating two devices.
+- Device revocation/switching: ensure old and new statuses change atomically.
+- Enrollment create/revoke: avoid duplicate active enrollments and preserve revocation history.
+- Quiz submission: ensure one final score per attempt and idempotent retry behavior.
+- Course section/lesson reordering: preserve unique positions within a parent.
+- Account deletion: transition identity, profile, sessions, devices, and retained records consistently.
+- Progress updates: handle mobile retries without regressing progress or duplicating completion.
+
+## API Boundary Implications
+
+Future DTOs and API payloads must not mirror database rows blindly.
+
+Important backend boundaries:
+
+- Authentication identity resolution.
+- Tenant resolution from membership/resource access.
+- Authorization policies.
+- Device authorization.
+- Course entitlement.
+- Content access/playback authorization.
+- Admin-only security actions.
+
+Internal fields such as password hashes, refresh/session secrets, provider asset references, security metadata, deletion markers, and raw audit metadata must not be exposed directly to clients.
+
+## Failure-Case Review
+
+- Same student studies with two instructors: supported through canonical `User` plus tenant-scoped enrollments.
+- Instructor accesses another tenant course: blocked by tenant membership/resource authorization.
+- Client changes `tenantId`: ignored unless server verifies membership/resource access.
+- Student shares password with another device: device authorization blocks protected access and triggers request/audit flow.
+- Two device approvals concurrently: requires transactional status changes and partial unique active-device constraints.
+- Student loses device: device-change request and Platform Admin approval handles replacement.
+- Enrollment expires: active access check considers status and start/end dates.
+- Section reordered: section/lesson ordering constraints plus transaction preserve positions.
+- Student resumes video: lesson progress stores resume position.
+- Mobile retries progress: idempotent/monotonic progress updates prevent duplicate or regressed state.
+- Quiz edited after completion: attempt snapshots keep history interpretable.
+- Quiz submitted twice after retry: idempotency key/attempt state prevents duplicate finalization.
+- Account deletion requested: status and anonymization lifecycle support future compliant flow.
+- Instructor suspended: account/member status checks disable access without deleting tenant records.
+- Security log volume grows: security events are indexed for investigation and retention-managed.
+- Course contains hundreds of lessons: ordered sections/lessons with pagination-friendly queries.
+- Tenant has thousands of students: tenant/course enrollment indexes support list and access checks.
+
+## Future Extension Boundaries
+
+Deferred by design: OAuth/social login, advanced staff permission matrix, enterprise hierarchy, billing records, marketplace fields, DRM provider implementation, notification providers, advanced assessment engine, analytics warehouse, Redis/queues/search infrastructure, and sharding/distributed databases.
