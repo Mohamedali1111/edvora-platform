@@ -53,6 +53,12 @@ Local development may generate and review migration SQL without applying it. App
 
 Staging and production migrations must be planned. Destructive migrations require backup/restore awareness, rollback planning, and compatibility review.
 
+## Compatibility Validation
+
+The initial migration has been applied successfully to a disposable PostgreSQL 16 database. This confirms the migration does not depend on PostgreSQL 18 UUIDv7 functions, provider-specific extensions, or cloud-managed database behavior.
+
+Future migrations should continue to be validated against an explicit supported PostgreSQL version before database runtime integration or shared-environment application.
+
 ## Mobile Compatibility
 
 Because mobile clients may run older app versions, future schema changes should prefer expand/contract migrations:

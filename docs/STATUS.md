@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema and reviewed PostgreSQL migration artifact completed for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features or database connection.
+Initial Prisma schema and reviewed PostgreSQL migration artifact completed and validated against disposable PostgreSQL 16 for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features or database runtime integration.
 
 ## Completed Work
 
@@ -22,6 +22,7 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed for t
 - Documented PostgreSQL-only constraints deferred to migrations in `docs/DATABASE-CONSTRAINTS.md`.
 - Generated the first reviewed PostgreSQL migration SQL artifact in `apps/api/prisma/migrations/20260823000000_initial_schema/migration.sql`.
 - Added migration workflow guidance in `docs/MIGRATIONS.md`.
+- Validated the initial migration against a disposable PostgreSQL 16 database, including custom partial indexes, check constraints, tenant composite foreign keys, JSONB fields, and repeatable clean application.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -29,7 +30,7 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed for t
 - Monorepo using pnpm workspaces.
 - Apps: `apps/mobile`, `apps/web`, and `apps/api`.
 - Current stack: Expo SDK 57 + React Native + Expo Router + TypeScript, Next.js 16 + TypeScript, NestJS 11 + TypeScript.
-- Planned data layer is PostgreSQL + Prisma. Prisma schema and the first reviewed migration SQL artifact are implemented; PostgreSQL connection and applying migrations are not done yet.
+- Planned data layer is PostgreSQL + Prisma. Prisma schema and the first reviewed migration SQL artifact are implemented and have been validated against disposable PostgreSQL 16; database runtime integration is not done yet.
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - Multi-tenant SaaS from the beginning.
@@ -56,7 +57,7 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed for t
 ## Known Issues / Warnings
 
 - No product functionality exists yet.
-- No database connection, applied migration, seed data, or product modules exist yet.
+- No application database connection, seed data, or product modules exist yet.
 - Prisma v7 requires generated client output to use an explicit path. The current output path is `apps/api/.generated/prisma`, which is intentionally ignored because no application code imports Prisma Client yet.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
 - No CI/CD exists yet.
@@ -132,9 +133,20 @@ Initial migration artifact task validation passed:
 - `git diff --check` passed.
 - No database was connected or modified.
 
+Disposable PostgreSQL migration validation passed:
+
+- Confirmed repository started clean at `5af56dc feat(database): add reviewed initial PostgreSQL migration`.
+- Created an isolated disposable PostgreSQL 16 database for validation without touching unrelated Docker containers or cloud infrastructure.
+- Applied `apps/api/prisma/migrations/20260823000000_initial_schema/migration.sql` successfully from an empty database.
+- Verified expected tables, enums, primary keys, foreign keys, unique indexes, custom partial indexes, custom check constraints, UUID columns, `TIMESTAMPTZ`, and `JSONB` fields through PostgreSQL introspection.
+- Tested active-device, pending-device-change, active-enrollment, representative check constraints, tenant composite foreign keys, security event nullable references, and quiz attempt JSONB snapshot behavior with synthetic data.
+- Recreated the disposable database and reapplied the same migration successfully to confirm repeatability.
+- Removed the disposable database container after validation.
+- Root `corepack pnpm check` and `git diff --check` passed after documentation updates.
+
 ## Exact Recommended Next Step
 
-Review the initial migration SQL artifact and PostgreSQL-only constraints before applying anything to a disposable local database in a separate task.
+Design the NestJS Prisma runtime integration boundary without adding product domain logic yet.
 
 ## Handoff Instructions
 
