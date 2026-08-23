@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Backend domain and database architecture design completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or database implementation.
+Initial Prisma schema implementation completed for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features, database connection, or migrations.
 
 ## Completed Work
 
@@ -17,6 +17,9 @@ Backend domain and database architecture design completed. The repository has mi
 - Scaffolded `apps/mobile` as a minimal Expo SDK 57 React Native TypeScript application with Expo Router.
 - Designed the V1 backend domain model in `docs/BACKEND-DOMAIN.md`.
 - Designed the V1 relational database model in `docs/DATABASE-DESIGN.md`.
+- Implemented the initial PostgreSQL Prisma schema in `apps/api/prisma/schema.prisma`.
+- Added Prisma CLI/Client tooling to `apps/api` and non-destructive Prisma validation scripts.
+- Documented PostgreSQL-only constraints deferred to migrations in `docs/DATABASE-CONSTRAINTS.md`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -24,7 +27,7 @@ Backend domain and database architecture design completed. The repository has mi
 - Monorepo using pnpm workspaces.
 - Apps: `apps/mobile`, `apps/web`, and `apps/api`.
 - Current stack: Expo SDK 57 + React Native + Expo Router + TypeScript, Next.js 16 + TypeScript, NestJS 11 + TypeScript.
-- Planned data layer remains PostgreSQL + Prisma, not implemented yet.
+- Planned data layer is PostgreSQL + Prisma. Prisma schema is implemented; PostgreSQL connection and migrations are not created yet.
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - Multi-tenant SaaS from the beginning.
@@ -44,13 +47,16 @@ Backend domain and database architecture design completed. The repository has mi
 ## Current Framework Versions
 
 - API: NestJS 11.2.1.
+- ORM tooling: Prisma 7.9.1 and `@prisma/client` 7.9.1.
 - Web: Next.js 16.3.2, React 19.2.8, Tailwind CSS 4.3.3.
 - Mobile: Expo 57.0.15, Expo Router 57.0.15, React Native 0.86.2, React 19.2.3.
 
 ## Known Issues / Warnings
 
 - No product functionality exists yet.
-- No Prisma schema, migrations, database connection, or product modules exist yet.
+- No Prisma migrations, database connection, seed data, or product modules exist yet.
+- Prisma v7 requires generated client output to use an explicit path. The current output path is `apps/api/.generated/prisma`, which is intentionally ignored because no application code imports Prisma Client yet.
+- Several PostgreSQL-only constraints are documented in `docs/DATABASE-CONSTRAINTS.md` and must be added during migration work.
 - No CI/CD exists yet.
 - pnpm dependency installation may need `--config.offline=false` on machines with a global pnpm `offline=true` setting.
 - Next.js build may require normal process-spawn permissions on Windows because it uses worker processes.
@@ -62,7 +68,9 @@ Backend domain and database architecture design completed. The repository has mi
 - Final visual branding, fonts, colors, and logo.
 - Authentication/session implementation details.
 - Final password hashing/session implementation details.
+- Prisma 7 PostgreSQL runtime integration details, including whether a driver adapter such as `@prisma/adapter-pg` is required.
 - Final legal/privacy retention policy for account deletion and security events.
+- Final UUIDv7 generation mechanism: application-generated UUIDv7 values or a reviewed PostgreSQL function/default before first real writes.
 - App Store bundle identifiers and Android application IDs.
 - EAS build profiles and production build identity.
 - Deployment target and production infrastructure.
@@ -71,7 +79,7 @@ Backend domain and database architecture design completed. The repository has mi
 
 - Product feature implementation.
 - Authentication and authorization.
-- Prisma/database setup.
+- PostgreSQL connection, migrations, seed data, and database runtime integration.
 - Docker and infrastructure.
 - CI/CD.
 - Payments/billing implementation.
@@ -100,9 +108,20 @@ Backend design task validation passed:
 - Markdown/source text scans passed for forbidden implementation artifacts and scope contradictions.
 - `git diff --check` passed.
 
+Prisma schema task validation passed:
+
+- `corepack pnpm install --config.offline=false` passed.
+- `corepack pnpm --filter @edvora/api prisma:format` passed.
+- `corepack pnpm --filter @edvora/api prisma:validate` passed.
+- `corepack pnpm --filter @edvora/api prisma:generate` passed and generated ignored local output only.
+- API lint, typecheck, test, and build passed.
+- Root `corepack pnpm check` passed.
+- `git diff --check` passed.
+- Repository hygiene checks found no nested lockfiles, committed `.env` files, Prisma migrations, or unignored generated Prisma client output.
+
 ## Exact Recommended Next Step
 
-Create the initial Prisma schema draft from the approved database design without connecting PostgreSQL or adding migrations.
+Create the first reviewed PostgreSQL migration plan for the Prisma schema, including the deferred PostgreSQL-only constraints, without connecting production infrastructure.
 
 ## Handoff Instructions
 

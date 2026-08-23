@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm/
 
 # Package manager
 .pnpm-store/
@@ -11,6 +12,7 @@ build/
 out/
 coverage/
 *.tsbuildinfo
+.generated/
 
 # Expo
 .expo/

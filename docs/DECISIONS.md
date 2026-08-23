@@ -209,3 +209,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Account deletion should support status transitions plus deletion/anonymization fields rather than blind cascade deletion of all records.
 - Reasoning: Edvora must balance privacy/account deletion requirements with security audit integrity, instructor operational records, quiz history, and legal/abuse-prevention retention.
 - Implications: Final retention policy remains pending, but schema design must support deleting/anonymizing direct PII while retaining minimal justified historical records.
+
+## DEC-0027: Prisma Model Naming and PostgreSQL Mapping
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Prisma models and fields use idiomatic PascalCase/camelCase names while mapping PostgreSQL tables and columns to snake_case with `@@map` and `@map`.
+- Reasoning: This keeps TypeScript application code ergonomic while preserving a conventional PostgreSQL schema naming style.
+- Implications: Future Prisma models should apply the mapping convention consistently and avoid mixing unmapped table/column naming styles.

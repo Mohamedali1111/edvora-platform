@@ -1,0 +1,821 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../.generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PlatformRole {
+  STUDENT
+  INSTRUCTOR
+  PLATFORM_ADMIN
+
+  @@map("platform_role")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETION_REQUESTED
+  DELETED
+
+  @@map("account_status")
+}
+
+enum LanguagePreference {
+  EN
+  AR
+
+  @@map("language_preference")
+}
+
+enum CredentialType {
+  PASSWORD
+
+  @@map("credential_type")
+}
+
+enum RefreshSessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+
+  @@map("refresh_session_status")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+
+  @@map("tenant_status")
+}
+
+enum TenantMembershipRole {
+  OWNER
+  INSTRUCTOR
+  STAFF
+
+  @@map("tenant_membership_role")
+}
+
+enum TenantMembershipStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+
+  @@map("tenant_membership_status")
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+
+  @@map("device_platform")
+}
+
+enum StudentDeviceStatus {
+  PENDING
+  APPROVED
+  ACTIVE
+  REVOKED
+  REPLACED
+  BLOCKED
+
+  @@map("student_device_status")
+}
+
+enum DeviceChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+  EXPIRED
+
+  @@map("device_change_request_status")
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("course_status")
+}
+
+enum CourseVisibility {
+  PRIVATE
+  ENROLLED_ONLY
+
+  @@map("course_visibility")
+}
+
+enum LessonType {
+  VIDEO
+  DOCUMENT
+  QUIZ
+
+  @@map("lesson_type")
+}
+
+enum SectionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("section_status")
+}
+
+enum LessonStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("lesson_status")
+}
+
+enum AssetProcessingStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+
+  @@map("asset_processing_status")
+}
+
+enum VideoPlaybackPolicy {
+  STREAM_ONLY
+
+  @@map("video_playback_policy")
+}
+
+enum DocumentViewPolicy {
+  IN_APP_ONLY
+  DOWNLOAD_ALLOWED
+
+  @@map("document_view_policy")
+}
+
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("quiz_status")
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+
+  @@map("question_type")
+}
+
+enum QuestionStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@map("question_status")
+}
+
+enum QuizRevealAnswersPolicy {
+  NEVER
+  AFTER_SUBMISSION
+  AFTER_PASSING
+
+  @@map("quiz_reveal_answers_policy")
+}
+
+enum QuizAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+  ABANDONED
+
+  @@map("quiz_attempt_status")
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  INACTIVE
+  REVOKED
+  EXPIRED
+
+  @@map("enrollment_status")
+}
+
+enum LessonProgressStatus {
+  NOT_STARTED
+  STARTED
+  COMPLETED
+
+  @@map("lesson_progress_status")
+}
+
+enum NotificationCategory {
+  SYSTEM
+  COURSE
+  SECURITY
+  ADMIN
+
+  @@map("notification_category")
+}
+
+enum SecurityEventCategory {
+  AUTHENTICATION
+  AUTHORIZATION
+  DEVICE
+  CONTENT
+  ACCOUNT
+  ADMIN
+
+  @@map("security_event_category")
+}
+
+enum SecurityEventSeverity {
+  INFO
+  WARN
+  HIGH
+  CRITICAL
+
+  @@map("security_event_severity")
+}
+
+model User {
+  id                  String             @id @db.Uuid
+  email               String             @db.VarChar(320)
+  normalizedEmail     String             @unique(map: "users_normalized_email_key") @map("normalized_email") @db.VarChar(320)
+  emailVerifiedAt     DateTime?          @map("email_verified_at") @db.Timestamptz(6)
+  accountStatus       AccountStatus      @default(ACTIVE) @map("account_status")
+  platformRole        PlatformRole       @map("platform_role")
+  preferredLanguage   LanguagePreference @default(EN) @map("preferred_language")
+  displayName         String?            @map("display_name") @db.VarChar(160)
+  deletionRequestedAt DateTime?          @map("deletion_requested_at") @db.Timestamptz(6)
+  deletedAt           DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  anonymizedAt        DateTime?          @map("anonymized_at") @db.Timestamptz(6)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  authCredentials              AuthCredential[]
+  refreshSessions              RefreshSession[]
+  studentProfile               StudentProfile?
+  instructorProfile            InstructorProfile?
+  tenantMemberships            TenantMembership[]
+  studentDevices               StudentDevice[]
+  deviceChangeRequests         DeviceChangeRequest[] @relation("DeviceChangeRequestStudent")
+  reviewedDeviceChangeRequests DeviceChangeRequest[] @relation("DeviceChangeRequestReviewer")
+  createdCourses               Course[]              @relation("CourseCreator")
+  uploadedVideoAssets          VideoAsset[]          @relation("VideoAssetUploader")
+  uploadedDocumentAssets       DocumentAsset[]       @relation("DocumentAssetUploader")
+  enrollmentsReceived          Enrollment[]          @relation("EnrollmentStudent")
+  enrollmentsGranted           Enrollment[]          @relation("EnrollmentGrantedBy")
+  enrollmentsRevoked           Enrollment[]          @relation("EnrollmentRevokedBy")
+  lessonProgress               LessonProgress[]
+  quizAttempts                 QuizAttempt[]
+  notifications                Notification[]
+  securityEventsAsActor        SecurityEvent[]       @relation("SecurityEventActor")
+  securityEventsAsTarget       SecurityEvent[]       @relation("SecurityEventTarget")
+
+  @@index([platformRole, accountStatus], map: "users_platform_role_account_status_idx")
+  @@map("users")
+}
+
+model AuthCredential {
+  id                String         @id @db.Uuid
+  userId            String         @map("user_id") @db.Uuid
+  credentialType    CredentialType @default(PASSWORD) @map("credential_type")
+  passwordHash      String         @map("password_hash") @db.VarChar(255)
+  passwordUpdatedAt DateTime?      @map("password_updated_at") @db.Timestamptz(6)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, credentialType], map: "auth_credentials_user_id_credential_type_key")
+  @@map("auth_credentials")
+}
+
+model RefreshSession {
+  id               String               @id @db.Uuid
+  userId           String               @map("user_id") @db.Uuid
+  deviceId         String?              @map("device_id") @db.Uuid
+  status           RefreshSessionStatus @default(ACTIVE)
+  refreshTokenHash String               @map("refresh_token_hash") @db.VarChar(255)
+  expiresAt        DateTime             @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime?            @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime?            @map("last_used_at") @db.Timestamptz(6)
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentDevice  StudentDevice?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  securityEvents SecurityEvent[]
+
+  @@index([userId, status], map: "refresh_sessions_user_id_status_idx")
+  @@index([expiresAt], map: "refresh_sessions_expires_at_idx")
+  @@map("refresh_sessions")
+}
+
+model StudentProfile {
+  id        String   @id @db.Uuid
+  userId    String   @unique(map: "student_profiles_user_id_key") @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("student_profiles")
+}
+
+model InstructorProfile {
+  id        String   @id @db.Uuid
+  userId    String   @unique(map: "instructor_profiles_user_id_key") @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("instructor_profiles")
+}
+
+model Tenant {
+  id        String       @id @db.Uuid
+  name      String       @db.VarChar(160)
+  slug      String       @unique(map: "tenants_slug_key") @db.VarChar(120)
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships    TenantMembership[]
+  courses        Course[]
+  videoAssets    VideoAsset[]
+  documentAssets DocumentAsset[]
+  quizzes        Quiz[]
+  notifications  Notification[]
+  securityEvents SecurityEvent[]
+
+  @@index([status], map: "tenants_status_idx")
+  @@map("tenants")
+}
+
+model TenantMembership {
+  id        String                 @id @db.Uuid
+  tenantId  String                 @map("tenant_id") @db.Uuid
+  userId    String                 @map("user_id") @db.Uuid
+  role      TenantMembershipRole
+  status    TenantMembershipStatus @default(ACTIVE)
+  removedAt DateTime?              @map("removed_at") @db.Timestamptz(6)
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
+  @@index([userId, status], map: "tenant_memberships_user_id_status_idx")
+  @@index([tenantId, status], map: "tenant_memberships_tenant_id_status_idx")
+  @@map("tenant_memberships")
+}
+
+model StudentDevice {
+  id                 String              @id @db.Uuid
+  studentUserId      String              @map("student_user_id") @db.Uuid
+  clientDeviceIdHash String              @map("client_device_id_hash") @db.VarChar(255)
+  platform           DevicePlatform
+  status             StudentDeviceStatus @default(PENDING)
+  approvedAt         DateTime?           @map("approved_at") @db.Timestamptz(6)
+  activatedAt        DateTime?           @map("activated_at") @db.Timestamptz(6)
+  revokedAt          DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  revokedReason      String?             @map("revoked_reason") @db.VarChar(500)
+  lastSeenAt         DateTime?           @map("last_seen_at") @db.Timestamptz(6)
+  appVersion         String?             @map("app_version") @db.VarChar(40)
+  osVersion          String?             @map("os_version") @db.VarChar(80)
+  deviceModel        String?             @map("device_model") @db.VarChar(120)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  student                 User                  @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
+  refreshSessions         RefreshSession[]
+  currentChangeRequests   DeviceChangeRequest[] @relation("CurrentDeviceChangeRequests")
+  requestedChangeRequests DeviceChangeRequest[] @relation("RequestedDeviceChangeRequests")
+  securityEvents          SecurityEvent[]
+
+  @@unique([studentUserId, clientDeviceIdHash], map: "student_devices_student_user_id_client_device_id_hash_key")
+  @@index([studentUserId, status], map: "student_devices_student_user_id_status_idx")
+  @@index([lastSeenAt], map: "student_devices_last_seen_at_idx")
+  @@map("student_devices")
+}
+
+model DeviceChangeRequest {
+  id                String                    @id @db.Uuid
+  studentUserId     String                    @map("student_user_id") @db.Uuid
+  currentDeviceId   String?                   @map("current_device_id") @db.Uuid
+  requestedDeviceId String?                   @map("requested_device_id") @db.Uuid
+  status            DeviceChangeRequestStatus @default(PENDING)
+  reason            String?                   @db.VarChar(500)
+  requestedAt       DateTime                  @default(now()) @map("requested_at") @db.Timestamptz(6)
+  reviewedByUserId  String?                   @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt        DateTime?                 @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote        String?                   @map("review_note") @db.VarChar(1000)
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  student         User           @relation("DeviceChangeRequestStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  reviewedBy      User?          @relation("DeviceChangeRequestReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  currentDevice   StudentDevice? @relation("CurrentDeviceChangeRequests", fields: [currentDeviceId], references: [id], onDelete: SetNull)
+  requestedDevice StudentDevice? @relation("RequestedDeviceChangeRequests", fields: [requestedDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([status, requestedAt], map: "device_change_requests_status_requested_at_idx")
+  @@index([studentUserId, status], map: "device_change_requests_student_user_id_status_idx")
+  @@map("device_change_requests")
+}
+
+model Course {
+  id                String           @id @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  createdByUserId   String           @map("created_by_user_id") @db.Uuid
+  title             String           @db.VarChar(240)
+  description       String?          @db.Text
+  thumbnailAssetRef String?          @map("thumbnail_asset_ref") @db.VarChar(500)
+  status            CourseStatus     @default(DRAFT)
+  visibility        CourseVisibility @default(ENROLLED_ONLY)
+  publishedAt       DateTime?        @map("published_at") @db.Timestamptz(6)
+  archivedAt        DateTime?        @map("archived_at") @db.Timestamptz(6)
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy   User            @relation("CourseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  sections    CourseSection[]
+  enrollments Enrollment[]
+
+  @@unique([id, tenantId], map: "courses_id_tenant_id_key")
+  @@index([tenantId, status], map: "courses_tenant_id_status_idx")
+  @@map("courses")
+}
+
+model CourseSection {
+  id          String        @id @db.Uuid
+  tenantId    String        @map("tenant_id") @db.Uuid
+  courseId    String        @map("course_id") @db.Uuid
+  title       String        @db.VarChar(240)
+  description String?       @db.Text
+  position    Int
+  status      SectionStatus @default(DRAFT)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  course  Course   @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lessons Lesson[]
+
+  @@unique([id, tenantId], map: "course_sections_id_tenant_id_key")
+  @@unique([id, courseId, tenantId], map: "course_sections_id_course_id_tenant_id_key")
+  @@unique([courseId, position], map: "course_sections_course_id_position_key")
+  @@index([courseId, position], map: "course_sections_course_id_position_idx")
+  @@map("course_sections")
+}
+
+model Lesson {
+  id             String       @id @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  courseId       String       @map("course_id") @db.Uuid
+  sectionId      String       @map("section_id") @db.Uuid
+  title          String       @db.VarChar(240)
+  description    String?      @db.Text
+  type           LessonType
+  position       Int
+  status         LessonStatus @default(DRAFT)
+  availableFrom  DateTime?    @map("available_from") @db.Timestamptz(6)
+  availableUntil DateTime?    @map("available_until") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  section        CourseSection    @relation(fields: [sectionId, courseId, tenantId], references: [id, courseId, tenantId], onDelete: Restrict)
+  videoLesson    VideoLesson?
+  documentLesson DocumentLesson?
+  quizLesson     QuizLesson?
+  quizAttempts   QuizAttempt[]
+  progress       LessonProgress[]
+
+  @@unique([id, tenantId], map: "lessons_id_tenant_id_key")
+  @@unique([sectionId, position], map: "lessons_section_id_position_key")
+  @@index([sectionId, position], map: "lessons_section_id_position_idx")
+  @@index([courseId, status], map: "lessons_course_id_status_idx")
+  @@map("lessons")
+}
+
+model VideoAsset {
+  id               String                @id @db.Uuid
+  tenantId         String                @map("tenant_id") @db.Uuid
+  uploadedByUserId String                @map("uploaded_by_user_id") @db.Uuid
+  externalAssetRef String                @map("external_asset_ref") @db.VarChar(500)
+  providerKey      String?               @map("provider_key") @db.VarChar(80)
+  processingStatus AssetProcessingStatus @default(UPLOADING) @map("processing_status")
+  durationSeconds  Int?                  @map("duration_seconds")
+  failureCode      String?               @map("failure_code") @db.VarChar(120)
+  failureReason    String?               @map("failure_reason") @db.VarChar(1000)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  uploadedBy   User          @relation("VideoAssetUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  videoLessons VideoLesson[]
+
+  @@unique([id, tenantId], map: "video_assets_id_tenant_id_key")
+  @@index([tenantId, processingStatus], map: "video_assets_tenant_id_processing_status_idx")
+  @@map("video_assets")
+}
+
+model VideoLesson {
+  lessonId          String              @id @map("lesson_id") @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  videoAssetId      String              @map("video_asset_id") @db.Uuid
+  playbackPolicy    VideoPlaybackPolicy @default(STREAM_ONLY) @map("playback_policy")
+  watermarkRequired Boolean             @default(true) @map("watermark_required")
+
+  lesson     Lesson     @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  videoAsset VideoAsset @relation(fields: [videoAssetId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([lessonId, tenantId], map: "video_lessons_lesson_id_tenant_id_key")
+  @@index([videoAssetId], map: "video_lessons_video_asset_id_idx")
+  @@map("video_lessons")
+}
+
+model DocumentAsset {
+  id               String                @id @db.Uuid
+  tenantId         String                @map("tenant_id") @db.Uuid
+  uploadedByUserId String                @map("uploaded_by_user_id") @db.Uuid
+  externalAssetRef String                @map("external_asset_ref") @db.VarChar(500)
+  fileName         String                @map("file_name") @db.VarChar(255)
+  mimeType         String                @map("mime_type") @db.VarChar(120)
+  fileSizeBytes    BigInt                @map("file_size_bytes")
+  processingStatus AssetProcessingStatus @default(UPLOADING) @map("processing_status")
+  failureReason    String?               @map("failure_reason") @db.VarChar(1000)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  uploadedBy      User             @relation("DocumentAssetUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  documentLessons DocumentLesson[]
+
+  @@unique([id, tenantId], map: "document_assets_id_tenant_id_key")
+  @@index([tenantId, processingStatus], map: "document_assets_tenant_id_processing_status_idx")
+  @@map("document_assets")
+}
+
+model DocumentLesson {
+  lessonId          String             @id @map("lesson_id") @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  documentAssetId   String             @map("document_asset_id") @db.Uuid
+  viewPolicy        DocumentViewPolicy @default(IN_APP_ONLY) @map("view_policy")
+  watermarkRequired Boolean            @default(true) @map("watermark_required")
+
+  lesson        Lesson        @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  documentAsset DocumentAsset @relation(fields: [documentAssetId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([lessonId, tenantId], map: "document_lessons_lesson_id_tenant_id_key")
+  @@index([documentAssetId], map: "document_lessons_document_asset_id_idx")
+  @@map("document_lessons")
+}
+
+model Quiz {
+  id                  String                  @id @db.Uuid
+  tenantId            String                  @map("tenant_id") @db.Uuid
+  title               String                  @db.VarChar(240)
+  description         String?                 @db.Text
+  status              QuizStatus              @default(DRAFT)
+  passingScorePercent Decimal?                @map("passing_score_percent") @db.Decimal(5, 2)
+  attemptLimit        Int?                    @map("attempt_limit")
+  revealAnswersPolicy QuizRevealAnswersPolicy @default(NEVER) @map("reveal_answers_policy")
+  publishedAt         DateTime?               @map("published_at") @db.Timestamptz(6)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  quizLessons  QuizLesson[]
+  questions    Question[]
+  quizAttempts QuizAttempt[]
+
+  @@unique([id, tenantId], map: "quizzes_id_tenant_id_key")
+  @@index([tenantId, status], map: "quizzes_tenant_id_status_idx")
+  @@map("quizzes")
+}
+
+model QuizLesson {
+  lessonId String @id @map("lesson_id") @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  quizId   String @map("quiz_id") @db.Uuid
+
+  lesson Lesson @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  quiz   Quiz   @relation(fields: [quizId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([lessonId, tenantId], map: "quiz_lessons_lesson_id_tenant_id_key")
+  @@index([quizId], map: "quiz_lessons_quiz_id_idx")
+  @@map("quiz_lessons")
+}
+
+model Question {
+  id        String         @id @db.Uuid
+  tenantId  String         @map("tenant_id") @db.Uuid
+  quizId    String         @map("quiz_id") @db.Uuid
+  type      QuestionType
+  prompt    String         @db.Text
+  position  Int
+  points    Decimal        @db.Decimal(10, 2)
+  status    QuestionStatus @default(ACTIVE)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  quiz           Quiz                @relation(fields: [quizId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  options        QuestionOption[]
+  attemptAnswers QuizAttemptAnswer[]
+
+  @@unique([id, tenantId], map: "questions_id_tenant_id_key")
+  @@unique([quizId, position], map: "questions_quiz_id_position_key")
+  @@index([quizId, status], map: "questions_quiz_id_status_idx")
+  @@map("questions")
+}
+
+model QuestionOption {
+  id         String   @id @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  questionId String   @map("question_id") @db.Uuid
+  label      String?  @db.VarChar(40)
+  text       String   @db.Text
+  position   Int
+  isCorrect  Boolean  @default(false) @map("is_correct")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  question Question @relation(fields: [questionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([questionId, position], map: "question_options_question_id_position_key")
+  @@index([questionId], map: "question_options_question_id_idx")
+  @@map("question_options")
+}
+
+model QuizAttempt {
+  id                  String            @id @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  quizId              String            @map("quiz_id") @db.Uuid
+  lessonId            String            @map("lesson_id") @db.Uuid
+  studentUserId       String            @map("student_user_id") @db.Uuid
+  enrollmentId        String            @map("enrollment_id") @db.Uuid
+  status              QuizAttemptStatus @default(IN_PROGRESS)
+  attemptNumber       Int               @map("attempt_number")
+  clientSubmissionKey String?           @map("client_submission_key") @db.VarChar(120)
+  startedAt           DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  submittedAt         DateTime?         @map("submitted_at") @db.Timestamptz(6)
+  gradedAt            DateTime?         @map("graded_at") @db.Timestamptz(6)
+  scorePoints         Decimal?          @map("score_points") @db.Decimal(10, 2)
+  maxPoints           Decimal?          @map("max_points") @db.Decimal(10, 2)
+  passed              Boolean?
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  quiz       Quiz                @relation(fields: [quizId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lesson     Lesson              @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  student    User                @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
+  enrollment Enrollment          @relation(fields: [enrollmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  answers    QuizAttemptAnswer[]
+
+  @@unique([id, tenantId], map: "quiz_attempts_id_tenant_id_key")
+  @@unique([quizId, studentUserId, attemptNumber], map: "quiz_attempts_quiz_id_student_user_id_attempt_number_key")
+  @@unique([studentUserId, quizId, clientSubmissionKey], map: "quiz_attempts_student_user_id_quiz_id_client_submission_key_key")
+  @@index([studentUserId, quizId, createdAt], map: "quiz_attempts_student_user_id_quiz_id_created_at_idx")
+  @@index([enrollmentId, createdAt], map: "quiz_attempts_enrollment_id_created_at_idx")
+  @@map("quiz_attempts")
+}
+
+model QuizAttemptAnswer {
+  id                        String   @id @db.Uuid
+  attemptId                 String   @map("attempt_id") @db.Uuid
+  questionId                String?  @map("question_id") @db.Uuid
+  questionSnapshot          Json     @map("question_snapshot") @db.JsonB
+  optionsSnapshot           Json?    @map("options_snapshot") @db.JsonB
+  selectedOptionIdsSnapshot Json?    @map("selected_option_ids_snapshot") @db.JsonB
+  selectedValueSnapshot     Json?    @map("selected_value_snapshot") @db.JsonB
+  correctAnswerSnapshot     Json     @map("correct_answer_snapshot") @db.JsonB
+  pointsAwarded             Decimal  @map("points_awarded") @db.Decimal(10, 2)
+  pointsPossible            Decimal  @map("points_possible") @db.Decimal(10, 2)
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  attempt  QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  question Question?   @relation(fields: [questionId], references: [id], onDelete: SetNull)
+
+  @@unique([attemptId, questionId], map: "quiz_attempt_answers_attempt_id_question_id_key")
+  @@index([attemptId], map: "quiz_attempt_answers_attempt_id_idx")
+  @@map("quiz_attempt_answers")
+}
+
+model Enrollment {
+  id              String           @id @db.Uuid
+  tenantId        String           @map("tenant_id") @db.Uuid
+  courseId        String           @map("course_id") @db.Uuid
+  studentUserId   String           @map("student_user_id") @db.Uuid
+  grantedByUserId String           @map("granted_by_user_id") @db.Uuid
+  status          EnrollmentStatus @default(ACTIVE)
+  startsAt        DateTime?        @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime?        @map("ends_at") @db.Timestamptz(6)
+  revokedAt       DateTime?        @map("revoked_at") @db.Timestamptz(6)
+  revokedByUserId String?          @map("revoked_by_user_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  course         Course           @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  student        User             @relation("EnrollmentStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  grantedBy      User             @relation("EnrollmentGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  revokedBy      User?            @relation("EnrollmentRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  lessonProgress LessonProgress[]
+  quizAttempts   QuizAttempt[]
+
+  @@unique([id, tenantId], map: "enrollments_id_tenant_id_key")
+  @@index([studentUserId, status], map: "enrollments_student_user_id_status_idx")
+  @@index([tenantId, courseId, status], map: "enrollments_tenant_id_course_id_status_idx")
+  @@index([studentUserId, courseId, status], map: "enrollments_student_user_id_course_id_status_idx")
+  @@map("enrollments")
+}
+
+model LessonProgress {
+  id                   String               @id @db.Uuid
+  tenantId             String               @map("tenant_id") @db.Uuid
+  courseId             String               @map("course_id") @db.Uuid
+  lessonId             String               @map("lesson_id") @db.Uuid
+  studentUserId        String               @map("student_user_id") @db.Uuid
+  enrollmentId         String               @map("enrollment_id") @db.Uuid
+  status               LessonProgressStatus @default(NOT_STARTED)
+  startedAt            DateTime?            @map("started_at") @db.Timestamptz(6)
+  completedAt          DateTime?            @map("completed_at") @db.Timestamptz(6)
+  lastAccessedAt       DateTime?            @map("last_accessed_at") @db.Timestamptz(6)
+  videoPositionSeconds Int?                 @map("video_position_seconds")
+  videoWatchedSeconds  Int?                 @map("video_watched_seconds")
+  lastClientMutationId String?              @map("last_client_mutation_id") @db.VarChar(120)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lesson     Lesson     @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  student    User       @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
+  enrollment Enrollment @relation(fields: [enrollmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([studentUserId, lessonId, enrollmentId], map: "lesson_progress_student_user_id_lesson_id_enrollment_id_key")
+  @@index([studentUserId, courseId], map: "lesson_progress_student_user_id_course_id_idx")
+  @@index([enrollmentId, status], map: "lesson_progress_enrollment_id_status_idx")
+  @@map("lesson_progress")
+}
+
+model Notification {
+  id               String               @id @db.Uuid
+  tenantId         String?              @map("tenant_id") @db.Uuid
+  recipientUserId  String               @map("recipient_user_id") @db.Uuid
+  type             String               @db.VarChar(100)
+  category         NotificationCategory
+  title            String               @db.VarChar(240)
+  body             String               @db.Text
+  domainEntityType String?              @map("domain_entity_type") @db.VarChar(100)
+  domainEntityId   String?              @map("domain_entity_id") @db.Uuid
+  readAt           DateTime?            @map("read_at") @db.Timestamptz(6)
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  recipient User    @relation(fields: [recipientUserId], references: [id], onDelete: Restrict)
+
+  @@index([recipientUserId, readAt, createdAt], map: "notifications_recipient_user_id_read_at_created_at_idx")
+  @@index([tenantId, createdAt], map: "notifications_tenant_id_created_at_idx")
+  @@map("notifications")
+}
+
+model SecurityEvent {
+  id               String                @id @db.Uuid
+  tenantId         String?               @map("tenant_id") @db.Uuid
+  actorUserId      String?               @map("actor_user_id") @db.Uuid
+  targetUserId     String?               @map("target_user_id") @db.Uuid
+  deviceId         String?               @map("device_id") @db.Uuid
+  sessionId        String?               @map("session_id") @db.Uuid
+  eventType        String                @map("event_type") @db.VarChar(120)
+  category         SecurityEventCategory
+  severity         SecurityEventSeverity @default(INFO)
+  requestId        String?               @map("request_id") @db.VarChar(120)
+  ipHash           String?               @map("ip_hash") @db.VarChar(255)
+  userAgentSummary String?               @map("user_agent_summary") @db.VarChar(500)
+  metadata         Json?                 @db.JsonB
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant     Tenant?         @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actorUser  User?           @relation("SecurityEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  targetUser User?           @relation("SecurityEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  device     StudentDevice?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  session    RefreshSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt], map: "security_events_created_at_idx")
+  @@index([targetUserId, createdAt], map: "security_events_target_user_id_created_at_idx")
+  @@index([actorUserId, createdAt], map: "security_events_actor_user_id_created_at_idx")
+  @@index([tenantId, createdAt], map: "security_events_tenant_id_created_at_idx")
+  @@index([eventType, createdAt], map: "security_events_event_type_created_at_idx")
+  @@index([deviceId, createdAt], map: "security_events_device_id_created_at_idx")
+  @@map("security_events")
+}

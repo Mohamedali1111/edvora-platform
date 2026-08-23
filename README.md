@@ -9,8 +9,8 @@ This repository is in early application scaffolding phase. It contains minimal f
 - Student mobile app: Expo SDK 57 + React Native + TypeScript + Expo Router.
 - Instructor and Platform Admin dashboard: Next.js App Router + TypeScript + Tailwind CSS.
 - Backend API: NestJS + TypeScript.
-- Database: PostgreSQL planned, not added yet.
-- ORM: Prisma planned, not added yet.
+- Database: PostgreSQL planned; no database connection or migrations yet.
+- ORM: Prisma schema foundation implemented for the API.
 - Monorepo: pnpm workspaces.
 
 V1 has no student in-app payment, course checkout, or subscription purchase flow. Instructor billing is handled externally/manual outside the student mobile app.
@@ -71,6 +71,16 @@ pnpm build:web
 pnpm check
 ```
 
+API Prisma schema commands:
+
+```bash
+pnpm --filter @edvora/api prisma:format
+pnpm --filter @edvora/api prisma:validate
+pnpm --filter @edvora/api prisma:generate
+```
+
+Prisma uses `apps/api/prisma.config.ts` and a safe placeholder database URL when `DATABASE_URL` is not set. No real database credentials should be committed.
+
 Mobile store builds are not local root scripts. Future native development/custom builds should use Expo/EAS workflows after the app identity and build profiles are deliberately configured.
 
 ## Documentation
@@ -84,6 +94,7 @@ Start here:
 - `docs/UI-GUIDELINES.md`
 - `docs/RELEASE-COMPLIANCE.md`
 - `docs/RELIABILITY.md`
+- `docs/DATABASE-CONSTRAINTS.md`
 - `docs/DECISIONS.md`
 - `docs/STATUS.md`
 

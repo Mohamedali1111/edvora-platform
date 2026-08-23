@@ -573,8 +573,7 @@ Pagination is required for admin/instructor lists and event review. Security eve
 
 ## Explicitly Deferred From V1
 
-- Prisma schema and migrations.
-- PostgreSQL connection setup.
+- Prisma migrations and PostgreSQL connection setup.
 - OAuth/social login.
 - Payment, checkout, subscription, billing portal, marketplace, and pricing fields.
 - Advanced organization hierarchy.
