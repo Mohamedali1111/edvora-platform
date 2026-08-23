@@ -11,7 +11,9 @@ export type AuthErrorCode =
   | 'ACTIVATION_TOKEN_CONSUMED'
   | 'RESET_TOKEN_INVALID'
   | 'RESET_TOKEN_EXPIRED'
-  | 'RESET_TOKEN_CONSUMED';
+  | 'RESET_TOKEN_CONSUMED'
+  | 'CURRENT_PASSWORD_INCORRECT'
+  | 'NEW_PASSWORD_SAME_AS_CURRENT';
 
 export class AuthError extends Error {
   constructor(
@@ -27,6 +29,13 @@ export class PasswordPolicyError extends AuthError {
   constructor(message: string) {
     super('PASSWORD_POLICY_REJECTED', message);
     this.name = 'PasswordPolicyError';
+  }
+}
+
+export class InvalidCredentialsError extends AuthError {
+  constructor() {
+    super('INVALID_CREDENTIALS', 'Invalid credentials.');
+    this.name = 'InvalidCredentialsError';
   }
 }
 
@@ -104,5 +113,19 @@ export class ResetTokenConsumedError extends AuthError {
   constructor() {
     super('RESET_TOKEN_CONSUMED', 'Password reset token has already been consumed.');
     this.name = 'ResetTokenConsumedError';
+  }
+}
+
+export class CurrentPasswordIncorrectError extends AuthError {
+  constructor() {
+    super('CURRENT_PASSWORD_INCORRECT', 'Current password is incorrect.');
+    this.name = 'CurrentPasswordIncorrectError';
+  }
+}
+
+export class NewPasswordSameAsCurrentError extends AuthError {
+  constructor() {
+    super('NEW_PASSWORD_SAME_AS_CURRENT', 'New password must be different from the current password.');
+    this.name = 'NewPasswordSameAsCurrentError';
   }
 }

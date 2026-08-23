@@ -52,3 +52,44 @@ export type IssuedOneTimeToken = {
   tokenHash: string;
   expiresAt: Date;
 };
+
+export type AuthenticatedSessionResult = {
+  user: {
+    userId: string;
+    platformRole: PlatformRole;
+  };
+  sessionId: string;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenTtlSeconds: number;
+  refreshTokenExpiresAt: Date;
+};
+
+export type LoginInput = {
+  email: string;
+  password: string;
+  channel: SessionChannel;
+};
+
+export type ActivateAccountInput = {
+  activationToken: string;
+  newPassword: string;
+  expectedPurpose: AccountActivationPurpose;
+};
+
+export type RefreshAuthenticatedSessionInput = {
+  sessionId: string;
+  refreshToken: string;
+};
+
+export type ChangePasswordInput = {
+  userId: string;
+  currentSessionId: string;
+  currentPassword: string;
+  newPassword: string;
+};
+
+export type CompletePasswordResetInput = {
+  resetToken: string;
+  newPassword: string;
+};

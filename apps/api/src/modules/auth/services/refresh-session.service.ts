@@ -10,6 +10,7 @@ import { AccountInactiveError, InvalidRefreshSessionError, RefreshReplayDetected
 import type { IssuedRefreshSession, RotatedRefreshSession, SessionChannel } from '../types/auth.types';
 import { AuthRuntimeConfig } from '../auth.config';
 import { AUTH_RUNTIME_CONFIG } from '../auth.constants';
+import type { PrismaTransactionClient } from '../types/prisma-transaction.type';
 import { Inject } from '@nestjs/common';
 import { ClockService } from './clock.service';
 import { TokenCryptoService } from './token-crypto.service';
@@ -39,8 +40,21 @@ export class RefreshSessionService {
     channel: SessionChannel;
     deviceId?: string | null;
   }): Promise<IssuedRefreshSession> {
+    return this.prismaService.client.$transaction((tx) => {
+      return this.createSessionWithinTransaction(tx, input);
+    });
+  }
+
+  async createSessionWithinTransaction(
+    tx: PrismaTransactionClient,
+    input: {
+      userId: string;
+      channel: SessionChannel;
+      deviceId?: string | null;
+    },
+  ): Promise<IssuedRefreshSession> {
     const now = this.clock.now();
-    const user = await this.prismaService.client.user.findUnique({
+    const user = await tx.user.findUnique({
       where: { id: input.userId },
       select: { accountStatus: true },
     });
@@ -54,7 +68,7 @@ export class RefreshSessionService {
     const expiresAt = addSeconds(now, this.getRefreshTtlSeconds(input.channel));
     const sessionId = this.uuid.create();
 
-    await this.prismaService.client.refreshSession.create({
+    await tx.refreshSession.create({
       data: {
         id: sessionId,
         userId: input.userId,
@@ -189,6 +203,79 @@ export class RefreshSessionService {
     });
 
     return result.count;
+  }
+
+  async revokeAllUserSessionsWithinTransaction(
+    tx: PrismaTransactionClient,
+    userId: string,
+    exceptSessionId?: string,
+  ): Promise<number> {
+    const now = this.clock.now();
+    const result = await tx.refreshSession.updateMany({
+      where: {
+        userId,
+        status: RefreshSessionStatus.ACTIVE,
+        id: exceptSessionId ? { not: exceptSessionId } : undefined,
+      },
+      data: {
+        status: RefreshSessionStatus.REVOKED,
+        revokedAt: now,
+      },
+    });
+
+    return result.count;
+  }
+
+  async rotateAuthenticatedSessionWithinTransaction(
+    tx: PrismaTransactionClient,
+    input: {
+      userId: string;
+      sessionId: string;
+    },
+  ): Promise<RotatedRefreshSession> {
+    const now = this.clock.now();
+    const session = await tx.refreshSession.findUnique({
+      where: { id: input.sessionId },
+      include: {
+        user: {
+          select: { accountStatus: true },
+        },
+      },
+    });
+
+    this.assertSessionUsable(session, now);
+
+    if (session.userId !== input.userId) {
+      throw new InvalidRefreshSessionError();
+    }
+
+    const nextRefreshToken = this.tokenCrypto.generateOpaqueToken();
+    const nextRefreshTokenHash = this.tokenCrypto.hashOpaqueToken(nextRefreshToken);
+
+    const result = await tx.refreshSession.updateMany({
+      where: {
+        id: input.sessionId,
+        userId: input.userId,
+        status: RefreshSessionStatus.ACTIVE,
+        expiresAt: { gt: now },
+        revokedAt: null,
+      },
+      data: {
+        refreshTokenHash: nextRefreshTokenHash,
+        lastUsedAt: now,
+      },
+    });
+
+    if (result.count !== 1) {
+      throw new InvalidRefreshSessionError();
+    }
+
+    return {
+      sessionId: input.sessionId,
+      refreshToken: nextRefreshToken,
+      refreshTokenHash: nextRefreshTokenHash,
+      expiresAt: session.expiresAt,
+    };
   }
 
   private getRefreshTtlSeconds(channel: SessionChannel): number {

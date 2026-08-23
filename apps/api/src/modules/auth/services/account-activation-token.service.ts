@@ -1,5 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { AccountActivationToken } from '../../../../.generated/prisma/client';
+import type {
+  AccountActivationPurpose,
+  AccountActivationToken,
+} from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthRuntimeConfig } from '../auth.config';
 import { AUTH_RUNTIME_CONFIG } from '../auth.constants';
@@ -8,6 +11,7 @@ import {
   ActivationTokenExpiredError,
   ActivationTokenInvalidError,
 } from '../errors/auth.errors';
+import type { PrismaTransactionClient } from '../types/prisma-transaction.type';
 import type { IssueActivationTokenInput, IssuedOneTimeToken } from '../types/auth.types';
 import { ClockService } from './clock.service';
 import { TokenCryptoService } from './token-crypto.service';
@@ -63,41 +67,57 @@ export class AccountActivationTokenService {
     });
   }
 
-  async consume(rawToken: string): Promise<AccountActivationToken> {
+  async consume(
+    rawToken: string,
+    expectedPurpose?: AccountActivationPurpose,
+  ): Promise<AccountActivationToken> {
     const tokenHash = this.tokenCrypto.hashOpaqueToken(rawToken);
 
     return this.prismaService.client.$transaction(async (tx) => {
-      const now = this.clock.now();
-      const token = await tx.accountActivationToken.findUnique({ where: { tokenHash } });
-
-      this.assertConsumable(token, now);
-
-      const result = await tx.accountActivationToken.updateMany({
-        where: {
-          id: token.id,
-          consumedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { consumedAt: now },
-      });
-
-      if (result.count !== 1) {
-        throw new ActivationTokenConsumedError();
-      }
-
-      return {
-        ...token,
-        consumedAt: now,
-      };
+      return this.consumeWithinTransaction(tx, tokenHash, expectedPurpose);
     });
+  }
+
+  async consumeWithinTransaction(
+    tx: PrismaTransactionClient,
+    tokenHash: string,
+    expectedPurpose?: AccountActivationPurpose,
+  ): Promise<AccountActivationToken> {
+    const now = this.clock.now();
+    const token = await tx.accountActivationToken.findUnique({ where: { tokenHash } });
+
+    this.assertConsumable(token, now, expectedPurpose);
+
+    const result = await tx.accountActivationToken.updateMany({
+      where: {
+        id: token.id,
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { consumedAt: now },
+    });
+
+    if (result.count !== 1) {
+      throw new ActivationTokenConsumedError();
+    }
+
+    return {
+      ...token,
+      consumedAt: now,
+    };
   }
 
   private assertConsumable(
     token: AccountActivationToken | null,
     now: Date,
+    expectedPurpose?: AccountActivationPurpose,
   ): asserts token is AccountActivationToken {
     if (!token || token.revokedAt) {
+      throw new ActivationTokenInvalidError();
+    }
+
+    if (expectedPurpose && token.purpose !== expectedPurpose) {
       throw new ActivationTokenInvalidError();
     }
 

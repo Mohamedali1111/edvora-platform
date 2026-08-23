@@ -305,3 +305,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Internal auth primitives use `argon2@0.45.1` for Argon2id password hashing, `@nestjs/jwt@11.0.2` for HS256 access-token signing/verification, Node `crypto` for opaque tokens and SHA-256 token digests, and a local RFC 9562 UUIDv7 generator for application-generated IDs.
 - Reasoning: These choices match the approved auth design while keeping dependencies minimal and compatible with the current CommonJS NestJS build. The current stable `uuid` package is ESM-only, so a small tested local UUIDv7 generator avoids changing the API module system for this milestone.
 - Implications: Refresh rotation requires the refresh session ID plus the opaque refresh token. Rotation uses transactional conditional updates so only one presented token can rotate successfully; near-simultaneous duplicate use is rejected without minting another chain, and stale replay outside the retry grace window revokes the session.
+
+## DEC-0039: Internal Auth Orchestration Before Public Transport
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Login, account activation, refresh, logout, logout-all, password change, and password-reset completion are implemented first as internal NestJS orchestration services, with public HTTP controllers, guards, cookies, CSRF handling, and client storage deferred.
+- Reasoning: Keeping orchestration separate from transport lets Edvora validate transaction boundaries, token/session handling, and security-event persistence before exposing API routes.
+- Implications: Future controllers should call the internal orchestration services rather than duplicating credential, token, or session logic. Web refresh sessions use the concrete V1 default of 10 hours, while mobile refresh sessions use 30 days.

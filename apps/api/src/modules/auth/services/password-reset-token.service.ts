@@ -9,6 +9,7 @@ import {
   ResetTokenInvalidError,
 } from '../errors/auth.errors';
 import type { IssuedOneTimeToken, IssuePasswordResetTokenInput } from '../types/auth.types';
+import type { PrismaTransactionClient } from '../types/prisma-transaction.type';
 import { ClockService } from './clock.service';
 import { TokenCryptoService } from './token-crypto.service';
 import { UuidV7Service } from './uuid-v7.service';
@@ -64,30 +65,37 @@ export class PasswordResetTokenService {
     const tokenHash = this.tokenCrypto.hashOpaqueToken(rawToken);
 
     return this.prismaService.client.$transaction(async (tx) => {
-      const now = this.clock.now();
-      const token = await tx.passwordResetToken.findUnique({ where: { tokenHash } });
-
-      this.assertConsumable(token, now);
-
-      const result = await tx.passwordResetToken.updateMany({
-        where: {
-          id: token.id,
-          consumedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { consumedAt: now },
-      });
-
-      if (result.count !== 1) {
-        throw new ResetTokenConsumedError();
-      }
-
-      return {
-        ...token,
-        consumedAt: now,
-      };
+      return this.consumeWithinTransaction(tx, tokenHash);
     });
+  }
+
+  async consumeWithinTransaction(
+    tx: PrismaTransactionClient,
+    tokenHash: string,
+  ): Promise<PasswordResetToken> {
+    const now = this.clock.now();
+    const token = await tx.passwordResetToken.findUnique({ where: { tokenHash } });
+
+    this.assertConsumable(token, now);
+
+    const result = await tx.passwordResetToken.updateMany({
+      where: {
+        id: token.id,
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { consumedAt: now },
+    });
+
+    if (result.count !== 1) {
+      throw new ResetTokenConsumedError();
+    }
+
+    return {
+      ...token,
+      consumedAt: now,
+    };
   }
 
   private assertConsumable(

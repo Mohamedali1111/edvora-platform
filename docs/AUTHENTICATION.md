@@ -1,6 +1,6 @@
 # Authentication
 
-This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, and password-reset-token primitives are implemented in the API. No public endpoints, guards, controllers, cookies, mobile storage, email delivery, or device binding are implemented yet.
+This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, password-reset-token, and authentication use-case orchestration services are implemented in the API. No public endpoints, guards, controllers, cookies, mobile storage, email delivery, or device binding are implemented yet.
 
 ## Scope
 
@@ -71,6 +71,13 @@ Activation token requirements:
 - Raw token must never appear in logs, security-event metadata, analytics, or source control.
 
 Completing activation lets the intended user set their own password. It should not be described as mailbox verification unless the delivery mechanism actually proves mailbox ownership.
+
+Implementation status:
+
+- Internal activation completion orchestration is implemented.
+- Activation consumes the single-use token and creates the initial password credential inside one transaction.
+- Activation does not mark email as verified.
+- Activation does not create a logged-in session or authorize any student device.
 
 ## Boundaries
 
@@ -147,7 +154,7 @@ Implementation status:
 
 - The internal API password service uses `argon2@0.45.1` with Argon2id, memory cost 19 MiB, time cost 2, and parallelism 1.
 - Password policy validation is implemented for internal callers: minimum 12 characters, maximum 128 characters, no silent truncation, and no composition rules.
-- Password hashing is implemented, but no login, password-set, password-change, or password-reset orchestration endpoint exists yet.
+- Internal login, activation, password-change, and password-reset completion orchestration exists. Public HTTP endpoints do not exist yet.
 
 Future pepper:
 
@@ -318,11 +325,11 @@ Do not let both refresh attempts create indefinitely valid token chains.
 Implementation status:
 
 - Refresh-token generation, hashing, session creation, session rotation, current-session revocation, and all-session revocation are implemented as internal API services.
+- Internal refresh, logout-current, and logout-all orchestration exists. Public `/refresh` or `/logout` endpoints do not exist yet.
 - Future refresh callers must pass the refresh session ID together with the opaque refresh token. The raw refresh token remains opaque and does not carry authorization state.
 - Rotation uses a transactional conditional update on `sessionId`, active status, unrevoked state, expiry, and current token hash.
 - For near-simultaneous duplicate refresh attempts, one request can rotate successfully and the duplicate is rejected without issuing another chain.
 - A stale mismatched token outside the short retry grace window revokes the session and raises replay detection.
-- No public `/refresh` or `/logout` endpoint exists yet.
 
 ## Session Lifetimes
 
@@ -330,7 +337,7 @@ Initial recommendation:
 
 - Access token lifetime: 10 minutes.
 - Refresh session lifetime: 30 days for mobile students.
-- Refresh session lifetime: 8 to 12 hours for web Instructor/Admin sessions, with optional "remember this device/browser" decision deferred.
+- Refresh session lifetime: 10 hours for web Instructor/Admin sessions, with optional "remember this device/browser" decision deferred.
 
 Reasoning:
 
@@ -485,7 +492,7 @@ Do not overload `RefreshSession` for password reset tokens.
 
 The schema includes a dedicated `PasswordResetToken` persistence model with user reference, token hash, expiry, consumed timestamp, revocation timestamp, created timestamp, and optional initiating actor reference. Password reset implementation must still generate, hash, consume, and revoke tokens transactionally.
 
-Internal password-reset token generation, replacement revocation, and one-time consumption are implemented. Full password-reset orchestration, password update, refresh-session revocation after successful reset, security-event recording, and delivery are still deferred.
+Internal password-reset token generation, replacement revocation, one-time consumption, and reset completion orchestration are implemented. Reset completion updates or creates the password credential, consumes the reset token, revokes all refresh sessions, and records a security event inside one transaction. Password-reset request initiation and delivery are still deferred.
 
 No email provider is selected yet. Reset delivery is deferred.
 
