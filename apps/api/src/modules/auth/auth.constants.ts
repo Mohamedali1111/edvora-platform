@@ -1,0 +1,1 @@
+export const AUTH_RUNTIME_CONFIG = Symbol('AUTH_RUNTIME_CONFIG');

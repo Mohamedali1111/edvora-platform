@@ -1,6 +1,6 @@
 # Authentication
 
-This document defines the V1 authentication and session-security design for Edvora. It is a design source of truth, not an implementation. No endpoints, guards, controllers, password hashing code, JWT signing code, cookies, mobile storage, or device binding are implemented by this document.
+This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, and password-reset-token primitives are implemented in the API. No public endpoints, guards, controllers, cookies, mobile storage, email delivery, or device binding are implemented yet.
 
 ## Scope
 
@@ -143,6 +143,12 @@ Verification:
 - Use the password-hashing library's verification function.
 - On successful login, check whether the stored hash uses outdated parameters. If so, rehash with current parameters in the same authenticated flow.
 
+Implementation status:
+
+- The internal API password service uses `argon2@0.45.1` with Argon2id, memory cost 19 MiB, time cost 2, and parallelism 1.
+- Password policy validation is implemented for internal callers: minimum 12 characters, maximum 128 characters, no silent truncation, and no composition rules.
+- Password hashing is implemented, but no login, password-set, password-change, or password-reset orchestration endpoint exists yet.
+
 Future pepper:
 
 - A server-side pepper may be considered later as defense in depth.
@@ -214,6 +220,13 @@ Validation:
 
 - Validate signature, issuer, audience, expiration, and required claims.
 - Treat role claim as a convenience hint only. Sensitive authorization still checks account/session/resource state.
+
+Implementation status:
+
+- The internal API access-token service signs and verifies HS256 JWTs through `@nestjs/jwt@11.0.2`.
+- Verification explicitly restricts accepted algorithms to HS256 and validates issuer, audience, expiration, and minimal claims.
+- Token signing configuration comes from `AUTH_JWT_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, and optional `AUTH_ACCESS_TOKEN_TTL_SECONDS`.
+- `AUTH_JWT_SECRET` is required at runtime and must be at least 32 bytes; examples remain placeholders only.
 
 ## Signing Key Strategy
 
@@ -301,6 +314,15 @@ Concurrency:
 - To avoid accidental lockout from immediate duplicate mobile/network retry, implementation may support a tiny one-time grace window or idempotency key, but only if replay detection remains strong and documented.
 
 Do not let both refresh attempts create indefinitely valid token chains.
+
+Implementation status:
+
+- Refresh-token generation, hashing, session creation, session rotation, current-session revocation, and all-session revocation are implemented as internal API services.
+- Future refresh callers must pass the refresh session ID together with the opaque refresh token. The raw refresh token remains opaque and does not carry authorization state.
+- Rotation uses a transactional conditional update on `sessionId`, active status, unrevoked state, expiry, and current token hash.
+- For near-simultaneous duplicate refresh attempts, one request can rotate successfully and the duplicate is rejected without issuing another chain.
+- A stale mismatched token outside the short retry grace window revokes the session and raises replay detection.
+- No public `/refresh` or `/logout` endpoint exists yet.
 
 ## Session Lifetimes
 
@@ -463,6 +485,8 @@ Do not overload `RefreshSession` for password reset tokens.
 
 The schema includes a dedicated `PasswordResetToken` persistence model with user reference, token hash, expiry, consumed timestamp, revocation timestamp, created timestamp, and optional initiating actor reference. Password reset implementation must still generate, hash, consume, and revoke tokens transactionally.
 
+Internal password-reset token generation, replacement revocation, and one-time consumption are implemented. Full password-reset orchestration, password update, refresh-session revocation after successful reset, security-event recording, and delivery are still deferred.
+
 No email provider is selected yet. Reset delivery is deferred.
 
 Early V1 support may allow Platform Admin/support to initiate a reset token workflow, but support staff must never learn or set the user's password. Instructors must not retrieve or reset student passwords directly.
@@ -606,9 +630,8 @@ Device authorization later:
 
 Deferred until implementation or later reviewed tasks:
 
-- Installing Argon2/JWT/cookie/security libraries.
-- Auth controllers/services/guards/decorators.
-- Password reset token schema and migrations.
+- Installing cookie/CSRF/frontend security transport libraries.
+- Public auth controllers, route guards, DTOs, decorators, and orchestration services.
 - Email provider and email verification workflow.
 - MFA.
 - Redis/distributed rate limiting.
@@ -621,12 +644,12 @@ MFA for Instructor and especially Platform Admin is a high-priority pre-producti
 
 ## Schema Plan
 
-Before implementing activation or password reset, add reviewed persistence for:
+Implemented persistence exists for:
 
 - `AccountActivationToken`
 - `PasswordResetToken`
 
-These persistence models are implemented, but no auth code or delivery flow exists yet. See `docs/AUTH-SCHEMA-PLAN.md` for fields, constraints, indexes, lifecycle, and remaining application responsibilities.
+Internal issuance/consumption primitives for these persistence models are implemented, but no public auth code or delivery flow exists yet. See `docs/AUTH-SCHEMA-PLAN.md` for fields, constraints, indexes, lifecycle, and remaining application responsibilities.
 
 ## References
 

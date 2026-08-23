@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, and auth one-time token persistence completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, and internal auth/security primitives completed. The repository has minimal framework foundations for API, web, and mobile, with no public product features or product domain repositories.
 
 ## Completed Work
 
@@ -29,6 +29,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Finalized V1 managed account creation, account activation, password reset, access-token, and refresh-token decisions.
 - Implemented required authentication persistence additions for `AccountActivationToken` and `PasswordResetToken`.
 - Added the reviewed additive migration `20260823010000_add_auth_security_tokens` and validated it against disposable PostgreSQL 16 after the initial migration.
+- Implemented internal authentication/security primitives for password hashing, JWT access tokens, opaque refresh tokens, refresh-session rotation/revocation, account activation tokens, and password reset tokens.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -42,6 +43,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - V1 authentication design uses email/password, Argon2id password hashes, 10-minute HS256 JWT access tokens, opaque rotating refresh sessions, managed account creation, and purpose-specific activation/reset tokens.
 - Auth one-time token persistence stores only lowercase 64-character SHA-256 hex token hashes; raw activation/reset tokens must never be persisted.
+- Internal auth primitives use `argon2`, `@nestjs/jwt`, Node `crypto`, and application-generated UUIDv7 IDs. Refresh rotation is transaction-safe and requires both refresh session ID and opaque token.
 - Multi-tenant SaaS from the beginning.
 - Student device authorization defaults to one approved active device, with configurable architecture.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
@@ -67,8 +69,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
-- Authentication/session behavior and V1 onboarding decisions are designed but not implemented.
-- Authentication one-time token persistence exists, but token generation, hashing, consumption, delivery, endpoints, guards, and services are not implemented.
+- Authentication/session behavior and V1 onboarding decisions are designed; internal primitives exist, but no public auth endpoints or guards exist yet.
+- Authentication one-time token persistence and internal generation/hashing/consumption services exist, but delivery, endpoint orchestration, password reset completion, cookies, mobile storage, device binding, tenant authorization, and rate limiting are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -91,8 +93,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - Product feature implementation.
 - Authentication and authorization.
-- Authentication endpoints, guards, services, password hashing, token signing, cookies, activation tokens, password reset tokens, and rate limiting.
-- Auth application logic for creating, revoking, consuming, and cleaning up activation/reset tokens.
+- Public authentication endpoints, guards, cookies, activation/reset delivery flows, password reset completion, and rate limiting.
+- Cleanup jobs for expired/consumed activation/reset tokens.
 - Applying migrations to any persistent/shared database, seed data, and product database access logic.
 - Docker and infrastructure.
 - CI/CD.
@@ -197,9 +199,20 @@ Auth token persistence validation passed:
 - Removed the disposable Edvora PostgreSQL container after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
 - Prisma format, validate, generate, API lint/typecheck/tests/build, root `corepack pnpm check`, and `git diff --check` passed.
 
+Internal auth primitive validation passed:
+
+- Added minimal dependencies: `argon2@0.45.1` and `@nestjs/jwt@11.0.2`.
+- Added root pnpm build-script approval for `argon2` only.
+- Implemented internal API auth module primitives without public controllers, guards, routes, Passport, frontend/mobile work, Redis, OAuth, MFA, or email delivery.
+- Unit tests cover auth config, Argon2id password hashing/verification/policy/rehash detection, JWT signing/verification/error behavior, opaque token hashing, and UUIDv7 shape.
+- Opt-in PostgreSQL integration test applies the initial and auth-token migrations to disposable PostgreSQL 16 and validates transactional refresh rotation/replay, revocation, account-status checks, activation-token issuance/consumption, and password-reset-token issuance/consumption.
+- The default `pnpm test` and root `pnpm check` do not require Docker or a live database.
+- The disposable Edvora PostgreSQL container was removed after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
+- Prisma format, validate, generate, API lint/typecheck/tests/build, opt-in auth PostgreSQL tests, root `corepack pnpm check`, and `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Design the authentication implementation plan for account activation and password reset services without creating public endpoints yet.
+Implement internal authentication orchestration for account activation/password setting and login use cases without exposing public HTTP endpoints yet.
 
 ## Handoff Instructions
 

@@ -297,3 +297,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Account activation and password reset token tables store only lowercase hexadecimal SHA-256 token digests in `CHAR(64)` columns with unique token-hash indexes.
 - Reasoning: Activation/reset tokens are machine-generated high-entropy values, so a fast cryptographic digest is appropriate for lookup while avoiding raw-token persistence. Hex text keeps Prisma/PostgreSQL handling simple and portable.
 - Implications: Future application code must generate at least 256 bits of token entropy, persist only the canonical digest, avoid logging raw tokens or hashes, and perform issuance/consumption in transactions.
+
+## DEC-0038: Internal Auth Primitive Runtime Choices
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Internal auth primitives use `argon2@0.45.1` for Argon2id password hashing, `@nestjs/jwt@11.0.2` for HS256 access-token signing/verification, Node `crypto` for opaque tokens and SHA-256 token digests, and a local RFC 9562 UUIDv7 generator for application-generated IDs.
+- Reasoning: These choices match the approved auth design while keeping dependencies minimal and compatible with the current CommonJS NestJS build. The current stable `uuid` package is ESM-only, so a small tested local UUIDv7 generator avoids changing the API module system for this milestone.
+- Implications: Refresh rotation requires the refresh session ID plus the opaque refresh token. Rotation uses transactional conditional updates so only one presented token can rotate successfully; near-simultaneous duplicate use is rejected without minting another chain, and stale replay outside the retry grace window revokes the session.
