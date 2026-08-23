@@ -21,9 +21,10 @@
     "dev:mobile": "pnpm --filter @edvora/mobile start",
     "build:api": "pnpm --filter @edvora/api build",
     "build:web": "pnpm --filter @edvora/web build",
+    "prisma:generate": "pnpm --filter @edvora/api prisma:generate",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "check": "pnpm install --frozen-lockfile --config.confirm-modules-purge=false --config.offline=false && pnpm lint && pnpm typecheck && pnpm test && pnpm build:api && pnpm build:web"
+    "check": "pnpm install --frozen-lockfile --config.confirm-modules-purge=false --config.offline=false && pnpm prisma:generate && pnpm lint && pnpm typecheck && pnpm test && pnpm build:api && pnpm build:web"
   }
 }

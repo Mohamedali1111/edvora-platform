@@ -11,7 +11,7 @@ apps/api     -> Shared backend API
 packages/*   -> Future shared code, added only when justified
 ```
 
-The repository contains minimal framework scaffolds for these applications. Product features, domain modules, database integration, and infrastructure remain intentionally deferred.
+The repository contains minimal framework scaffolds for these applications plus the initial Prisma/PostgreSQL database runtime boundary for the API. Product features, domain modules, product repositories, and infrastructure remain intentionally deferred.
 
 ## Planned Stack
 
@@ -43,6 +43,14 @@ Instructor users manage tenant-scoped educational operations. Platform Admin use
 ### API
 
 The NestJS API is the shared backend for all product surfaces. It owns server-side business rules, authentication/session handling, authorization, tenant isolation, device authorization, course entitlement checks, security event recording, and playback authorization.
+
+### Database Runtime Boundary
+
+The API uses Prisma 7 with the official PostgreSQL driver adapter. The NestJS `DatabaseModule` creates one Prisma runtime boundary per API process through dependency injection, backed by one `pg` connection pool. Feature modules should import the database module explicitly when they need database access; the module is not global.
+
+API startup requires `DATABASE_URL` and fails clearly when runtime database configuration or connectivity is unavailable. The application must not log the full database URL because it may contain credentials.
+
+Database schema deployment remains separate from application startup. The API must not run Prisma migrations or schema push automatically on boot.
 
 ## API-First Communication
 
@@ -77,7 +85,7 @@ Use scale-ready architecture without scale-expensive infrastructure:
 - Use pagination for lists.
 - Plan proper database indexes around query patterns.
 - Prevent N+1 query problems.
-- Use connection pooling when the database layer is introduced.
+- Use one controlled database connection pool per API process and account for total connections across horizontally scaled replicas.
 - Add rate limiting where abuse or cost exposure exists.
 - Use idempotency for retryable operations where relevant.
 - Move heavy work to background processing only when the need is demonstrated.

@@ -2,15 +2,15 @@
 
 Edvora is a security-first bilingual EdTech SaaS platform for instructors and their students.
 
-This repository is in early application scaffolding phase. It contains minimal framework foundations for the student mobile app, instructor/admin web app, and shared backend API. It does not yet contain product features, authentication, database integration, payments, or security implementation.
+This repository is in early foundation phase. It contains minimal framework foundations for the student mobile app, instructor/admin web app, shared backend API, reviewed database schema/migration artifacts, and the API database runtime boundary. It does not yet contain product features, authentication, product repositories, payments, or security implementation.
 
 ## Current Architecture
 
 - Student mobile app: Expo SDK 57 + React Native + TypeScript + Expo Router.
 - Instructor and Platform Admin dashboard: Next.js App Router + TypeScript + Tailwind CSS.
 - Backend API: NestJS + TypeScript.
-- Database: PostgreSQL planned; no database connection or migrations yet.
-- ORM: Prisma schema foundation implemented for the API.
+- Database: PostgreSQL planned; initial reviewed migration exists and the API has a Prisma/PostgreSQL runtime boundary.
+- ORM: Prisma 7 schema foundation implemented for the API.
 - Monorepo: pnpm workspaces.
 
 V1 has no student in-app payment, course checkout, or subscription purchase flow. Instructor billing is handled externally/manual outside the student mobile app.
@@ -79,7 +79,7 @@ pnpm --filter @edvora/api prisma:validate
 pnpm --filter @edvora/api prisma:generate
 ```
 
-Prisma uses `apps/api/prisma.config.ts` and a safe placeholder database URL when `DATABASE_URL` is not set. No real database credentials should be committed.
+Prisma uses `apps/api/prisma.config.ts` and a safe placeholder database URL for non-runtime Prisma commands when `DATABASE_URL` is not set. Starting the API runtime requires a real local/runtime `DATABASE_URL`; use `apps/api/.env.example` as the shape only and never commit real credentials.
 
 Migration SQL is reviewed before application. See `docs/MIGRATIONS.md` before creating or applying database migrations.
 

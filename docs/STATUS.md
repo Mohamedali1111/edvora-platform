@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema and reviewed PostgreSQL migration artifact completed and validated against disposable PostgreSQL 16 for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features or database runtime integration.
+Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma/PostgreSQL runtime foundation completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
 
 ## Completed Work
 
@@ -23,6 +23,8 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed and v
 - Generated the first reviewed PostgreSQL migration SQL artifact in `apps/api/prisma/migrations/20260823000000_initial_schema/migration.sql`.
 - Added migration workflow guidance in `docs/MIGRATIONS.md`.
 - Validated the initial migration against a disposable PostgreSQL 16 database, including custom partial indexes, check constraints, tenant composite foreign keys, JSONB fields, and repeatable clean application.
+- Added the NestJS API database runtime boundary using Prisma 7, `@prisma/adapter-pg`, and `pg`.
+- Added API runtime configuration validation for `DATABASE_URL`, a safe `.env.example`, and focused database infrastructure unit tests.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -30,7 +32,8 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed and v
 - Monorepo using pnpm workspaces.
 - Apps: `apps/mobile`, `apps/web`, and `apps/api`.
 - Current stack: Expo SDK 57 + React Native + Expo Router + TypeScript, Next.js 16 + TypeScript, NestJS 11 + TypeScript.
-- Planned data layer is PostgreSQL + Prisma. Prisma schema and the first reviewed migration SQL artifact are implemented and have been validated against disposable PostgreSQL 16; database runtime integration is not done yet.
+- Planned data layer is PostgreSQL + Prisma. Prisma schema and the first reviewed migration SQL artifact are implemented and have been validated against disposable PostgreSQL 16.
+- The API has a Nest-managed Prisma 7 runtime boundary using the official PostgreSQL adapter and one `pg` pool per API process.
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - Multi-tenant SaaS from the beginning.
@@ -50,15 +53,16 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed and v
 ## Current Framework Versions
 
 - API: NestJS 11.2.1.
-- ORM tooling: Prisma 7.9.1 and `@prisma/client` 7.9.1.
+- ORM/runtime tooling: Prisma 7.9.1, `@prisma/client` 7.9.1, `@prisma/adapter-pg` 7.9.1, and `pg` 8.23.0.
 - Web: Next.js 16.3.2, React 19.2.8, Tailwind CSS 4.3.3.
 - Mobile: Expo 57.0.15, Expo Router 57.0.15, React Native 0.86.2, React 19.2.3.
 
 ## Known Issues / Warnings
 
 - No product functionality exists yet.
-- No application database connection, seed data, or product modules exist yet.
-- Prisma v7 requires generated client output to use an explicit path. The current output path is `apps/api/.generated/prisma`, which is intentionally ignored because no application code imports Prisma Client yet.
+- No seed data, product modules, or product repositories exist yet.
+- Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
+- Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
 - No CI/CD exists yet.
 - pnpm dependency installation may need `--config.offline=false` on machines with a global pnpm `offline=true` setting.
@@ -71,7 +75,6 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed and v
 - Final visual branding, fonts, colors, and logo.
 - Authentication/session implementation details.
 - Final password hashing/session implementation details.
-- Prisma 7 PostgreSQL runtime integration details, including whether a driver adapter such as `@prisma/adapter-pg` is required.
 - Final legal/privacy retention policy for account deletion and security events.
 - App Store bundle identifiers and Android application IDs.
 - EAS build profiles and production build identity.
@@ -81,7 +84,7 @@ Initial Prisma schema and reviewed PostgreSQL migration artifact completed and v
 
 - Product feature implementation.
 - Authentication and authorization.
-- PostgreSQL connection, applying migrations, seed data, and database runtime integration.
+- Applying migrations to any persistent/shared database, seed data, and product database access logic.
 - Docker and infrastructure.
 - CI/CD.
 - Payments/billing implementation.
@@ -144,9 +147,20 @@ Disposable PostgreSQL migration validation passed:
 - Removed the disposable database container after validation.
 - Root `corepack pnpm check` and `git diff --check` passed after documentation updates.
 
+Prisma/PostgreSQL runtime foundation validation passed:
+
+- Confirmed repository started clean at `d44f6f8 test(database): validate initial migration on PostgreSQL 16`.
+- Verified Prisma 7 official PostgreSQL runtime guidance requires a driver adapter.
+- Added `@prisma/adapter-pg`, `pg`, and `@types/pg`.
+- Prisma format, validate, and generate passed.
+- API lint, typecheck, unit tests, and build passed.
+- Started the API successfully against a disposable PostgreSQL 16 container with the approved initial migration applied.
+- Removed the disposable Edvora runtime-test container after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
+- Root `corepack pnpm check` and `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Design the NestJS Prisma runtime integration boundary without adding product domain logic yet.
+Design the first authentication/session implementation plan without creating product endpoints yet.
 
 ## Handoff Instructions
 
