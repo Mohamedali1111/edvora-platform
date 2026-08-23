@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema implementation completed for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features, database connection, or migrations.
+Initial Prisma schema and reviewed PostgreSQL migration artifact completed for the backend database foundation. The repository has minimal framework foundations for API, web, and mobile, with no product features or database connection.
 
 ## Completed Work
 
@@ -20,6 +20,8 @@ Initial Prisma schema implementation completed for the backend database foundati
 - Implemented the initial PostgreSQL Prisma schema in `apps/api/prisma/schema.prisma`.
 - Added Prisma CLI/Client tooling to `apps/api` and non-destructive Prisma validation scripts.
 - Documented PostgreSQL-only constraints deferred to migrations in `docs/DATABASE-CONSTRAINTS.md`.
+- Generated the first reviewed PostgreSQL migration SQL artifact in `apps/api/prisma/migrations/20260823000000_initial_schema/migration.sql`.
+- Added migration workflow guidance in `docs/MIGRATIONS.md`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -27,7 +29,7 @@ Initial Prisma schema implementation completed for the backend database foundati
 - Monorepo using pnpm workspaces.
 - Apps: `apps/mobile`, `apps/web`, and `apps/api`.
 - Current stack: Expo SDK 57 + React Native + Expo Router + TypeScript, Next.js 16 + TypeScript, NestJS 11 + TypeScript.
-- Planned data layer is PostgreSQL + Prisma. Prisma schema is implemented; PostgreSQL connection and migrations are not created yet.
+- Planned data layer is PostgreSQL + Prisma. Prisma schema and the first reviewed migration SQL artifact are implemented; PostgreSQL connection and applying migrations are not done yet.
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - Multi-tenant SaaS from the beginning.
@@ -54,9 +56,9 @@ Initial Prisma schema implementation completed for the backend database foundati
 ## Known Issues / Warnings
 
 - No product functionality exists yet.
-- No Prisma migrations, database connection, seed data, or product modules exist yet.
+- No database connection, applied migration, seed data, or product modules exist yet.
 - Prisma v7 requires generated client output to use an explicit path. The current output path is `apps/api/.generated/prisma`, which is intentionally ignored because no application code imports Prisma Client yet.
-- Several PostgreSQL-only constraints are documented in `docs/DATABASE-CONSTRAINTS.md` and must be added during migration work.
+- PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
 - No CI/CD exists yet.
 - pnpm dependency installation may need `--config.offline=false` on machines with a global pnpm `offline=true` setting.
 - Next.js build may require normal process-spawn permissions on Windows because it uses worker processes.
@@ -70,7 +72,6 @@ Initial Prisma schema implementation completed for the backend database foundati
 - Final password hashing/session implementation details.
 - Prisma 7 PostgreSQL runtime integration details, including whether a driver adapter such as `@prisma/adapter-pg` is required.
 - Final legal/privacy retention policy for account deletion and security events.
-- Final UUIDv7 generation mechanism: application-generated UUIDv7 values or a reviewed PostgreSQL function/default before first real writes.
 - App Store bundle identifiers and Android application IDs.
 - EAS build profiles and production build identity.
 - Deployment target and production infrastructure.
@@ -79,7 +80,7 @@ Initial Prisma schema implementation completed for the backend database foundati
 
 - Product feature implementation.
 - Authentication and authorization.
-- PostgreSQL connection, migrations, seed data, and database runtime integration.
+- PostgreSQL connection, applying migrations, seed data, and database runtime integration.
 - Docker and infrastructure.
 - CI/CD.
 - Payments/billing implementation.
@@ -119,9 +120,21 @@ Prisma schema task validation passed:
 - `git diff --check` passed.
 - Repository hygiene checks found no nested lockfiles, committed `.env` files, Prisma migrations, or unignored generated Prisma client output.
 
+Initial migration artifact task validation passed:
+
+- Confirmed repository started clean at `ef7bd3a feat(database): establish Prisma schema foundation`.
+- Generated SQL with `corepack pnpm --filter @edvora/api exec prisma migrate diff --config prisma.config.ts --from-empty --to-schema prisma/schema.prisma --script --output prisma/migrations/20260823000000_initial_schema/migration.sql`.
+- Manually reviewed migration SQL for enums, tables, primary keys, foreign keys, referential actions, indexes, UUID columns, `TIMESTAMPTZ(6)`, `JSONB`, decimal types, and tenant-scoped composite relations.
+- Added PostgreSQL-only partial unique indexes and stable check constraints to the reviewed migration SQL.
+- Prisma format, validate, and generate passed.
+- API lint, typecheck, tests, and build passed.
+- Root `corepack pnpm check` passed.
+- `git diff --check` passed.
+- No database was connected or modified.
+
 ## Exact Recommended Next Step
 
-Create the first reviewed PostgreSQL migration plan for the Prisma schema, including the deferred PostgreSQL-only constraints, without connecting production infrastructure.
+Review the initial migration SQL artifact and PostgreSQL-only constraints before applying anything to a disposable local database in a separate task.
 
 ## Handoff Instructions
 

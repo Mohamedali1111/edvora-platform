@@ -81,6 +81,8 @@ pnpm --filter @edvora/api prisma:generate
 
 Prisma uses `apps/api/prisma.config.ts` and a safe placeholder database URL when `DATABASE_URL` is not set. No real database credentials should be committed.
 
+Migration SQL is reviewed before application. See `docs/MIGRATIONS.md` before creating or applying database migrations.
+
 Mobile store builds are not local root scripts. Future native development/custom builds should use Expo/EAS workflows after the app identity and build profiles are deliberately configured.
 
 ## Documentation
@@ -95,6 +97,7 @@ Start here:
 - `docs/RELEASE-COMPLIANCE.md`
 - `docs/RELIABILITY.md`
 - `docs/DATABASE-CONSTRAINTS.md`
+- `docs/MIGRATIONS.md`
 - `docs/DECISIONS.md`
 - `docs/STATUS.md`
 

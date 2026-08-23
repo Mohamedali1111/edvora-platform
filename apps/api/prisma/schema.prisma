@@ -476,7 +476,6 @@ model CourseSection {
   @@unique([id, tenantId], map: "course_sections_id_tenant_id_key")
   @@unique([id, courseId, tenantId], map: "course_sections_id_course_id_tenant_id_key")
   @@unique([courseId, position], map: "course_sections_course_id_position_key")
-  @@index([courseId, position], map: "course_sections_course_id_position_idx")
   @@map("course_sections")
 }
 
@@ -503,8 +502,8 @@ model Lesson {
   progress       LessonProgress[]
 
   @@unique([id, tenantId], map: "lessons_id_tenant_id_key")
+  @@unique([id, tenantId, courseId], map: "lessons_id_tenant_id_course_id_key")
   @@unique([sectionId, position], map: "lessons_section_id_position_key")
-  @@index([sectionId, position], map: "lessons_section_id_position_idx")
   @@index([courseId, status], map: "lessons_course_id_status_idx")
   @@map("lessons")
 }
@@ -655,7 +654,6 @@ model QuestionOption {
   question Question @relation(fields: [questionId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([questionId, position], map: "question_options_question_id_position_key")
-  @@index([questionId], map: "question_options_question_id_idx")
   @@map("question_options")
 }
 
@@ -681,7 +679,7 @@ model QuizAttempt {
   quiz       Quiz                @relation(fields: [quizId, tenantId], references: [id, tenantId], onDelete: Restrict)
   lesson     Lesson              @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
   student    User                @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
-  enrollment Enrollment          @relation(fields: [enrollmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  enrollment Enrollment          @relation(fields: [enrollmentId, tenantId, studentUserId], references: [id, tenantId, studentUserId], onDelete: Restrict)
   answers    QuizAttemptAnswer[]
 
   @@unique([id, tenantId], map: "quiz_attempts_id_tenant_id_key")
@@ -709,7 +707,6 @@ model QuizAttemptAnswer {
   question Question?   @relation(fields: [questionId], references: [id], onDelete: SetNull)
 
   @@unique([attemptId, questionId], map: "quiz_attempt_answers_attempt_id_question_id_key")
-  @@index([attemptId], map: "quiz_attempt_answers_attempt_id_idx")
   @@map("quiz_attempt_answers")
 }
 
@@ -735,6 +732,8 @@ model Enrollment {
   quizAttempts   QuizAttempt[]
 
   @@unique([id, tenantId], map: "enrollments_id_tenant_id_key")
+  @@unique([id, tenantId, studentUserId], map: "enrollments_id_tenant_id_student_user_id_key")
+  @@unique([id, tenantId, studentUserId, courseId], map: "enrollments_id_tenant_id_student_user_id_course_id_key")
   @@index([studentUserId, status], map: "enrollments_student_user_id_status_idx")
   @@index([tenantId, courseId, status], map: "enrollments_tenant_id_course_id_status_idx")
   @@index([studentUserId, courseId, status], map: "enrollments_student_user_id_course_id_status_idx")
@@ -758,9 +757,9 @@ model LessonProgress {
   createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  lesson     Lesson     @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lesson     Lesson     @relation(fields: [lessonId, tenantId, courseId], references: [id, tenantId, courseId], onDelete: Restrict)
   student    User       @relation(fields: [studentUserId], references: [id], onDelete: Restrict)
-  enrollment Enrollment @relation(fields: [enrollmentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  enrollment Enrollment @relation(fields: [enrollmentId, tenantId, studentUserId, courseId], references: [id, tenantId, studentUserId, courseId], onDelete: Restrict)
 
   @@unique([studentUserId, lessonId, enrollmentId], map: "lesson_progress_student_user_id_lesson_id_enrollment_id_key")
   @@index([studentUserId, courseId], map: "lesson_progress_student_user_id_course_id_idx")
