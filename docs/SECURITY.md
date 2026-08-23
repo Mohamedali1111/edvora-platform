@@ -26,6 +26,8 @@ The backend must own authentication and session handling. The future implementat
 - No secrets, passwords, refresh tokens, access tokens, or sensitive session material in logs.
 - Clear separation between authentication and authorization.
 
+The V1 authentication/session design is documented in `docs/AUTHENTICATION.md`. Authentication, authorization, and student device authorization are separate backend responsibilities and must not be collapsed into one JWT or client-side check.
+
 ## Authorization Requirements
 
 Authorization must verify role, tenant access, resource ownership, device authorization where applicable, and course entitlement before protected operations.

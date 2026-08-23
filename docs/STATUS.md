@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma/PostgreSQL runtime foundation completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, and V1 account onboarding decisions completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
 
 ## Completed Work
 
@@ -25,6 +25,9 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma
 - Validated the initial migration against a disposable PostgreSQL 16 database, including custom partial indexes, check constraints, tenant composite foreign keys, JSONB fields, and repeatable clean application.
 - Added the NestJS API database runtime boundary using Prisma 7, `@prisma/adapter-pg`, and `pg`.
 - Added API runtime configuration validation for `DATABASE_URL`, a safe `.env.example`, and focused database infrastructure unit tests.
+- Designed V1 authentication/session security in `docs/AUTHENTICATION.md`.
+- Finalized V1 managed account creation, account activation, password reset, access-token, and refresh-token decisions.
+- Planned required authentication persistence additions in `docs/AUTH-SCHEMA-PLAN.md`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -36,6 +39,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma
 - The API has a Nest-managed Prisma 7 runtime boundary using the official PostgreSQL adapter and one `pg` pool per API process.
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
+- V1 authentication design uses email/password, Argon2id password hashes, 10-minute HS256 JWT access tokens, opaque rotating refresh sessions, managed account creation, and purpose-specific activation/reset tokens.
 - Multi-tenant SaaS from the beginning.
 - Student device authorization defaults to one approved active device, with configurable architecture.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
@@ -61,6 +65,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma
 
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
+- Authentication/session behavior and V1 onboarding decisions are designed but not implemented.
+- Authentication persistence additions are planned but not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -73,8 +79,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma
 
 - Video/security provider selection after dedicated technical and cost evaluation.
 - Final visual branding, fonts, colors, and logo.
-- Authentication/session implementation details.
-- Final password hashing/session implementation details.
+- Final production auth hardening/tuning after implementation benchmarks and UX review.
 - Final legal/privacy retention policy for account deletion and security events.
 - App Store bundle identifiers and Android application IDs.
 - EAS build profiles and production build identity.
@@ -84,6 +89,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, and NestJS Prisma
 
 - Product feature implementation.
 - Authentication and authorization.
+- Authentication endpoints, guards, services, password hashing, token signing, cookies, activation tokens, password reset tokens, and rate limiting.
+- Prisma schema/migration additions for `AccountActivationToken` and `PasswordResetToken`.
 - Applying migrations to any persistent/shared database, seed data, and product database access logic.
 - Docker and infrastructure.
 - CI/CD.
@@ -158,9 +165,28 @@ Prisma/PostgreSQL runtime foundation validation passed:
 - Removed the disposable Edvora runtime-test container after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
 - Root `corepack pnpm check` and `git diff --check` passed.
 
+Authentication/security design validation passed:
+
+- Read `AGENTS.md`, relevant `docs/`, Prisma schema, and database runtime infrastructure.
+- Created `docs/AUTHENTICATION.md`.
+- Updated durable authentication decisions in `docs/DECISIONS.md`.
+- Updated this status file.
+- No dependencies, schema/migration changes, app source changes, `.env` files, or secrets were added.
+- Root `corepack pnpm check` and `git diff --check` passed.
+
+Authentication onboarding decision validation passed:
+
+- Read `AGENTS.md`, `docs/AUTHENTICATION.md`, product/security/domain/database docs, decision/status docs, and Prisma schema.
+- Added `docs/AUTH-SCHEMA-PLAN.md`.
+- Updated account creation, activation, reset, token, password, device, and MFA decisions in `docs/AUTHENTICATION.md`.
+- Updated durable decisions in `docs/DECISIONS.md`.
+- Updated this status file.
+- No dependencies, Prisma schema/migration changes, API source changes, web/mobile changes, `.env` files, or secrets were added.
+- Root `corepack pnpm check` and `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Design the first authentication/session implementation plan without creating product endpoints yet.
+Implement the planned Prisma schema additions for `AccountActivationToken` and `PasswordResetToken`, with reviewed migration SQL, before authentication service implementation.
 
 ## Handoff Instructions
 

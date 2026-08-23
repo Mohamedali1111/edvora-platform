@@ -249,3 +249,43 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Database access is provided through an explicit NestJS `DatabaseModule`, and migrations are not run automatically during API startup.
 - Reasoning: Explicit imports keep module dependencies visible, and separating schema deployment from application boot keeps releases reviewable and safer.
 - Implications: Feature modules that need database access must import the database module deliberately. Migration execution remains a deployment/release responsibility.
+
+## DEC-0032: Argon2id for Password Hashing
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Edvora V1 password authentication will use Argon2id for new password hashes.
+- Reasoning: Argon2id is a modern memory-hard password hashing algorithm recommended for new systems when the Node deployment environment supports it reliably.
+- Implications: Implementation must benchmark parameters before production, store only encoded hashes, support future parameter upgrades, and never store or log plaintext passwords.
+
+## DEC-0033: Short-Lived JWT Access Tokens and Opaque Refresh Tokens
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Edvora will use 10-minute HS256 signed JWT access tokens and long-lived opaque rotating refresh tokens stored only as server-side SHA-256 or equivalent cryptographic digests.
+- Reasoning: JWT access tokens are practical for API identity propagation when kept minimal and short-lived, while opaque refresh tokens provide clean server-side revocation and replay detection.
+- Implications: JWTs must not contain tenant memberships, course access, device secrets, or sensitive PII. The HS256 secret must have at least 256 bits of entropy and must never be committed. Refresh rotation must be transactional and replay-aware.
+
+## DEC-0034: Web Refresh Sessions Prefer HttpOnly Secure Cookies
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Instructor/Admin web refresh session material should use HttpOnly Secure cookies where deployment topology allows it.
+- Reasoning: Long-lived refresh tokens should not be exposed to browser JavaScript when a cookie-based approach is practical.
+- Implications: Web auth implementation must include SameSite/CSRF/origin protections and must still treat XSS as a serious threat.
+
+## DEC-0035: Managed V1 Account Creation and Activation
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: V1 has no public Instructor or Student self-registration. Platform Admin initiates Instructor activation, and Instructor or Platform Admin workflows invite/create students through tenant/course operations.
+- Reasoning: Edvora V1 is an instructor SaaS with external instructor billing and controlled student access, not a public marketplace or self-serve student platform.
+- Implications: Admins and instructors must never set permanent user passwords. New users set their own passwords through purpose-bound single-use activation tokens.
+
+## DEC-0036: Purpose-Specific One-Time Auth Tokens
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Account activation and password reset require explicit purpose-specific token entities rather than overloading `RefreshSession`.
+- Reasoning: Activation, reset, and refresh sessions have different purposes, actors, expiry, consumption, revocation, and audit semantics.
+- Implications: Add planned `AccountActivationToken` and `PasswordResetToken` persistence before implementing activation/reset flows.
