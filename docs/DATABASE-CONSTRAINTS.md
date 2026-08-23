@@ -48,10 +48,26 @@ The Prisma schema is the application model source of truth, but production integ
 ## Check Constraints
 
 - Invariant: Numeric and lifecycle fields should remain valid.
-- Current migration status: Implemented for stable mathematical/date invariants including non-negative positions, points, durations, file sizes, progress seconds, quiz score bounds, quiz attempt sequence, and simple date ordering.
+- Current migration status: Implemented for stable mathematical/date invariants including non-negative positions, points, durations, file sizes, progress seconds, quiz score bounds, quiz attempt sequence, simple date ordering, and auth-token timestamp ordering.
 - Intended PostgreSQL concept: Check constraints for non-negative positions, points, durations, progress seconds, valid score percentages, and date ranges such as `starts_at <= ends_at`.
 - Prisma limitation: Prisma schema does not cover these PostgreSQL checks comprehensively.
 - Remaining work: Business-state transitions, reveal policy, completion semantics, and status/timestamp consistency remain application-controlled.
+
+## Auth One-Time Token Timestamp Integrity
+
+- Invariant: Account activation and password reset tokens must expire after creation, and consumed/revoked timestamps must not precede creation.
+- Current migration status: Implemented in `20260823010000_add_auth_security_tokens` with PostgreSQL CHECK constraints on `account_activation_tokens` and `password_reset_tokens`.
+- Intended PostgreSQL concept: Stable timestamp-ordering CHECK constraints.
+- Prisma limitation: Prisma schema cannot express CHECK constraints.
+- Remaining work: Token generation, hashing, single-use consumption, issuing a replacement token, and revoking older outstanding tokens must be implemented in transactional application logic. No time-dependent partial indexes using `NOW()` are used.
+
+## Auth One-Time Outstanding Token Policy
+
+- Invariant: Product workflows may choose to keep at most one outstanding activation or reset token per user by revoking older unconsumed tokens when a new token is issued.
+- Current migration status: Application-enforced, not a database partial unique index.
+- Intended PostgreSQL concept: Avoid volatile time-dependent predicates such as `expires_at > now()` in partial indexes.
+- Prisma limitation: Prisma cannot express partial unique indexes, and a status-only partial index would not account for expiry without lifecycle updates.
+- Remaining work: Issuance flows must transactionally revoke prior unconsumed/unrevoked tokens before creating a replacement if the workflow requires only one outstanding token.
 
 ## Lesson Detail Consistency
 

@@ -39,6 +39,13 @@ enum CredentialType {
   @@map("credential_type")
 }
 
+enum AccountActivationPurpose {
+  INSTRUCTOR_ACTIVATION
+  STUDENT_ACTIVATION
+
+  @@map("account_activation_purpose")
+}
+
 enum RefreshSessionStatus {
   ACTIVE
   REVOKED
@@ -263,23 +270,27 @@ model User {
 
   authCredentials              AuthCredential[]
   refreshSessions              RefreshSession[]
+  accountActivationTokens      AccountActivationToken[] @relation("AccountActivationTokenUser")
+  initiatedActivationTokens    AccountActivationToken[] @relation("AccountActivationTokenInitiator")
+  passwordResetTokens          PasswordResetToken[]     @relation("PasswordResetTokenUser")
+  initiatedPasswordResetTokens PasswordResetToken[]     @relation("PasswordResetTokenInitiator")
   studentProfile               StudentProfile?
   instructorProfile            InstructorProfile?
   tenantMemberships            TenantMembership[]
   studentDevices               StudentDevice[]
-  deviceChangeRequests         DeviceChangeRequest[] @relation("DeviceChangeRequestStudent")
-  reviewedDeviceChangeRequests DeviceChangeRequest[] @relation("DeviceChangeRequestReviewer")
-  createdCourses               Course[]              @relation("CourseCreator")
-  uploadedVideoAssets          VideoAsset[]          @relation("VideoAssetUploader")
-  uploadedDocumentAssets       DocumentAsset[]       @relation("DocumentAssetUploader")
-  enrollmentsReceived          Enrollment[]          @relation("EnrollmentStudent")
-  enrollmentsGranted           Enrollment[]          @relation("EnrollmentGrantedBy")
-  enrollmentsRevoked           Enrollment[]          @relation("EnrollmentRevokedBy")
+  deviceChangeRequests         DeviceChangeRequest[]    @relation("DeviceChangeRequestStudent")
+  reviewedDeviceChangeRequests DeviceChangeRequest[]    @relation("DeviceChangeRequestReviewer")
+  createdCourses               Course[]                 @relation("CourseCreator")
+  uploadedVideoAssets          VideoAsset[]             @relation("VideoAssetUploader")
+  uploadedDocumentAssets       DocumentAsset[]          @relation("DocumentAssetUploader")
+  enrollmentsReceived          Enrollment[]             @relation("EnrollmentStudent")
+  enrollmentsGranted           Enrollment[]             @relation("EnrollmentGrantedBy")
+  enrollmentsRevoked           Enrollment[]             @relation("EnrollmentRevokedBy")
   lessonProgress               LessonProgress[]
   quizAttempts                 QuizAttempt[]
   notifications                Notification[]
-  securityEventsAsActor        SecurityEvent[]       @relation("SecurityEventActor")
-  securityEventsAsTarget       SecurityEvent[]       @relation("SecurityEventTarget")
+  securityEventsAsActor        SecurityEvent[]          @relation("SecurityEventActor")
+  securityEventsAsTarget       SecurityEvent[]          @relation("SecurityEventTarget")
 
   @@index([platformRole, accountStatus], map: "users_platform_role_account_status_idx")
   @@map("users")
@@ -351,16 +362,58 @@ model Tenant {
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  memberships    TenantMembership[]
-  courses        Course[]
-  videoAssets    VideoAsset[]
-  documentAssets DocumentAsset[]
-  quizzes        Quiz[]
-  notifications  Notification[]
-  securityEvents SecurityEvent[]
+  memberships      TenantMembership[]
+  courses          Course[]
+  videoAssets      VideoAsset[]
+  documentAssets   DocumentAsset[]
+  quizzes          Quiz[]
+  activationTokens AccountActivationToken[]
+  notifications    Notification[]
+  securityEvents   SecurityEvent[]
 
   @@index([status], map: "tenants_status_idx")
   @@map("tenants")
+}
+
+model AccountActivationToken {
+  id                String                   @id @db.Uuid
+  userId            String                   @map("user_id") @db.Uuid
+  tokenHash         String                   @unique(map: "account_activation_tokens_token_hash_key") @map("token_hash") @db.Char(64)
+  purpose           AccountActivationPurpose
+  tenantId          String?                  @map("tenant_id") @db.Uuid
+  initiatedByUserId String?                  @map("initiated_by_user_id") @db.Uuid
+  expiresAt         DateTime                 @map("expires_at") @db.Timestamptz(6)
+  consumedAt        DateTime?                @map("consumed_at") @db.Timestamptz(6)
+  revokedAt         DateTime?                @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user        User    @relation("AccountActivationTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  initiatedBy User?   @relation("AccountActivationTokenInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, consumedAt, revokedAt, expiresAt], map: "account_activation_tokens_outstanding_lookup_idx")
+  @@index([tenantId, createdAt], map: "account_activation_tokens_tenant_id_created_at_idx")
+  @@index([initiatedByUserId, createdAt], map: "account_activation_tokens_initiated_by_user_id_created_at_idx")
+  @@map("account_activation_tokens")
+}
+
+model PasswordResetToken {
+  id                String    @id @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  tokenHash         String    @unique(map: "password_reset_tokens_token_hash_key") @map("token_hash") @db.Char(64)
+  initiatedByUserId String?   @map("initiated_by_user_id") @db.Uuid
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt        DateTime? @map("consumed_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user        User  @relation("PasswordResetTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  initiatedBy User? @relation("PasswordResetTokenInitiator", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, consumedAt, revokedAt, expiresAt], map: "password_reset_tokens_outstanding_lookup_idx")
+  @@index([createdAt], map: "password_reset_tokens_created_at_idx")
+  @@index([initiatedByUserId, createdAt], map: "password_reset_tokens_initiated_by_user_id_created_at_idx")
+  @@map("password_reset_tokens")
 }
 
 model TenantMembership {

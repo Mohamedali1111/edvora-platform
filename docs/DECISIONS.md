@@ -289,3 +289,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Account activation and password reset require explicit purpose-specific token entities rather than overloading `RefreshSession`.
 - Reasoning: Activation, reset, and refresh sessions have different purposes, actors, expiry, consumption, revocation, and audit semantics.
 - Implications: Add planned `AccountActivationToken` and `PasswordResetToken` persistence before implementing activation/reset flows.
+
+## DEC-0037: Auth One-Time Token Hash Storage
+
+- Date: 2026-08-23
+- Status: Accepted
+- Decision: Account activation and password reset token tables store only lowercase hexadecimal SHA-256 token digests in `CHAR(64)` columns with unique token-hash indexes.
+- Reasoning: Activation/reset tokens are machine-generated high-entropy values, so a fast cryptographic digest is appropriate for lookup while avoiding raw-token persistence. Hex text keeps Prisma/PostgreSQL handling simple and portable.
+- Implications: Future application code must generate at least 256 bits of token entropy, persist only the canonical digest, avoid logging raw tokens or hashes, and perform issuance/consumption in transactions.

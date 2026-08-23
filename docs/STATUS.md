@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, and V1 account onboarding decisions completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, and auth one-time token persistence completed. The repository has minimal framework foundations for API, web, and mobile, with no product features or product domain repositories.
 
 ## Completed Work
 
@@ -27,7 +27,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/Pos
 - Added API runtime configuration validation for `DATABASE_URL`, a safe `.env.example`, and focused database infrastructure unit tests.
 - Designed V1 authentication/session security in `docs/AUTHENTICATION.md`.
 - Finalized V1 managed account creation, account activation, password reset, access-token, and refresh-token decisions.
-- Planned required authentication persistence additions in `docs/AUTH-SCHEMA-PLAN.md`.
+- Implemented required authentication persistence additions for `AccountActivationToken` and `PasswordResetToken`.
+- Added the reviewed additive migration `20260823010000_add_auth_security_tokens` and validated it against disposable PostgreSQL 16 after the initial migration.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -40,6 +41,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/Pos
 - Backend domain/database design covers canonical users, tenant memberships, enrollments, devices, content, quizzes, progress, notifications, security events, deletion lifecycle, UUIDv7-compatible IDs, and concurrency-sensitive operations.
 - V1 roles: `STUDENT`, `INSTRUCTOR`, `PLATFORM_ADMIN`.
 - V1 authentication design uses email/password, Argon2id password hashes, 10-minute HS256 JWT access tokens, opaque rotating refresh sessions, managed account creation, and purpose-specific activation/reset tokens.
+- Auth one-time token persistence stores only lowercase 64-character SHA-256 hex token hashes; raw activation/reset tokens must never be persisted.
 - Multi-tenant SaaS from the beginning.
 - Student device authorization defaults to one approved active device, with configurable architecture.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
@@ -66,7 +68,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/Pos
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
 - Authentication/session behavior and V1 onboarding decisions are designed but not implemented.
-- Authentication persistence additions are planned but not implemented.
+- Authentication one-time token persistence exists, but token generation, hashing, consumption, delivery, endpoints, guards, and services are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -90,7 +92,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifact, NestJS Prisma/Pos
 - Product feature implementation.
 - Authentication and authorization.
 - Authentication endpoints, guards, services, password hashing, token signing, cookies, activation tokens, password reset tokens, and rate limiting.
-- Prisma schema/migration additions for `AccountActivationToken` and `PasswordResetToken`.
+- Auth application logic for creating, revoking, consuming, and cleaning up activation/reset tokens.
 - Applying migrations to any persistent/shared database, seed data, and product database access logic.
 - Docker and infrastructure.
 - CI/CD.
@@ -184,9 +186,20 @@ Authentication onboarding decision validation passed:
 - No dependencies, Prisma schema/migration changes, API source changes, web/mobile changes, `.env` files, or secrets were added.
 - Root `corepack pnpm check` and `git diff --check` passed.
 
+Auth token persistence validation passed:
+
+- Added `AccountActivationToken`, `PasswordResetToken`, and `AccountActivationPurpose` to the Prisma schema.
+- Generated additive migration `20260823010000_add_auth_security_tokens` without editing the approved initial migration.
+- Added PostgreSQL CHECK constraints for auth-token timestamp ordering.
+- Applied the initial migration and auth-token migration sequentially to an isolated disposable PostgreSQL 16 container.
+- Verified auth-token tables, enum, indexes, foreign keys, CHECK constraints, and representative behavior with synthetic data.
+- Confirmed duplicate token hashes fail, historical consumed tokens remain representable, nullable initiating actor works, and target user deletion cleans up short-lived token rows while initiating actor deletion sets references to null.
+- Removed the disposable Edvora PostgreSQL container after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
+- Prisma format, validate, generate, API lint/typecheck/tests/build, root `corepack pnpm check`, and `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Implement the planned Prisma schema additions for `AccountActivationToken` and `PasswordResetToken`, with reviewed migration SQL, before authentication service implementation.
+Design the authentication implementation plan for account activation and password reset services without creating public endpoints yet.
 
 ## Handoff Instructions
 

@@ -59,6 +59,7 @@ Activation token requirements:
 - Minimum 256 bits of entropy.
 - Transport-safe representation such as base64url.
 - Store only a SHA-256 or equivalent cryptographic digest of the token server-side.
+- Store the digest in the canonical lowercase hexadecimal SHA-256 format: exactly 64 characters.
 - Purpose-bound to account activation.
 - Short operational expiry, initially 7 days unless product/support needs a shorter value.
 - Single use with explicit consumed timestamp/state.
@@ -460,7 +461,7 @@ request reset
 
 Do not overload `RefreshSession` for password reset tokens.
 
-The current schema does not include a password reset token model. Before implementation, add a dedicated reviewed model such as `PasswordResetToken` with user reference, token hash, expiry, consumed timestamp, created timestamp, and request metadata limits.
+The schema includes a dedicated `PasswordResetToken` persistence model with user reference, token hash, expiry, consumed timestamp, revocation timestamp, created timestamp, and optional initiating actor reference. Password reset implementation must still generate, hash, consume, and revoke tokens transactionally.
 
 No email provider is selected yet. Reset delivery is deferred.
 
@@ -625,7 +626,7 @@ Before implementing activation or password reset, add reviewed persistence for:
 - `AccountActivationToken`
 - `PasswordResetToken`
 
-See `docs/AUTH-SCHEMA-PLAN.md` for the proposed fields, constraints, indexes, lifecycle, and migration considerations.
+These persistence models are implemented, but no auth code or delivery flow exists yet. See `docs/AUTH-SCHEMA-PLAN.md` for fields, constraints, indexes, lifecycle, and remaining application responsibilities.
 
 ## References
 

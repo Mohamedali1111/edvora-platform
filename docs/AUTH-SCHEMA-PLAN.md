@@ -1,6 +1,8 @@
 # Authentication Schema Plan
 
-This document describes the minimum persistence additions needed before implementing Edvora V1 authentication flows. It is a schema plan only; Prisma schema, migrations, services, controllers, and delivery integrations are not implemented yet.
+This document describes the minimum persistence additions needed before implementing Edvora V1 authentication flows.
+
+Persistence status: `AccountActivationToken` and `PasswordResetToken` are implemented in the Prisma schema and the additive migration `20260823010000_add_auth_security_tokens`. Services, controllers, delivery integrations, token generation, hashing code, and auth flows are not implemented yet.
 
 ## Why Add Tables
 
@@ -10,6 +12,12 @@ Use explicit purpose-specific entities for clarity and safer review:
 
 - `AccountActivationToken`
 - `PasswordResetToken`
+
+Token hash format:
+
+- Future application code must hash raw activation/reset tokens with SHA-256 or an equivalent approved cryptographic digest.
+- The canonical stored representation is lowercase hexadecimal SHA-256, exactly 64 characters, stored in PostgreSQL as `CHAR(64)`.
+- Raw tokens must never be persisted or logged.
 
 ## AccountActivationToken
 
@@ -32,9 +40,11 @@ Fields:
 Constraints and indexes:
 
 - Unique `tokenHash`.
-- Index `(userId, consumedAt, expiresAt)` for finding pending activation state.
+- Index `(userId, consumedAt, revokedAt, expiresAt)` for finding outstanding activation state.
 - Index `(tenantId, createdAt)` for tenant/admin review if needed.
-- Optional partial unique index to allow at most one unconsumed, unrevoked activation token per user if product workflow requires it.
+- Index `(initiatedByUserId, createdAt)` for support/admin investigation.
+- No database-level "one outstanding token per user" invariant yet. Issuing a new activation token must transactionally revoke older outstanding activation tokens when the product workflow requires that behavior.
+- Migration SQL adds stable timestamp checks: `expiresAt > createdAt`, `consumedAt >= createdAt` when present, and `revokedAt >= createdAt` when present.
 
 Lifecycle:
 
@@ -63,9 +73,11 @@ Fields:
 Constraints and indexes:
 
 - Unique `tokenHash`.
-- Index `(userId, consumedAt, expiresAt)` for active reset lookup.
+- Index `(userId, consumedAt, revokedAt, expiresAt)` for outstanding reset lookup.
 - Index `(createdAt)` for retention cleanup.
-- Optional partial unique index to allow at most one unconsumed, unrevoked reset token per user if support workflow requires it.
+- Index `(initiatedByUserId, createdAt)` for support/admin investigation.
+- No database-level "one outstanding token per user" invariant yet. Issuing a new reset token must transactionally revoke older outstanding reset tokens when the product workflow requires that behavior.
+- Migration SQL adds stable timestamp checks: `expiresAt > createdAt`, `consumedAt >= createdAt` when present, and `revokedAt >= createdAt` when present.
 
 Lifecycle:
 
@@ -82,6 +94,7 @@ Lifecycle:
 - Use `timestamptz` for all timestamps.
 - Use `Restrict` or `SetNull` intentionally; do not cascade-delete security evidence blindly.
 - Add partial indexes/check constraints only in reviewed SQL migrations if Prisma cannot express them accurately.
+- The auth-token migration is additive and does not modify the approved initial migration.
 - Do not add email-provider fields until a provider/delivery workflow is selected.
 
 ## Deferred

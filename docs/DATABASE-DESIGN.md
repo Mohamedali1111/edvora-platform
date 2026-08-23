@@ -80,6 +80,38 @@ Fields:
 
 Store token hashes, not raw tokens.
 
+#### AccountActivationToken
+
+Single-use account activation token persistence.
+
+Fields:
+
+- `id`
+- `userId`
+- `tokenHash`: lowercase hexadecimal SHA-256 digest, exactly 64 characters
+- `purpose`: `INSTRUCTOR_ACTIVATION` or `STUDENT_ACTIVATION`
+- `tenantId` nullable for tenant-initiated onboarding context
+- `initiatedByUserId` nullable for Platform Admin/Instructor/support actor context
+- `expiresAt`, `consumedAt`, `revokedAt`
+- `createdAt`
+
+Store only token hashes, never raw activation tokens. Issuing a replacement activation token should transactionally revoke older outstanding tokens when the workflow requires one outstanding token per user.
+
+#### PasswordResetToken
+
+Single-use password reset token persistence.
+
+Fields:
+
+- `id`
+- `userId`
+- `tokenHash`: lowercase hexadecimal SHA-256 digest, exactly 64 characters
+- `initiatedByUserId` nullable for Platform Admin/support actor context
+- `expiresAt`, `consumedAt`, `revokedAt`
+- `createdAt`
+
+Store only token hashes, never raw reset tokens. Consuming a reset token, updating credentials, revoking refresh sessions, and recording a security event must be transactional.
+
 #### StudentProfile
 
 Fields:
