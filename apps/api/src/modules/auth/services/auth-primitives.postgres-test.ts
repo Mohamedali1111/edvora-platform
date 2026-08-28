@@ -109,8 +109,10 @@ maybeDescribe('auth primitives PostgreSQL integration', () => {
       skipDuplicates: true,
     });
 
-    await prismaService.client.tenant.create({
-      data: {
+    await prismaService.client.tenant.upsert({
+      where: { id: tenantId },
+      update: {},
+      create: {
         id: tenantId,
         name: 'Auth Test Tenant',
         slug: 'auth-test-tenant',

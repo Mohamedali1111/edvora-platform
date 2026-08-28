@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, and internal auth use-case orchestration completed. The repository has minimal framework foundations for API, web, and mobile, with no public product features or product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, and the first public auth HTTP boundary completed. The repository has minimal framework foundations for API, web, and mobile, with no product domain repositories.
 
 ## Completed Work
 
@@ -31,6 +31,9 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Added the reviewed additive migration `20260823010000_add_auth_security_tokens` and validated it against disposable PostgreSQL 16 after the initial migration.
 - Implemented internal authentication/security primitives for password hashing, JWT access tokens, opaque refresh tokens, refresh-session rotation/revocation, account activation tokens, and password reset tokens.
 - Implemented internal authentication use-case orchestration for login, account activation, refresh, logout, logout-all, authenticated password change, and password-reset completion.
+- Implemented public auth HTTP routes for login, refresh, logout, logout-all, activation completion, authenticated password change, and password-reset completion.
+- Added auth DTO validation, stable auth error mapping, Bearer access-token guard, typed authenticated principal decorator, web refresh cookies, trusted-origin checks, no-store token responses, and initial in-process auth throttling.
+- Documented the auth HTTP route contract in `docs/AUTH-HTTP-API.md`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -45,7 +48,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - V1 authentication design uses email/password, Argon2id password hashes, 10-minute HS256 JWT access tokens, opaque rotating refresh sessions, managed account creation, and purpose-specific activation/reset tokens.
 - Auth one-time token persistence stores only lowercase 64-character SHA-256 hex token hashes; raw activation/reset tokens must never be persisted.
 - Internal auth primitives use `argon2`, `@nestjs/jwt`, Node `crypto`, and application-generated UUIDv7 IDs. Refresh rotation is transaction-safe and requires both refresh session ID and opaque token.
-- Internal auth orchestration composes the primitives for identity/session use cases without exposing HTTP endpoints. Web refresh sessions default to 10 hours; mobile refresh sessions default to 30 days.
+- Internal auth orchestration composes the primitives for identity/session use cases. Web refresh sessions default to 10 hours; mobile refresh sessions default to 30 days.
+- Public auth HTTP transport exposes `/auth/*` routes. Web refresh tokens are cookie-only, mobile refresh tokens use explicit body transport, and protected auth routes use Bearer access tokens.
 - Multi-tenant SaaS from the beginning.
 - Student device authorization defaults to one approved active device, with configurable architecture.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
@@ -71,8 +75,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
-- Authentication/session behavior and V1 onboarding decisions are designed; internal primitives and orchestration services exist, but no public auth endpoints or guards exist yet.
-- Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, and password-reset completion exist. Delivery, HTTP transport, cookies, mobile storage, device binding, tenant authorization, and rate limiting are not implemented.
+- Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, and public auth HTTP transport exist.
+- Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, password-reset completion, HTTP DTO validation, auth route throttling, Bearer guard, web refresh cookies, and trusted-origin checks exist. Delivery, mobile storage, device binding, tenant authorization, and distributed rate limiting are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -93,9 +97,10 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 ## Intentionally Deferred Work
 
-- Product feature implementation.
-- Authentication and authorization.
-- Public authentication endpoints, guards, cookies, activation/reset delivery flows, password reset request flow, and rate limiting.
+- Product domain feature implementation.
+- Tenant/course authorization and device authorization.
+- Activation/reset delivery flows and password reset request flow.
+- Distributed rate limiting.
 - Cleanup jobs for expired/consumed activation/reset tokens.
 - Applying migrations to any persistent/shared database, seed data, and product database access logic.
 - Docker and infrastructure.
@@ -223,9 +228,20 @@ Internal auth orchestration validation passed:
 - Removed the disposable Edvora PostgreSQL container after validation; the unrelated `mini-inventory-system-db-1` container was not modified.
 - Prisma format, validate, generate, API lint/typecheck/tests/build, opt-in auth PostgreSQL tests, root `corepack pnpm check`, and `git diff --check` passed.
 
+Public auth HTTP boundary validation passed:
+
+- Added public auth HTTP controllers/routes for login, refresh, logout, logout-all, activation completion, authenticated password change, and password-reset completion.
+- Added DTO validation, stable auth HTTP error mapping, Bearer access-token guard, typed authenticated principal helper, web refresh cookies, trusted-origin checks, no-store token responses, credentialed CORS configuration, and in-process auth throttling.
+- API Prisma format, validate, and generate passed.
+- API lint, typecheck, default unit/controller tests, and build passed.
+- Ran the opt-in PostgreSQL auth integration suite against disposable PostgreSQL 16.13 after applying the initial and auth-token migrations. The suite includes the real Nest HTTP boundary and validates mobile and web auth transport paths, refresh rotation/replay behavior, activation, password reset completion, logout, and the device-authorization non-implementation boundary.
+- Root `corepack pnpm check` passed.
+- `git diff --check` passed.
+- The disposable Edvora PostgreSQL container was removed after validation. The unrelated `mini-inventory-system-db-1` database was not touched.
+
 ## Exact Recommended Next Step
 
-Implement public authentication HTTP controllers/routes for login, refresh, logout, activation completion, password change, and password-reset completion using the existing internal orchestration services.
+Implement the student device authorization backend boundary so protected student resources can distinguish authenticated identity from approved-device access.
 
 ## Handoff Instructions
 

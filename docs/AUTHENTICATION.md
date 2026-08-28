@@ -1,6 +1,6 @@
 # Authentication
 
-This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, password-reset-token, and authentication use-case orchestration services are implemented in the API. No public endpoints, guards, controllers, cookies, mobile storage, email delivery, or device binding are implemented yet.
+This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, password-reset-token, authentication use-case orchestration services, and the first public REST authentication boundary are implemented in the API. Mobile storage, email delivery, tenant authorization, course authorization, and device binding are not implemented yet.
 
 ## Scope
 
@@ -75,6 +75,7 @@ Completing activation lets the intended user set their own password. It should n
 Implementation status:
 
 - Internal activation completion orchestration is implemented.
+- Public `POST /auth/activate` transport is implemented.
 - Activation consumes the single-use token and creates the initial password credential inside one transaction.
 - Activation does not mark email as verified.
 - Activation does not create a logged-in session or authorize any student device.
@@ -154,7 +155,7 @@ Implementation status:
 
 - The internal API password service uses `argon2@0.45.1` with Argon2id, memory cost 19 MiB, time cost 2, and parallelism 1.
 - Password policy validation is implemented for internal callers: minimum 12 characters, maximum 128 characters, no silent truncation, and no composition rules.
-- Internal login, activation, password-change, and password-reset completion orchestration exists. Public HTTP endpoints do not exist yet.
+- Internal login, activation, password-change, and password-reset completion orchestration exists. Public HTTP endpoints for these flows now exist.
 
 Future pepper:
 
@@ -232,6 +233,7 @@ Implementation status:
 
 - The internal API access-token service signs and verifies HS256 JWTs through `@nestjs/jwt@11.0.2`.
 - Verification explicitly restricts accepted algorithms to HS256 and validates issuer, audience, expiration, and minimal claims.
+- Public protected auth routes use `Authorization: Bearer <access-token>` through the `AccessTokenGuard`.
 - Token signing configuration comes from `AUTH_JWT_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, and optional `AUTH_ACCESS_TOKEN_TTL_SECONDS`.
 - `AUTH_JWT_SECRET` is required at runtime and must be at least 32 bytes; examples remain placeholders only.
 
@@ -325,8 +327,9 @@ Do not let both refresh attempts create indefinitely valid token chains.
 Implementation status:
 
 - Refresh-token generation, hashing, session creation, session rotation, current-session revocation, and all-session revocation are implemented as internal API services.
-- Internal refresh, logout-current, and logout-all orchestration exists. Public `/refresh` or `/logout` endpoints do not exist yet.
-- Future refresh callers must pass the refresh session ID together with the opaque refresh token. The raw refresh token remains opaque and does not carry authorization state.
+- Public `POST /auth/refresh`, `POST /auth/logout`, and `POST /auth/logout-all` transport is implemented.
+- Refresh callers must provide the refresh session ID together with the opaque refresh token. Mobile sends them explicitly. Web sends them through auth cookies.
+- The raw refresh token remains opaque and does not carry authorization state.
 - Rotation uses a transactional conditional update on `sessionId`, active status, unrevoked state, expiry, and current token hash.
 - For near-simultaneous duplicate refresh attempts, one request can rotate successfully and the duplicate is rejected without issuing another chain.
 - A stale mismatched token outside the short retry grace window revokes the session and raises replay detection.
@@ -419,8 +422,11 @@ Recommended shape:
 CSRF:
 
 - Cookie-based refresh/logout/password-change endpoints require CSRF protection.
-- Use SameSite where possible, plus origin checks and a CSRF token pattern for state-changing cookie-authenticated requests.
+- Use SameSite where possible plus trusted-origin checks for cookie-backed web auth requests.
+- Add a double-submit or server-issued CSRF token pattern later only if deployment topology or browser behavior requires more than the V1 origin-check boundary.
 - CORS must be explicit and restrictive.
+- The implemented HTTP boundary uses trusted `Origin` validation for web-channel or web-cookie authentication requests.
+- Credentialed CORS is limited to configured trusted web origins and must not use wildcard origins.
 
 XSS:
 
@@ -436,6 +442,7 @@ Student mobile:
 - Refresh token: platform secure storage/keychain/keystore.
 - Do not store refresh tokens in AsyncStorage, plain files, logs, crash reports, or analytics.
 - Do not print tokens during debugging.
+- The implemented mobile refresh HTTP transport sends refresh token material explicitly in the request/response body. It does not depend on cookies.
 
 The exact Expo/React Native secure-storage library is deferred until implementation. The architecture must remain compatible with Expo development/custom builds and future native security plugins.
 
@@ -629,21 +636,34 @@ Device authorization later:
 10. User enumeration through email guessing: generic login/reset responses and careful account-status messaging.
 11. Password reset token is stolen: short expiry, hashed storage, single use, session revocation on completion.
 12. Web page has XSS: HttpOnly refresh cookie reduces token theft, but XSS remains serious; CSP/frontend hardening required later.
-13. CSRF attempt against web session: SameSite, origin checks, and CSRF token pattern for cookie-authenticated state changes.
+13. CSRF attempt against web session: SameSite cookies and trusted-origin checks protect V1 cookie-backed web auth requests; a CSRF token pattern can be added later if deployment needs it.
 14. Mobile device is lost: logout-all/session revocation helps; device revocation/change workflow is separate and required for protected content.
 15. Student logs out and logs back in on same approved device: session changes, device remains approved unless explicitly revoked.
+
+## Public HTTP Boundary
+
+The public auth route contract is documented in `docs/AUTH-HTTP-API.md`.
+
+Implemented routes:
+
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/logout-all`
+- `POST /auth/activate`
+- `POST /auth/password/change`
+- `POST /auth/password/reset/complete`
+
+The route layer adds DTO validation, stable auth error mapping, Bearer access-token authentication for protected auth routes, web refresh cookies, trusted-origin checks for web cookie/channel requests, no-store token responses, and initial in-process throttling.
 
 ## Deferred Controls
 
 Deferred until implementation or later reviewed tasks:
 
-- Installing cookie/CSRF/frontend security transport libraries.
-- Public auth controllers, route guards, DTOs, decorators, and orchestration services.
 - Email provider and email verification workflow.
 - MFA.
 - Redis/distributed rate limiting.
 - Device binding implementation.
-- Web CSRF implementation.
 - Mobile secure-storage library selection.
 - Production key-management service.
 
@@ -656,7 +676,7 @@ Implemented persistence exists for:
 - `AccountActivationToken`
 - `PasswordResetToken`
 
-Internal issuance/consumption primitives for these persistence models are implemented, but no public auth code or delivery flow exists yet. See `docs/AUTH-SCHEMA-PLAN.md` for fields, constraints, indexes, lifecycle, and remaining application responsibilities.
+Internal issuance/consumption primitives for these persistence models and public activation/reset-completion HTTP transport are implemented, but no activation/reset request or delivery flow exists yet. See `docs/AUTH-SCHEMA-PLAN.md` for fields, constraints, indexes, lifecycle, and remaining application responsibilities.
 
 ## References
 

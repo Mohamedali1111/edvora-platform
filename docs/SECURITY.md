@@ -28,6 +28,10 @@ The backend must own authentication and session handling. The future implementat
 
 The V1 authentication/session design is documented in `docs/AUTHENTICATION.md`. Authentication, authorization, and student device authorization are separate backend responsibilities and must not be collapsed into one JWT or client-side check.
 
+The API now exposes the first public authentication HTTP boundary. Web refresh material is transported through HttpOnly cookies, mobile refresh material is explicit request/response body data, and protected auth routes use Bearer access tokens. Cookie-backed web auth requests use trusted-origin checks plus SameSite cookies; future cross-site deployment would require revisiting cookie, CORS, and CSRF configuration together.
+
+Token-bearing auth responses must use `Cache-Control: no-store`. Public auth errors must not expose Prisma, JWT, Argon2, token-hash, credential-hash, or database constraint details.
+
 ## Authorization Requirements
 
 Authorization must verify role, tenant access, resource ownership, device authorization where applicable, and course entitlement before protected operations.

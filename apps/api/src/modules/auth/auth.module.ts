@@ -1,8 +1,15 @@
 import { Module } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
+import { AuthController } from './auth.controller';
 import { createAuthRuntimeConfig } from './auth.config';
 import { AUTH_RUNTIME_CONFIG } from './auth.constants';
+import { createAuthHttpConfig } from './http/auth-http.config';
+import { AUTH_HTTP_CONFIG } from './http/auth-http.constants';
+import { AuthCookieService } from './http/auth-cookie.service';
+import { AccessTokenGuard } from './http/access-token.guard';
+import { TrustedOriginGuard } from './http/trusted-origin.guard';
 import { AccountActivationTokenService } from './services/account-activation-token.service';
 import { AccessTokenService } from './services/access-token.service';
 import { AuthOrchestrationService } from './services/auth-orchestration.service';
@@ -15,14 +22,30 @@ import { TokenCryptoService } from './services/token-crypto.service';
 import { UuidV7Service } from './services/uuid-v7.service';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [
+    DatabaseModule,
+    ThrottlerModule.forRoot([
+      {
+        name: 'auth',
+        ttl: 60_000,
+        limit: 60,
+      },
+    ]),
+  ],
+  controllers: [AuthController],
   providers: [
     {
       provide: AUTH_RUNTIME_CONFIG,
       useFactory: createAuthRuntimeConfig,
     },
+    {
+      provide: AUTH_HTTP_CONFIG,
+      useFactory: createAuthHttpConfig,
+    },
     AccountActivationTokenService,
+    AccessTokenGuard,
     AuthOrchestrationService,
+    AuthCookieService,
     JwtService,
     AccessTokenService,
     ClockService,
@@ -30,6 +53,7 @@ import { UuidV7Service } from './services/uuid-v7.service';
     PasswordResetTokenService,
     RefreshSessionService,
     SecurityEventService,
+    TrustedOriginGuard,
     TokenCryptoService,
     UuidV7Service,
   ],
@@ -43,6 +67,7 @@ import { UuidV7Service } from './services/uuid-v7.service';
     RefreshSessionService,
     SecurityEventService,
     TokenCryptoService,
+    AuthCookieService,
     UuidV7Service,
   ],
 })

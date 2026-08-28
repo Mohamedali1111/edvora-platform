@@ -312,4 +312,28 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Status: Accepted
 - Decision: Login, account activation, refresh, logout, logout-all, password change, and password-reset completion are implemented first as internal NestJS orchestration services, with public HTTP controllers, guards, cookies, CSRF handling, and client storage deferred.
 - Reasoning: Keeping orchestration separate from transport lets Edvora validate transaction boundaries, token/session handling, and security-event persistence before exposing API routes.
-- Implications: Future controllers should call the internal orchestration services rather than duplicating credential, token, or session logic. Web refresh sessions use the concrete V1 default of 10 hours, while mobile refresh sessions use 30 days.
+- Implications: Public controllers call the internal orchestration services rather than duplicating credential, token, or session logic. Web refresh sessions use the concrete V1 default of 10 hours, while mobile refresh sessions use 30 days.
+
+## DEC-0040: Public Auth HTTP Transport
+
+- Date: 2026-08-28
+- Status: Accepted
+- Decision: Public auth routes are exposed under `/auth/*`; access tokens use Bearer transport, web refresh material uses HttpOnly cookies, and mobile refresh material uses explicit request/response body transport.
+- Reasoning: This keeps long-lived web refresh tokens away from browser JavaScript while preserving mobile secure-storage compatibility and a simple shared API boundary.
+- Implications: Web refresh does not accept body refresh-token fallback. Future frontend/mobile clients must preserve the transport distinction.
+
+## DEC-0041: Web Auth Cookie and Origin Policy
+
+- Date: 2026-08-28
+- Status: Accepted
+- Decision: Web auth cookies use path `/auth`, SameSite `Lax` by default, production `Secure`, and trusted `Origin` validation for web-channel or web-cookie auth requests.
+- Reasoning: Same-site dashboard/API deployment is the preferred V1 assumption; wildcard credentialed CORS and casual SameSite `None` would increase CSRF risk.
+- Implications: Cross-site web/API deployment requires revisiting cookie, CORS, and CSRF configuration before release.
+
+## DEC-0042: Initial In-Process Auth Rate Limiting
+
+- Date: 2026-08-28
+- Status: Accepted
+- Decision: Auth routes use Nest-compatible in-process throttling as the initial V1 public abuse-control boundary.
+- Reasoning: It adds immediate protection for a single API process without introducing Redis or new infrastructure before demonstrated need.
+- Implications: Rate limiting is not horizontally consistent. Before multi-replica production scaling or serious abuse exposure, Edvora must adopt a shared/distributed rate-limit strategy and explicit proxy trust configuration.

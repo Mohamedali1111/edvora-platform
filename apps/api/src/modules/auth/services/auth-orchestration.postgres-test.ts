@@ -129,8 +129,10 @@ maybeDescribe('auth orchestration PostgreSQL integration', () => {
       testAuthConfig,
     );
 
-    await prismaService.client.tenant.create({
-      data: {
+    await prismaService.client.tenant.upsert({
+      where: { id: tenantId },
+      update: {},
+      create: {
         id: tenantId,
         name: 'Auth Orchestration Tenant',
         slug: 'auth-orchestration-tenant',
