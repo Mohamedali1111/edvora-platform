@@ -10,6 +10,8 @@ import type { Response } from 'express';
 import { ThrottlerException } from '@nestjs/throttler';
 import { AuthError } from '../../modules/auth/errors/auth.errors';
 import { mapAuthErrorToHttp } from '../../modules/auth/http/auth-error-mapping';
+import { DeviceError } from '../../modules/devices/errors/device.errors';
+import { mapDeviceErrorToHttp } from '../../modules/devices/http/device-error-mapping';
 
 type ErrorResponseBody = {
   error: {
@@ -31,6 +33,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
 function mapException(exception: unknown): { status: number; body: ErrorResponseBody } {
   if (exception instanceof AuthError) {
     return mapAuthErrorToHttp(exception);
+  }
+
+  if (exception instanceof DeviceError) {
+    return mapDeviceErrorToHttp(exception);
   }
 
   if (exception instanceof ThrottlerException) {

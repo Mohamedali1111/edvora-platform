@@ -337,3 +337,19 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Auth routes use Nest-compatible in-process throttling as the initial V1 public abuse-control boundary.
 - Reasoning: It adds immediate protection for a single API process without introducing Redis or new infrastructure before demonstrated need.
 - Implications: Rate limiting is not horizontally consistent. Before multi-replica production scaling or serious abuse exposure, Edvora must adopt a shared/distributed rate-limit strategy and explicit proxy trust configuration.
+
+## DEC-0043: Installation-Scoped Student Device Authorization
+
+- Date: 2026-08-28
+- Status: Accepted
+- Decision: Student device authorization uses a native-app-generated installation-scoped UUID sent through `X-Edvora-Installation-Id`; the backend stores only a SHA-256 hash and checks current PostgreSQL device state for guarded student routes.
+- Reasoning: This enforces the V1 one-active-device policy without invasive hardware fingerprinting or trusting JWT/device claims.
+- Implications: Login alone does not authorize protected student content. A different installation must use the device-change workflow, and future protected student resources must compose Bearer authentication with the device guard.
+
+## DEC-0044: Platform Admin Owns Device Change Review
+
+- Date: 2026-08-28
+- Status: Accepted
+- Decision: Device-change approval/rejection is a Platform Admin operation in V1; instructors cannot approve, reject, reset, or replace student devices.
+- Reasoning: Device replacement affects content security and support/audit posture at the platform level.
+- Implications: Admin review paths must verify current database role/status before mutation. Instructor support workflows may request help later but must not control device replacement.

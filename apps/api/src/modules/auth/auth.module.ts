@@ -59,6 +59,7 @@ import { UuidV7Service } from './services/uuid-v7.service';
   ],
   exports: [
     AccountActivationTokenService,
+    AccessTokenGuard,
     AccessTokenService,
     AuthOrchestrationService,
     ClockService,

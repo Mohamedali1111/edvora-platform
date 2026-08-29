@@ -52,6 +52,8 @@ Expected behavior:
 - Device records should be designed so future device-trust signals can be added without redesigning the domain.
 - Device identifiers must avoid invasive or policy-violating fingerprinting.
 
+The backend now has a student device authorization foundation documented in `docs/DEVICE-AUTHORIZATION.md`. Device authorization uses an app-generated installation-scoped UUID supplied through `X-Edvora-Installation-Id`, stores only its SHA-256 hash, and checks current database state for guarded student requests. Authentication does not imply device authorization, and approved-device state is never embedded in JWTs.
+
 ## Device-Change Workflow
 
 When a student needs to use a different device:

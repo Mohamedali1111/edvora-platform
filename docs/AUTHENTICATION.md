@@ -386,7 +386,7 @@ Tradeoff:
 
 ## Student Device Integration
 
-Device binding is not implemented in this auth design, but authentication must not undermine it.
+Device authorization is implemented as a separate backend foundation, documented in `docs/DEVICE-AUTHORIZATION.md`. Authentication must not undermine it.
 
 First student login:
 
@@ -402,7 +402,7 @@ Different device:
 
 - Credentials may be correct.
 - Password possession alone must not authorize course/content access.
-- Backend should create or expose the device-change workflow.
+- Backend exposes student device authorization/status/change-request routes and Platform Admin approval/rejection routes.
 - Protected content requires approved device authorization.
 
 Instructor/Admin device policy may differ later. Student session logout must not unregister an approved device.

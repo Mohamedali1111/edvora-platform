@@ -17,7 +17,12 @@ export type AuthSecurityEventType =
   | 'LOGOUT_ALL'
   | 'PASSWORD_CHANGED'
   | 'PASSWORD_RESET_COMPLETED'
-  | 'ACCOUNT_ACTIVATED';
+  | 'ACCOUNT_ACTIVATED'
+  | 'STUDENT_DEVICE_APPROVED'
+  | 'DEVICE_CHANGE_REQUESTED'
+  | 'DEVICE_CHANGE_APPROVED'
+  | 'DEVICE_CHANGE_REJECTED'
+  | 'DEVICE_AUTHORIZATION_FAILED';
 
 export type RecordAuthSecurityEventInput = {
   eventType: AuthSecurityEventType;
@@ -25,7 +30,9 @@ export type RecordAuthSecurityEventInput = {
   actorUserId?: string | null;
   targetUserId?: string | null;
   sessionId?: string | null;
+  deviceId?: string | null;
   tenantId?: string | null;
+  category?: SecurityEventCategory;
   metadata?: Prisma.InputJsonObject;
 };
 
@@ -61,10 +68,11 @@ export class SecurityEventService {
       data: {
         id: this.uuid.create(),
         eventType: input.eventType,
-        category: SecurityEventCategory.AUTHENTICATION,
+        category: input.category ?? SecurityEventCategory.AUTHENTICATION,
         severity: input.severity ?? SecurityEventSeverity.INFO,
         actorUserId: input.actorUserId ?? null,
         targetUserId: input.targetUserId ?? null,
+        deviceId: input.deviceId ?? null,
         sessionId: input.sessionId ?? null,
         tenantId: input.tenantId ?? null,
         metadata: input.metadata ?? Prisma.JsonNull,

@@ -19,7 +19,7 @@ The Prisma schema is the application model source of truth, but production integ
 - Current migration status: Implemented as a PostgreSQL partial unique index on `student_devices(student_user_id)` where `status = 'ACTIVE'`.
 - Intended PostgreSQL concept: A partial unique index for the V1 default, possibly adjusted once device-limit policy tables exist.
 - Prisma limitation: Prisma schema cannot accurately define PostgreSQL partial unique indexes.
-- Remaining work: Device-switching must still use transactions so status changes and security events are atomic.
+- Application status: First-device authorization, current-device checks, and Platform Admin approval/rejection use transactions and convert expected uniqueness races into stable device-domain responses. Future device-limit configurability may require replacing this V1 partial unique index with a reviewed policy-aware design.
 
 ## One Pending Device-Change Request Per Student
 
@@ -27,7 +27,7 @@ The Prisma schema is the application model source of truth, but production integ
 - Current migration status: Implemented as a PostgreSQL partial unique index on `device_change_requests(student_user_id)` where `status = 'PENDING'`.
 - Intended PostgreSQL concept: A partial unique index on `student_user_id` where `status = 'PENDING'`.
 - Prisma limitation: Prisma schema cannot accurately define this partial unique index.
-- Remaining work: Request creation/review must still close or expire old requests transactionally.
+- Application status: Request creation/review is implemented transactionally for V1. Expiration automation and notification workflows remain deferred.
 
 ## Active Enrollment Uniqueness
 

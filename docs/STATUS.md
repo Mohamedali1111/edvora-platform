@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, and the first public auth HTTP boundary completed. The repository has minimal framework foundations for API, web, and mobile, with no product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, and the student device authorization foundation completed. The repository has minimal framework foundations for API, web, and mobile, with no product domain repositories.
 
 ## Completed Work
 
@@ -34,6 +34,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Implemented public auth HTTP routes for login, refresh, logout, logout-all, activation completion, authenticated password change, and password-reset completion.
 - Added auth DTO validation, stable auth error mapping, Bearer access-token guard, typed authenticated principal decorator, web refresh cookies, trusted-origin checks, no-store token responses, and initial in-process auth throttling.
 - Documented the auth HTTP route contract in `docs/AUTH-HTTP-API.md`.
+- Implemented the student device authorization backend foundation, including first-device authorization, existing-device checks, device-change requests, Platform Admin approval/rejection, a reusable `StudentDeviceGuard`, and documented route/security behavior in `docs/DEVICE-AUTHORIZATION.md`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -51,7 +52,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Internal auth orchestration composes the primitives for identity/session use cases. Web refresh sessions default to 10 hours; mobile refresh sessions default to 30 days.
 - Public auth HTTP transport exposes `/auth/*` routes. Web refresh tokens are cookie-only, mobile refresh tokens use explicit body transport, and protected auth routes use Bearer access tokens.
 - Multi-tenant SaaS from the beginning.
-- Student device authorization defaults to one approved active device, with configurable architecture.
+- Student device authorization defaults to one approved active device, with configurable architecture. Device authorization uses an app-generated installation UUID supplied by the native client, stores only a hash, and checks current database state through `StudentDeviceGuard`.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
 - Arabic/English and RTL/LTR support are first-class requirements.
 - No in-app payments in V1.
@@ -75,8 +76,8 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
-- Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, and public auth HTTP transport exist.
-- Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, password-reset completion, HTTP DTO validation, auth route throttling, Bearer guard, web refresh cookies, and trusted-origin checks exist. Delivery, mobile storage, device binding, tenant authorization, and distributed rate limiting are not implemented.
+- Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, public auth HTTP transport, and student device authorization foundation exist.
+- Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, password-reset completion, HTTP DTO validation, auth route throttling, Bearer guard, web refresh cookies, trusted-origin checks, device authorization routes, and Platform Admin device-change review routes exist. Delivery, mobile storage, tenant authorization, course/content authorization, and distributed rate limiting are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -239,9 +240,23 @@ Public auth HTTP boundary validation passed:
 - `git diff --check` passed.
 - The disposable Edvora PostgreSQL container was removed after validation. The unrelated `mini-inventory-system-db-1` database was not touched.
 
+Student device authorization foundation validation passed:
+
+- Prisma format, validate, and generate must pass.
+- API lint, typecheck, tests, and build must pass.
+- Existing auth PostgreSQL integration tests and new device authorization PostgreSQL/E2E tests must pass against disposable PostgreSQL 16.
+- Root `corepack pnpm check` and `git diff --check` must pass.
+- Prisma format, validate, and generate passed.
+- API lint, typecheck, tests, and build passed.
+- Existing auth PostgreSQL integration tests and new device authorization PostgreSQL/E2E tests passed against disposable PostgreSQL 16.
+- Root `corepack pnpm check` and `git diff --check` passed.
+- Disposable PostgreSQL validation used PostgreSQL 16.13 with the existing initial and auth-token migrations applied in order.
+- Device tests covered login/device separation, first-device concurrency, same-installation idempotency, one pending request, Platform Admin-only review, approval replacement, rejection preservation, logout/password-reset independence, and immediate guard behavior after device replacement.
+- The disposable Edvora PostgreSQL container was removed after validation. The unrelated `mini-inventory-system-db-1` database was not touched.
+
 ## Exact Recommended Next Step
 
-Implement the student device authorization backend boundary so protected student resources can distinguish authenticated identity from approved-device access.
+Audit and review the student device authorization foundation, then commit it if approved.
 
 ## Handoff Instructions
 
