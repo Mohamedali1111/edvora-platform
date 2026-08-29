@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, and the student device authorization foundation completed. The repository has minimal framework foundations for API, web, and mobile, with no product domain repositories.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, and tenant-student persistence are completed. The repository has minimal framework foundations for API, web, and mobile, with no tenancy/enrollment service implementation yet.
 
 ## Completed Work
 
@@ -35,6 +35,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Added auth DTO validation, stable auth error mapping, Bearer access-token guard, typed authenticated principal decorator, web refresh cookies, trusted-origin checks, no-store token responses, and initial in-process auth throttling.
 - Documented the auth HTTP route contract in `docs/AUTH-HTTP-API.md`.
 - Implemented the student device authorization backend foundation, including first-device authorization, existing-device checks, device-change requests, Platform Admin approval/rejection, a reusable `StudentDeviceGuard`, and documented route/security behavior in `docs/DEVICE-AUTHORIZATION.md`.
+- Designed and implemented the tenant-student association persistence model in `docs/TENANT-STUDENT-DESIGN.md`, Prisma schema, and the reviewed PostgreSQL migration `20260823020000_add_tenant_student_associations`.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -52,6 +53,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Internal auth orchestration composes the primitives for identity/session use cases. Web refresh sessions default to 10 hours; mobile refresh sessions default to 30 days.
 - Public auth HTTP transport exposes `/auth/*` routes. Web refresh tokens are cookie-only, mobile refresh tokens use explicit body transport, and protected auth routes use Bearer access tokens.
 - Multi-tenant SaaS from the beginning.
+- Tenant operators are represented by `TenantMembership`. Students use the separate `TenantStudent` association and must not be modeled as tenant staff membership.
 - Student device authorization defaults to one approved active device, with configurable architecture. Device authorization uses an app-generated installation UUID supplied by the native client, stores only a hash, and checks current database state through `StudentDeviceGuard`.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
 - Arabic/English and RTL/LTR support are first-class requirements.
@@ -76,6 +78,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - No product functionality exists yet.
 - No seed data, product modules, or product repositories exist yet.
+- Tenant/instructor/student/enrollment APIs remain pending; `TenantStudent` persistence is implemented, but no service/API layer exists yet.
 - Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, public auth HTTP transport, and student device authorization foundation exist.
 - Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, password-reset completion, HTTP DTO validation, auth route throttling, Bearer guard, web refresh cookies, trusted-origin checks, device authorization routes, and Platform Admin device-change review routes exist. Delivery, mobile storage, tenant authorization, course/content authorization, and distributed rate limiting are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
@@ -254,9 +257,23 @@ Student device authorization foundation validation passed:
 - Device tests covered login/device separation, first-device concurrency, same-installation idempotency, one pending request, Platform Admin-only review, approval replacement, rejection preservation, logout/password-reset independence, and immediate guard behavior after device replacement.
 - The disposable Edvora PostgreSQL container was removed after validation. The unrelated `mini-inventory-system-db-1` database was not touched.
 
+Tenant-student association design validation passed:
+
+- Confirmed repository started clean at `61d9fed feat(devices): implement student device authorization`.
+- Created `docs/TENANT-STUDENT-DESIGN.md`.
+- Updated domain/database/decision/status documentation only.
+- No Prisma schema, migration, dependency, API source, web/mobile, `.env`, or secret changes were made.
+- Root `corepack pnpm check` and `git diff --check` passed.
+
+Tenant-student persistence validation passed:
+
+- Prisma schema includes `TenantStudentStatus`, `TenantStudent`, User/Tenant relations, and the enrollment composite relation.
+- New additive migration `20260823020000_add_tenant_student_associations` adds `tenant_students`, the unique tenant/student association, referential integrity, enrollment composite FK, and stable timestamp CHECK constraints.
+- PostgreSQL migration execution, structural inspection, constraint tests, duplicate association concurrency tests, existing auth/device regression tests, Prisma validation/generation, API lint/typecheck/tests/build, root `corepack pnpm check`, and `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Audit and review the student device authorization foundation, then commit it if approved.
+Review the implemented `TenantStudent` persistence migration results, then implement tenant/instructor/student/enrollment services and APIs in a separate task.
 
 ## Handoff Instructions
 

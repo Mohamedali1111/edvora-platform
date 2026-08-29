@@ -37,6 +37,22 @@ The Prisma schema is the application model source of truth, but production integ
 - Prisma limitation: A normal `@@unique` would incorrectly block retained historical enrollment rows for the same student/course. The initial schema uses indexes for access checks and defers the partial uniqueness rule.
 - Remaining work: Date-based expiration still depends on transactional/application logic updating or interpreting `status`, `starts_at`, and `ends_at`.
 
+## Tenant Student Association Integrity
+
+- Invariant: `TenantMembership` remains staff/operator-only, while learner association is represented by exactly one durable `TenantStudent` row for each `(tenant_id, student_user_id)` pair.
+- Current migration status: Implemented in `20260823020000_add_tenant_student_associations` with `tenant_student_status`, `tenant_students`, a normal unique key on `(tenant_id, student_user_id)`, and foreign keys to `tenants` and `users`.
+- Intended PostgreSQL concept: A durable association row with lifecycle status (`ACTIVE`, `INACTIVE`, `REMOVED`) rather than deleting/recreating historical relationships.
+- Prisma limitation: PostgreSQL cannot enforce through a simple foreign key that `student_user_id` points to a `User` whose `platform_role = 'STUDENT'`; application logic must verify the role before creating or reactivating associations.
+- Remaining work: Tenant/student management services must enforce lifecycle transitions, role checks, reactivation behavior, and authorization rules.
+
+## Enrollment Tenant Student Integrity
+
+- Invariant: An enrollment may exist only when the student is associated with the same tenant.
+- Current migration status: Implemented in `20260823020000_add_tenant_student_associations` as `enrollments(tenant_id, student_user_id) -> tenant_students(tenant_id, student_user_id) ON DELETE RESTRICT ON UPDATE CASCADE`.
+- Intended PostgreSQL concept: A composite foreign key avoids adding a redundant `tenantStudentId` while preserving the existing enrollment fields and course/tenant integrity.
+- Prisma limitation: The foreign key enforces association existence, not association lifecycle. `TenantStudent.status = ACTIVE` remains an application entitlement requirement.
+- Remaining work: Enrollment creation services must create or require an active `TenantStudent` association before granting course access.
+
 ## Conditional Ordering Uniqueness
 
 - Invariant: Active/non-archived section, lesson, question, and option positions should be unique within their parent.

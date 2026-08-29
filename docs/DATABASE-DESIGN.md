@@ -146,19 +146,36 @@ Fields:
 
 #### TenantMembership
 
-Connects users to tenant staff/instructor roles.
+Connects users to tenant operator/staff roles. It is intentionally not used for students.
 
 Fields:
 
 - `id`
 - `tenantId`
 - `userId`
-- `role`: `OWNER`, `INSTRUCTOR`
+- `role`: `OWNER`, `INSTRUCTOR`, `STAFF`
 - `status`: `ACTIVE`, `SUSPENDED`, `REMOVED`
 - `createdAt`, `updatedAt`
 - `removedAt`
 
-`PLATFORM_ADMIN` users are not modeled as ordinary tenant members for platform-wide power. Student course access is modeled through enrollment, not by putting one tenant ID on `User`.
+`PLATFORM_ADMIN` users are not modeled as ordinary tenant members for platform-wide power. Students are learners, not tenant operators, so do not add `STUDENT` to `TenantMembershipRole`.
+
+#### TenantStudent
+
+Connects a global `STUDENT` identity to a tenant/academy without granting course access by itself.
+
+Fields:
+
+- `id`
+- `tenantId`
+- `studentUserId`
+- `status`: `ACTIVE`, `INACTIVE`, `REMOVED`
+- `createdByUserId` nullable
+- `activatedAt` nullable
+- `removedAt` nullable
+- `createdAt`, `updatedAt`
+
+`TenantStudent` supports instructor student lists, student association before course enrollment, removal without deleting history, and global student identity reuse across multiple tenants. Course access remains modeled through `Enrollment`.
 
 ### Devices
 
@@ -408,6 +425,8 @@ Fields:
 
 No payment fields.
 
+Enrollment keeps `tenantId`, `studentUserId`, and `courseId`, and has a composite relation from `(tenantId, studentUserId)` to `TenantStudent(tenantId, studentUserId)`. This preserves current course/tenant integrity while preventing enrollments for students not associated with the course tenant.
+
 #### LessonProgress
 
 Fields:
@@ -478,6 +497,8 @@ erDiagram
   User ||--o| InstructorProfile : has
   User ||--o{ TenantMembership : belongs_to
   Tenant ||--o{ TenantMembership : has
+  User ||--o{ TenantStudent : associated_as_student
+  Tenant ||--o{ TenantStudent : has_students
   Tenant ||--o{ Course : owns
   Course ||--o{ CourseSection : has
   CourseSection ||--o{ Lesson : contains
@@ -508,6 +529,8 @@ erDiagram
 - `CourseSection.courseId -> Course.id`.
 - `Lesson.sectionId -> CourseSection.id` and `Lesson.courseId -> Course.id`.
 - `Enrollment.courseId -> Course.id`, `Enrollment.studentUserId -> User.id`.
+- `TenantStudent.tenantId -> Tenant.id`, `TenantStudent.studentUserId -> User.id`.
+- `Enrollment(tenantId, studentUserId) -> TenantStudent(tenantId, studentUserId)`.
 - `LessonProgress.enrollmentId -> Enrollment.id`.
 
 ### Uniqueness
@@ -516,6 +539,7 @@ erDiagram
 - `StudentProfile.userId` unique.
 - `InstructorProfile.userId` unique.
 - `TenantMembership(tenantId, userId)` unique for active membership, or unique plus status lifecycle if historical rows are kept separately.
+- `TenantStudent(tenantId, studentUserId)` unique, using one durable row per tenant/student association with lifecycle status.
 - `CourseSection(courseId, position)` unique for non-archived sections.
 - `Lesson(sectionId, position)` unique for non-archived lessons.
 - `Question(quizId, position)` unique for active questions.
@@ -543,6 +567,8 @@ Useful future PostgreSQL checks:
 - `User(normalizedEmail)` for login/identity lookup.
 - `TenantMembership(userId, status)` for resolving instructor tenant access after login.
 - `TenantMembership(tenantId, status)` for tenant staff lists.
+- `TenantStudent(tenantId, status, createdAt)` for instructor student lists.
+- `TenantStudent(studentUserId, status)` for student tenant association and entitlement checks.
 - `Course(tenantId, status)` for instructor course management.
 - `CourseSection(courseId, position)` for rendering course structure.
 - `Lesson(sectionId, position)` and `Lesson(courseId, status)` for course content navigation.

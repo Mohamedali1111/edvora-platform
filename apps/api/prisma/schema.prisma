@@ -78,6 +78,14 @@ enum TenantMembershipStatus {
   @@map("tenant_membership_status")
 }
 
+enum TenantStudentStatus {
+  ACTIVE
+  INACTIVE
+  REMOVED
+
+  @@map("tenant_student_status")
+}
+
 enum DevicePlatform {
   IOS
   ANDROID
@@ -277,6 +285,8 @@ model User {
   studentProfile               StudentProfile?
   instructorProfile            InstructorProfile?
   tenantMemberships            TenantMembership[]
+  tenantStudentAssociations    TenantStudent[]          @relation("TenantStudentUser")
+  createdTenantStudents        TenantStudent[]          @relation("TenantStudentCreator")
   studentDevices               StudentDevice[]
   deviceChangeRequests         DeviceChangeRequest[]    @relation("DeviceChangeRequestStudent")
   reviewedDeviceChangeRequests DeviceChangeRequest[]    @relation("DeviceChangeRequestReviewer")
@@ -363,6 +373,7 @@ model Tenant {
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   memberships      TenantMembership[]
+  tenantStudents   TenantStudent[]
   courses          Course[]
   videoAssets      VideoAsset[]
   documentAssets   DocumentAsset[]
@@ -433,6 +444,29 @@ model TenantMembership {
   @@index([userId, status], map: "tenant_memberships_user_id_status_idx")
   @@index([tenantId, status], map: "tenant_memberships_tenant_id_status_idx")
   @@map("tenant_memberships")
+}
+
+model TenantStudent {
+  id              String              @id @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  studentUserId   String              @map("student_user_id") @db.Uuid
+  status          TenantStudentStatus @default(ACTIVE)
+  createdByUserId String?             @map("created_by_user_id") @db.Uuid
+  activatedAt     DateTime?           @map("activated_at") @db.Timestamptz(6)
+  removedAt       DateTime?           @map("removed_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student     User         @relation("TenantStudentUser", fields: [studentUserId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation("TenantStudentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  enrollments Enrollment[]
+
+  @@unique([tenantId, studentUserId], map: "tenant_students_tenant_id_student_user_id_key")
+  @@index([studentUserId, status], map: "tenant_students_student_user_id_status_idx")
+  @@index([tenantId, status, createdAt], map: "tenant_students_tenant_id_status_created_at_idx")
+  @@index([createdByUserId, createdAt], map: "tenant_students_created_by_user_id_created_at_idx")
+  @@map("tenant_students")
 }
 
 model StudentDevice {
@@ -778,6 +812,7 @@ model Enrollment {
   updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   course         Course           @relation(fields: [courseId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenantStudent  TenantStudent    @relation(fields: [tenantId, studentUserId], references: [tenantId, studentUserId], onDelete: Restrict)
   student        User             @relation("EnrollmentStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
   grantedBy      User             @relation("EnrollmentGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Restrict)
   revokedBy      User?            @relation("EnrollmentRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)

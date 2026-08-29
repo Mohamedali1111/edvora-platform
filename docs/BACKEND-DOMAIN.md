@@ -40,7 +40,9 @@ A tenant may initially contain one instructor, but users relate to tenants throu
 - One student to study with more than one instructor/tenant over time.
 - Platform Admin users to remain platform-wide rather than ordinary tenant members.
 
-`TenantMembership` represents role and status within a tenant. It should support tenant roles such as `OWNER`, `INSTRUCTOR`, and later `STAFF` if needed. A student generally gains access through enrollment rather than ordinary instructor/staff membership. If tenant-level student membership becomes useful later, it must not replace enrollment as the course-access source of truth.
+`TenantMembership` represents operator/staff role and status within a tenant. It supports tenant roles such as `OWNER`, `INSTRUCTOR`, and later `STAFF`; it must not be expanded with a `STUDENT` role. Students are learners rather than tenant operators.
+
+Tenant-associated students are represented through a separate `TenantStudent` relationship between a global `STUDENT` user and a tenant. `TenantStudent` records association with an academy/tenant, while `Enrollment` remains the course-access source of truth. See `docs/TENANT-STUDENT-DESIGN.md`.
 
 ## Canonical User / Identity Model
 
@@ -86,8 +88,9 @@ Server-side authorization must derive permissions from the authenticated identit
 - One canonical `User` identity per person/account.
 - `normalizedEmail` is unique among active/non-deleted user identities.
 - A tenant-scoped resource belongs to exactly one tenant.
-- A tenant member may have only one active membership row per tenant.
-- A student can have active enrollments in multiple tenants.
+- A tenant operator may have only one active membership row per tenant.
+- A student can be associated with multiple tenants through `TenantStudent` without duplicating global identity or credentials.
+- A student can have active enrollments in multiple tenants, but enrollment must not replace tenant-student association.
 - V1 defaults to one approved active device per student, but device limits are policy/configurable.
 - A new device never silently replaces an approved active device.
 - Instructors cannot approve or reset student devices in V1.
@@ -162,6 +165,7 @@ Access check concept:
 ```text
 authenticated student
 -> authorized device
+-> active tenant-student association
 -> active enrollment for tenant/course
 -> available course/lesson/content
 -> runtime content authorization
@@ -170,6 +174,8 @@ authenticated student
 Enrollment should support active/inactive/revoked/expired state, optional start/end dates, tenant scope, granted-by user, and timestamps. No payment fields are involved.
 
 Use constraints to avoid accidental duplicate active access for the same student/course where possible.
+
+Enrollment is database-linked to `TenantStudent` through `(tenantId, studentUserId)` so a course entitlement cannot be created for a student who is not associated with the course tenant.
 
 ## Learning Progress
 
@@ -233,7 +239,7 @@ Internal fields such as password hashes, refresh/session secrets, provider asset
 
 ## Failure-Case Review
 
-- Same student studies with two instructors: supported through canonical `User` plus tenant-scoped enrollments.
+- Same student studies with two instructors: supported through canonical `User` plus one `TenantStudent` association per tenant and tenant-scoped enrollments.
 - Instructor accesses another tenant course: blocked by tenant membership/resource authorization.
 - Client changes `tenantId`: ignored unless server verifies membership/resource access.
 - Student shares password with another device: device authorization blocks protected access and triggers request/audit flow.

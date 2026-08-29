@@ -353,3 +353,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Device-change approval/rejection is a Platform Admin operation in V1; instructors cannot approve, reject, reset, or replace student devices.
 - Reasoning: Device replacement affects content security and support/audit posture at the platform level.
 - Implications: Admin review paths must verify current database role/status before mutation. Instructor support workflows may request help later but must not control device replacement.
+
+## DEC-0045: TenantStudent Separates Learner Association From Staff Membership
+
+- Date: 2026-08-29
+- Status: Accepted
+- Decision: Students must not be represented as `TenantMembershipRole.STUDENT`. `TenantMembership` remains staff/operator-only, and tenant-associated learners require a separate `TenantStudent` model with one durable row per `(tenantId, studentUserId)`.
+- Reasoning: Students are learners, not tenant operators. A separate association lets instructors list/invite students before course enrollment while preserving global student identity reuse and keeping `Enrollment` focused on course entitlement.
+- Implications: `TenantStudent` persistence is implemented through a reviewed additive migration with a composite enrollment integrity relationship from `Enrollment(tenantId, studentUserId)` to `TenantStudent(tenantId, studentUserId)`. Tenancy/enrollment service implementation must use this association rather than adding students to `TenantMembership`.
