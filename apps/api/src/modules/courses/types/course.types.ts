@@ -1,4 +1,10 @@
-import type { CourseStatus, CourseVisibility } from '../../../../.generated/prisma/client';
+import type {
+  CourseStatus,
+  CourseVisibility,
+  LessonStatus,
+  LessonType,
+  SectionStatus,
+} from '../../../../.generated/prisma/client';
 
 export type CourseSummary = {
   courseId: string;
@@ -13,4 +19,35 @@ export type CourseSummary = {
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type CourseSectionSummary = {
+  sectionId: string;
+  tenantId: string;
+  courseId: string;
+  title: string;
+  description: string | null;
+  position: number;
+  status: SectionStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type LessonSummary = {
+  lessonId: string;
+  tenantId: string;
+  courseId: string;
+  sectionId: string;
+  title: string;
+  description: string | null;
+  type: LessonType;
+  position: number;
+  status: LessonStatus;
+  availableFrom: Date | null;
+  availableUntil: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  videoAssetId: string | null;
+  documentAssetId: string | null;
+  quizId: string | null;
 };

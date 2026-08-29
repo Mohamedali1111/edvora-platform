@@ -3,10 +3,26 @@ import { CourseError, type CourseErrorCode } from '../errors/course.errors';
 
 const ERROR_STATUS: Record<CourseErrorCode, HttpStatus> = {
   COURSE_NOT_FOUND: HttpStatus.NOT_FOUND,
+  SECTION_NOT_FOUND: HttpStatus.NOT_FOUND,
+  LESSON_NOT_FOUND: HttpStatus.NOT_FOUND,
+  SECTION_POSITION_CONFLICT: HttpStatus.CONFLICT,
+  LESSON_POSITION_CONFLICT: HttpStatus.CONFLICT,
+  INVALID_SECTION_REORDER: HttpStatus.BAD_REQUEST,
+  INVALID_LESSON_REORDER: HttpStatus.BAD_REQUEST,
+  INVALID_LESSON_TYPE_REFERENCE: HttpStatus.BAD_REQUEST,
+  LESSON_REFERENCE_NOT_FOUND: HttpStatus.NOT_FOUND,
 };
 
 const ERROR_MESSAGES: Record<CourseErrorCode, string> = {
   COURSE_NOT_FOUND: 'Course was not found.',
+  SECTION_NOT_FOUND: 'Course section was not found.',
+  LESSON_NOT_FOUND: 'Lesson was not found.',
+  SECTION_POSITION_CONFLICT: 'Section position conflict; retry the request.',
+  LESSON_POSITION_CONFLICT: 'Lesson position conflict; retry the request.',
+  INVALID_SECTION_REORDER: 'Reorder payload must contain exactly the current active sections for this course.',
+  INVALID_LESSON_REORDER: 'Reorder payload must contain exactly the current active lessons for this section.',
+  INVALID_LESSON_TYPE_REFERENCE: 'Lesson type reference does not match the declared lesson type.',
+  LESSON_REFERENCE_NOT_FOUND: 'Referenced video asset, document asset, or quiz was not found.',
 };
 
 type ErrorResponseBody = {

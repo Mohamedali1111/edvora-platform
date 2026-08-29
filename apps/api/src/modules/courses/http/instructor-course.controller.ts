@@ -1,19 +1,14 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { Matches } from 'class-validator';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
-import { TenantIdParamDto, UUID_PARAM_PATTERN } from '../../tenancy/dto/uuid-param.dto';
+import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
+import { CourseIdParamDto } from '../dto/course-params.dto';
 import { CreateCourseDto, UpdateCourseMetadataDto } from '../dto/course.dto';
 import { CourseService } from '../services/course.service';
 import type { CourseSummary } from '../types/course.types';
-
-class CourseIdParamDto extends TenantIdParamDto {
-  @Matches(UUID_PARAM_PATTERN)
-  courseId!: string;
-}
 
 type CourseListResponse = {
   items: CourseSummary[];
