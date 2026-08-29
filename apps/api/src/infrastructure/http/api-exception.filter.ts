@@ -12,6 +12,8 @@ import { AuthError } from '../../modules/auth/errors/auth.errors';
 import { mapAuthErrorToHttp } from '../../modules/auth/http/auth-error-mapping';
 import { DeviceError } from '../../modules/devices/errors/device.errors';
 import { mapDeviceErrorToHttp } from '../../modules/devices/http/device-error-mapping';
+import { TenancyError } from '../../modules/tenancy/errors/tenancy.errors';
+import { mapTenancyErrorToHttp } from '../../modules/tenancy/http/tenancy-error-mapping';
 
 type ErrorResponseBody = {
   error: {
@@ -37,6 +39,10 @@ function mapException(exception: unknown): { status: number; body: ErrorResponse
 
   if (exception instanceof DeviceError) {
     return mapDeviceErrorToHttp(exception);
+  }
+
+  if (exception instanceof TenancyError) {
+    return mapTenancyErrorToHttp(exception);
   }
 
   if (exception instanceof ThrottlerException) {

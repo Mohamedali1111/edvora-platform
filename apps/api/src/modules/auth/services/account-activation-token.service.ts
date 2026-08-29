@@ -30,41 +30,48 @@ export class AccountActivationTokenService {
 
   async issue(input: IssueActivationTokenInput): Promise<IssuedOneTimeToken> {
     return this.prismaService.client.$transaction(async (tx) => {
-      const now = this.clock.now();
-      const expiresAt = addSeconds(
-        now,
-        input.expiresInSeconds ?? this.config.oneTimeTokenTtlSeconds.activation,
-      );
-      const rawToken = this.tokenCrypto.generateOpaqueToken();
-      const tokenHash = this.tokenCrypto.hashOpaqueToken(rawToken);
-      const id = this.uuid.create();
-
-      await tx.accountActivationToken.updateMany({
-        where: {
-          userId: input.userId,
-          purpose: input.purpose,
-          consumedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { revokedAt: now },
-      });
-
-      await tx.accountActivationToken.create({
-        data: {
-          id,
-          userId: input.userId,
-          purpose: input.purpose,
-          tenantId: input.tenantId ?? null,
-          initiatedByUserId: input.initiatedByUserId ?? null,
-          tokenHash,
-          expiresAt,
-          createdAt: now,
-        },
-      });
-
-      return { id, rawToken, tokenHash, expiresAt };
+      return this.issueWithinTransaction(tx, input);
     });
+  }
+
+  async issueWithinTransaction(
+    tx: PrismaTransactionClient,
+    input: IssueActivationTokenInput,
+  ): Promise<IssuedOneTimeToken> {
+    const now = this.clock.now();
+    const expiresAt = addSeconds(
+      now,
+      input.expiresInSeconds ?? this.config.oneTimeTokenTtlSeconds.activation,
+    );
+    const rawToken = this.tokenCrypto.generateOpaqueToken();
+    const tokenHash = this.tokenCrypto.hashOpaqueToken(rawToken);
+    const id = this.uuid.create();
+
+    await tx.accountActivationToken.updateMany({
+      where: {
+        userId: input.userId,
+        purpose: input.purpose,
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { revokedAt: now },
+    });
+
+    await tx.accountActivationToken.create({
+      data: {
+        id,
+        userId: input.userId,
+        purpose: input.purpose,
+        tenantId: input.tenantId ?? null,
+        initiatedByUserId: input.initiatedByUserId ?? null,
+        tokenHash,
+        expiresAt,
+        createdAt: now,
+      },
+    });
+
+    return { id, rawToken, tokenHash, expiresAt };
   }
 
   async consume(

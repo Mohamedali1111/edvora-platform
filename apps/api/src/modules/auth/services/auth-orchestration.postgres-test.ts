@@ -722,6 +722,12 @@ maybeDescribe('auth orchestration PostgreSQL integration', () => {
     await prismaService.client.authCredential.deleteMany();
     await prismaService.client.accountActivationToken.deleteMany();
     await prismaService.client.passwordResetToken.deleteMany();
+    await prismaService.client.enrollment.deleteMany();
+    await prismaService.client.course.deleteMany();
+    await prismaService.client.tenantStudent.deleteMany();
+    await prismaService.client.tenantMembership.deleteMany();
+    await prismaService.client.studentProfile.deleteMany();
+    await prismaService.client.instructorProfile.deleteMany();
     await prismaService.client.user.deleteMany({
       where: {
         normalizedEmail: {

@@ -361,3 +361,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Students must not be represented as `TenantMembershipRole.STUDENT`. `TenantMembership` remains staff/operator-only, and tenant-associated learners require a separate `TenantStudent` model with one durable row per `(tenantId, studentUserId)`.
 - Reasoning: Students are learners, not tenant operators. A separate association lets instructors list/invite students before course enrollment while preserving global student identity reuse and keeping `Enrollment` focused on course entitlement.
 - Implications: `TenantStudent` persistence is implemented through a reviewed additive migration with a composite enrollment integrity relationship from `Enrollment(tenantId, studentUserId)` to `TenantStudent(tenantId, studentUserId)`. Tenancy/enrollment service implementation must use this association rather than adding students to `TenantMembership`.
+
+## DEC-0046: Tenant And Enrollment Authorization Foundation
+
+- Date: 2026-08-29
+- Status: Accepted
+- Decision: Platform Admin instructor onboarding, instructor tenant/student/enrollment APIs, and student enrollment reads use database-fresh authorization checks rather than trusting JWT tenant or role claims alone.
+- Reasoning: Tenant boundaries and enrollment grants are security-sensitive SaaS controls. Platform Admin operations must verify current platform role/status; instructor operations must verify current instructor role/status and active tenant membership; student enrollment reads must compose authenticated identity with approved student-device authorization.
+- Implications: `TenantStudent` remains the learner association, `Enrollment` remains course entitlement, activation-token delivery is still deferred, and course/content authorization must build on this boundary rather than embedding tenant, course, enrollment, or device state into JWTs.

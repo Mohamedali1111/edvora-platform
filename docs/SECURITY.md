@@ -40,6 +40,10 @@ Clients may send identifiers needed to request data, but the backend must not tr
 
 Platform Admin authorization must be explicit and separate from tenant-scoped instructor authorization.
 
+The backend now includes the first tenancy/enrollment API foundation. Platform Admin instructor onboarding checks current database `PLATFORM_ADMIN` and `ACTIVE` state before creating instructors/tenants. Instructor tenant operations check current database `INSTRUCTOR` and `ACTIVE` state plus active tenant membership before tenant-scoped student or enrollment operations. Student enrollment reads require both Bearer authentication and current approved student-device authorization.
+
+`TenantStudent` association is not course entitlement. Enrollment creation must prove active tenant-student association, same-tenant course ownership, and a valid active student account before granting course access.
+
 ## Device Binding Requirements
 
 V1 defaults to one approved active device per student. This default must remain configurable in architecture rather than permanently hardcoded.

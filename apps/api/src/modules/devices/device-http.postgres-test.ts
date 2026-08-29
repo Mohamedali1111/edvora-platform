@@ -640,7 +640,14 @@ maybeDescribe('student device authorization HTTP PostgreSQL integration', () => 
     await prisma.client.authCredential.deleteMany();
     await prisma.client.accountActivationToken.deleteMany();
     await prisma.client.passwordResetToken.deleteMany();
+    await prisma.client.enrollment.deleteMany();
+    await prisma.client.course.deleteMany();
+    await prisma.client.tenantStudent.deleteMany();
+    await prisma.client.tenantMembership.deleteMany();
     await prisma.client.studentDevice.deleteMany();
+    await prisma.client.studentProfile.deleteMany();
+    await prisma.client.instructorProfile.deleteMany();
+    await prisma.client.tenant.deleteMany();
     await prisma.client.user.deleteMany({
       where: {
         normalizedEmail: {

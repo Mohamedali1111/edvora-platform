@@ -177,6 +177,8 @@ Use constraints to avoid accidental duplicate active access for the same student
 
 Enrollment is database-linked to `TenantStudent` through `(tenantId, studentUserId)` so a course entitlement cannot be created for a student who is not associated with the course tenant.
 
+The backend now exposes the first tenant/student/enrollment API foundation: Platform Admin instructor creation/list/detail, instructor tenant-context reads, instructor tenant-scoped student association/list/detail, instructor enrollment create/revoke, and student enrollment listing. Student enrollment listing requires both Bearer authentication and student-device authorization. Course, section, lesson, content, and playback APIs remain deferred.
+
 ## Learning Progress
 
 Persist useful V1 progress: lesson started, lesson completed, last accessed, video resume position, watched seconds where relevant, and completion timestamp where useful.

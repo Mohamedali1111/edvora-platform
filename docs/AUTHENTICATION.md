@@ -26,12 +26,14 @@ Instructor onboarding:
 - Platform Admin creates or initiates activation for Instructor accounts.
 - Instructor sets their own password through a secure account activation flow.
 - Platform Admin must never know, choose, or set a permanent instructor password.
+- The backend creates instructor identity, tenant, owner membership, and `INSTRUCTOR_ACTIVATION` token in one admin-only workflow; activation delivery remains external/manual.
 
 Student onboarding:
 
 - Instructor can create or invite a student by email only within legitimate tenant/course workflows.
 - Instructor must never choose, view, or reset a student's permanent password.
 - New student uses a single-use account activation mechanism to set their own password.
+- The backend creates or reuses global student identity during tenant student association and issues `STUDENT_ACTIVATION` only when no password credential exists.
 
 Existing Edvora student:
 
