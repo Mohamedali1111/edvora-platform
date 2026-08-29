@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, and the first tenancy/enrollment service/API foundation are completed. The repository has minimal framework foundations for API, web, and mobile; course/content APIs are not implemented yet.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, and Instructor Course Core Slice A are completed. The repository has minimal framework foundations for API, web, and mobile; course sections, lessons, content delivery, and student course APIs are not implemented yet.
 
 ## Completed Work
 
@@ -38,6 +38,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Designed and implemented the tenant-student association persistence model in `docs/TENANT-STUDENT-DESIGN.md`, Prisma schema, and the reviewed PostgreSQL migration `20260823020000_add_tenant_student_associations`.
 - Implemented the backend tenancy/enrollment foundation for Platform Admin instructor creation/list/detail, instructor tenant context, instructor tenant-scoped student association/list/detail, enrollment create/revoke, and student enrollment reads behind device authorization.
 - Documented implemented tenancy/enrollment behavior in `docs/TENANCY-ENROLLMENT.md`.
+- Implemented Instructor Course Core Slice A: create course, paginated tenant-scoped course list, course detail, and safe metadata update for title, description, thumbnail asset reference, and visibility.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -56,7 +57,7 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 - Public auth HTTP transport exposes `/auth/*` routes. Web refresh tokens are cookie-only, mobile refresh tokens use explicit body transport, and protected auth routes use Bearer access tokens.
 - Multi-tenant SaaS from the beginning.
 - Tenant operators are represented by `TenantMembership`. Students use the separate `TenantStudent` association and must not be modeled as tenant staff membership.
-- Tenant/instructor/student/enrollment HTTP routes now enforce current database role/status and tenant membership checks. Student enrollment reads compose Bearer authentication with `StudentDeviceGuard`.
+- Tenant/instructor/student/enrollment HTTP routes now enforce current database role/status and tenant membership checks. Instructor course metadata routes use the same DB-fresh instructor tenant authorization boundary. Student enrollment reads compose Bearer authentication with `StudentDeviceGuard`.
 - Student device authorization defaults to one approved active device, with configurable architecture. Device authorization uses an app-generated installation UUID supplied by the native client, stores only a hash, and checks current database state through `StudentDeviceGuard`.
 - Student device-change approvals belong to `PLATFORM_ADMIN`, not instructors.
 - Arabic/English and RTL/LTR support are first-class requirements.
@@ -81,10 +82,10 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 - Course/content product functionality does not exist yet.
 - No seed data, product modules, or product repositories exist yet.
-- Course/section/lesson/content APIs remain pending. The tenancy/enrollment foundation exists, but it does not implement course authoring or content delivery.
+- Course authoring Slice A exists for core course metadata. Course lifecycle transitions, sections, lessons, ordering, student course APIs, protected content delivery, video/document APIs, uploads, quiz authoring/execution, and frontend/mobile course UI remain pending.
 - Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, public auth HTTP transport, and student device authorization foundation exist.
 - Authentication one-time token persistence, internal generation/hashing/consumption services, login orchestration, activation completion, refresh orchestration, logout, password change, password-reset completion, HTTP DTO validation, auth route throttling, Bearer guard, web refresh cookies, trusted-origin checks, device authorization routes, and Platform Admin device-change review routes exist. Delivery, mobile storage, tenant authorization, course/content authorization, and distributed rate limiting are not implemented.
-- Platform Admin instructor onboarding and instructor tenant/student/enrollment APIs exist. Activation delivery, student removal endpoints, course/content authorization, and distributed rate limiting are not implemented.
+- Platform Admin instructor onboarding, instructor tenant/student/enrollment APIs, and instructor course metadata APIs exist. Activation delivery, student removal endpoints, course lifecycle/section/lesson APIs, course/content authorization, and distributed rate limiting are not implemented.
 - Runtime API startup requires a valid `DATABASE_URL`; build/typecheck/unit tests do not require a live database.
 - Prisma v7 generated client output uses the explicit path `apps/api/.generated/prisma`, which is intentionally ignored. API build emits a compiled generated client under ignored build output.
 - PostgreSQL-only constraints are tracked in `docs/DATABASE-CONSTRAINTS.md`; partial unique indexes and stable check constraints are represented in the initial migration SQL, while lesson detail integrity and JSON payload limits remain application-controlled.
@@ -105,8 +106,9 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 ## Intentionally Deferred Work
 
-- Product domain feature implementation.
-- Tenant/course authorization and device authorization.
+- Product domain feature implementation beyond the approved auth, device, tenancy/enrollment, and course metadata foundations.
+- Course lifecycle, section, lesson, content, playback, and student course APIs.
+- Course entitlement authorization for protected course content.
 - Activation/reset delivery flows and password reset request flow.
 - Distributed rate limiting.
 - Cleanup jobs for expired/consumed activation/reset tokens.
@@ -282,9 +284,15 @@ Tenancy/enrollment service foundation validation passed:
 - Full opt-in PostgreSQL auth/device/tenancy-enrollment integration suites passed against fresh disposable PostgreSQL 16.
 - Root `corepack pnpm check` and `git diff --check` passed.
 
+Instructor Course Core Slice A validation passed:
+
+- API lint, typecheck, relevant tests, and build passed.
+- Course PostgreSQL HTTP tests passed against disposable PostgreSQL 16.
+- `git diff --check` passed.
+
 ## Exact Recommended Next Step
 
-Review the tenancy/enrollment foundation implementation and validation results, then implement course/section/lesson authoring persistence/API behavior in a separate task.
+Review Instructor Course Core Slice A, then implement course lifecycle transitions or section authoring as the next narrow course milestone.
 
 ## Handoff Instructions
 

@@ -10,6 +10,8 @@ import type { Response } from 'express';
 import { ThrottlerException } from '@nestjs/throttler';
 import { AuthError } from '../../modules/auth/errors/auth.errors';
 import { mapAuthErrorToHttp } from '../../modules/auth/http/auth-error-mapping';
+import { CourseError } from '../../modules/courses/errors/course.errors';
+import { mapCourseErrorToHttp } from '../../modules/courses/http/course-error-mapping';
 import { DeviceError } from '../../modules/devices/errors/device.errors';
 import { mapDeviceErrorToHttp } from '../../modules/devices/http/device-error-mapping';
 import { TenancyError } from '../../modules/tenancy/errors/tenancy.errors';
@@ -39,6 +41,10 @@ function mapException(exception: unknown): { status: number; body: ErrorResponse
 
   if (exception instanceof DeviceError) {
     return mapDeviceErrorToHttp(exception);
+  }
+
+  if (exception instanceof CourseError) {
+    return mapCourseErrorToHttp(exception);
   }
 
   if (exception instanceof TenancyError) {
