@@ -14,6 +14,8 @@ import { CourseError } from '../../modules/courses/errors/course.errors';
 import { mapCourseErrorToHttp } from '../../modules/courses/http/course-error-mapping';
 import { DeviceError } from '../../modules/devices/errors/device.errors';
 import { mapDeviceErrorToHttp } from '../../modules/devices/http/device-error-mapping';
+import { QuizError } from '../../modules/quizzes/errors/quiz.errors';
+import { mapQuizErrorToHttp } from '../../modules/quizzes/http/quiz-error-mapping';
 import { TenancyError } from '../../modules/tenancy/errors/tenancy.errors';
 import { mapTenancyErrorToHttp } from '../../modules/tenancy/http/tenancy-error-mapping';
 
@@ -45,6 +47,10 @@ function mapException(exception: unknown): { status: number; body: ErrorResponse
 
   if (exception instanceof CourseError) {
     return mapCourseErrorToHttp(exception);
+  }
+
+  if (exception instanceof QuizError) {
+    return mapQuizErrorToHttp(exception);
   }
 
   if (exception instanceof TenancyError) {

@@ -5,10 +5,11 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CoursesModule } from './modules/courses/courses.module';
 import { DeviceModule } from './modules/devices/device.module';
+import { QuizzesModule } from './modules/quizzes/quizzes.module';
 import { TenancyModule } from './modules/tenancy/tenancy.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, DeviceModule, TenancyModule, CoursesModule],
+  imports: [DatabaseModule, AuthModule, DeviceModule, TenancyModule, CoursesModule, QuizzesModule],
   controllers: [AppController],
   providers: [AppService],
 })
