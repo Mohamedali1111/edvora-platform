@@ -1,13 +1,19 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
+import { CreateDocumentUploadIntentDto } from '../dto/document-upload.dto';
 import { DocumentAssetIdParamDto, VideoAssetIdParamDto } from '../dto/media-params.dto';
 import { MediaAssetService } from '../services/media-asset.service';
-import type { DocumentAssetSummary, VideoAssetSummary } from '../types/media.types';
+import type {
+  DocumentAssetSummary,
+  DocumentUploadConfirmation,
+  DocumentUploadIntent,
+  VideoAssetSummary,
+} from '../types/media.types';
 
 type VideoAssetListResponse = {
   items: VideoAssetSummary[];
@@ -82,5 +88,24 @@ export class InstructorMediaController {
     @Param() params: DocumentAssetIdParamDto,
   ): Promise<DocumentAssetSummary> {
     return this.media.getDocumentAsset(principal, params.tenantId, params.documentAssetId);
+  }
+
+  @Post('documents/upload-intents')
+  @HttpCode(HttpStatus.CREATED)
+  async createDocumentUploadIntent(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: TenantIdParamDto,
+    @Body() body: CreateDocumentUploadIntentDto,
+  ): Promise<DocumentUploadIntent> {
+    return this.media.createDocumentUploadIntent(principal, params.tenantId, body);
+  }
+
+  @Post('documents/:documentAssetId/confirm-upload')
+  @HttpCode(HttpStatus.OK)
+  async confirmDocumentUpload(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: DocumentAssetIdParamDto,
+  ): Promise<DocumentUploadConfirmation> {
+    return this.media.confirmDocumentUpload(principal, params.tenantId, params.documentAssetId);
   }
 }

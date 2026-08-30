@@ -9,12 +9,15 @@ import { AuthModule } from '../auth/auth.module';
 import { CoursesModule } from '../courses/courses.module';
 import { DeviceModule } from '../devices/device.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import { createMediaRuntimeConfig } from './media.config';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { InstructorMediaController } from './http/instructor-media.controller';
 import { StudentDocumentController } from './http/student-document.controller';
 import { StudentVideoController } from './http/student-video.controller';
 import { MediaAssetService } from './services/media-asset.service';
 import { StudentDocumentAccessService } from './services/student-document-access.service';
 import { StudentVideoAccessService } from './services/student-video-access.service';
+import { R2DocumentStorageProvider } from './storage/r2-document-storage.provider';
 
 @Module({
   imports: [
@@ -32,7 +35,19 @@ import { StudentVideoAccessService } from './services/student-video-access.servi
     ]),
   ],
   controllers: [InstructorMediaController, StudentDocumentController, StudentVideoController],
-  providers: [MediaAssetService, StudentDocumentAccessService, StudentVideoAccessService],
+  providers: [
+    {
+      provide: MEDIA_RUNTIME_CONFIG,
+      useFactory: createMediaRuntimeConfig,
+    },
+    {
+      provide: DOCUMENT_STORAGE_PROVIDER,
+      useClass: R2DocumentStorageProvider,
+    },
+    MediaAssetService,
+    StudentDocumentAccessService,
+    StudentVideoAccessService,
+  ],
   exports: [MediaAssetService],
 })
 export class MediaModule {}

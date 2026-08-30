@@ -21,3 +21,19 @@ export type DocumentAssetSummary = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type DocumentUploadIntent = {
+  documentAssetId: string;
+  uploadUrl: string;
+  expiresAt: Date;
+  headers: Record<string, string>;
+};
+
+export type DocumentUploadConfirmation = {
+  documentAssetId: string;
+  processingStatus: AssetProcessingStatus;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: string;
+  verifiedAt: Date | null;
+};

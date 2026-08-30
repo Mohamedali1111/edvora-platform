@@ -1,4 +1,9 @@
-export type MediaErrorCode = 'VIDEO_ASSET_NOT_FOUND' | 'DOCUMENT_ASSET_NOT_FOUND';
+export type MediaErrorCode =
+  | 'VIDEO_ASSET_NOT_FOUND'
+  | 'DOCUMENT_ASSET_NOT_FOUND'
+  | 'UNSUPPORTED_DOCUMENT_MIME_TYPE'
+  | 'DOCUMENT_UPLOAD_NOT_FOUND'
+  | 'DOCUMENT_UPLOAD_VERIFICATION_FAILED';
 
 export class MediaError extends Error {
   constructor(
@@ -19,5 +24,23 @@ export class VideoAssetNotFoundError extends MediaError {
 export class DocumentAssetNotFoundError extends MediaError {
   constructor() {
     super('DOCUMENT_ASSET_NOT_FOUND', 'Document asset was not found.');
+  }
+}
+
+export class UnsupportedDocumentMimeTypeError extends MediaError {
+  constructor() {
+    super('UNSUPPORTED_DOCUMENT_MIME_TYPE', 'Document MIME type is not supported.');
+  }
+}
+
+export class DocumentUploadNotFoundError extends MediaError {
+  constructor() {
+    super('DOCUMENT_UPLOAD_NOT_FOUND', 'Document upload was not found.');
+  }
+}
+
+export class DocumentUploadVerificationFailedError extends MediaError {
+  constructor() {
+    super('DOCUMENT_UPLOAD_VERIFICATION_FAILED', 'Document upload verification failed.');
   }
 }

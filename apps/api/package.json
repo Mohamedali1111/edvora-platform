@@ -16,6 +16,8 @@
     "prisma:generate": "prisma generate --config prisma.config.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1121.0",
+    "@aws-sdk/s3-request-presigner": "^3.1121.0",
     "@nestjs/common": "11.2.1",
     "@nestjs/core": "11.2.1",
     "@nestjs/jwt": "11.0.2",

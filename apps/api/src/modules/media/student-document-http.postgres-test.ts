@@ -35,11 +35,25 @@ import { testAuthConfig } from '../auth/test-helpers';
 import { CoursesModule } from '../courses/courses.module';
 import { INSTALLATION_ID_HEADER } from '../devices/types/device.types';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import type { MediaRuntimeConfig } from './media.config';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { MediaModule } from './media.module';
+import type { DocumentObjectMetadata, DocumentStorageProvider, PresignedUploadCapability } from './storage/document-storage.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
 const trustedOrigin = 'http://localhost:3000';
+const testMediaConfig: MediaRuntimeConfig = {
+  documents: {
+    r2: {
+      endpoint: 'https://example-account.r2.cloudflarestorage.com',
+      accessKeyId: 'test-access-key',
+      secretAccessKey: 'test-secret-key',
+      bucketName: 'test-documents',
+      uploadUrlTtlSeconds: 600,
+    },
+  },
+};
 
 // Fixed "now" so every startsAt/endsAt/availableFrom/availableUntil boundary assertion is
 // deterministic, matching the convention `student-course-http.postgres-test.ts` and
@@ -55,6 +69,7 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
   let refreshSessions: RefreshSessionService;
   let tokenCrypto: TokenCryptoService;
   let uuid: UuidV7Service;
+  let documentStorage: TestDocumentStorageProvider;
 
   beforeEach(async () => {
     const databaseConfig: DatabaseRuntimeConfig = {
@@ -65,6 +80,8 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
         idleTimeoutMillis: 10_000,
       },
     };
+
+    documentStorage = new TestDocumentStorageProvider();
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule, TenancyModule, CoursesModule, MediaModule],
@@ -87,6 +104,10 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
       })
       .overrideProvider(ClockService)
       .useValue({ now: () => NOW })
+      .overrideProvider(MEDIA_RUNTIME_CONFIG)
+      .useValue(testMediaConfig)
+      .overrideProvider(DOCUMENT_STORAGE_PROVIDER)
+      .useValue(documentStorage)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -581,6 +602,72 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
     await getAccess(setup).expect(HttpStatus.OK);
   });
 
+  it('denies an UPLOADING asset until instructor R2 confirmation verifies it and makes Student Slice B authorization succeed', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('upload-confirm-bridge');
+    const instructorToken = await issueAccessToken(instructorId, PlatformRole.INSTRUCTOR);
+
+    const uploadIntent = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${instructorToken}`)
+      .send({ fileName: 'bridge.pdf', mimeType: 'application/pdf', fileSizeBytes: 2048 })
+      .expect(HttpStatus.CREATED);
+    const { documentAssetId } = responseBody<{ documentAssetId: string }>(uploadIntent);
+
+    const studentId = await createStudent('upload-confirm-bridge-student');
+    const installationId = installation();
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Bridge course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Bridge document',
+      position: 1,
+      status: LessonStatus.PUBLISHED,
+      documentAssetId,
+    });
+    await createActiveDevice(studentId, installationId);
+    const studentToken = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    await request(server)
+      .get(accessPath(courseId, lessonId))
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.NOT_FOUND);
+
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: documentAssetId } });
+    documentStorage.objects.set(asset.externalAssetRef, {
+      exists: true,
+      contentLengthBytes: BigInt(2048),
+      contentType: 'application/pdf',
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${instructorToken}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ processingStatus: AssetProcessingStatus.READY }));
+
+    await expect(prisma.client.documentAsset.findUniqueOrThrow({ where: { id: documentAssetId } })).resolves.toMatchObject({
+      externalAssetRef: `tenants/${tenantId}/documents/${documentAssetId}`,
+      processingStatus: AssetProcessingStatus.READY,
+    });
+
+    await request(server)
+      .get(accessPath(courseId, lessonId))
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({
+          lessonId,
+          fileName: 'bridge.pdf',
+          mimeType: 'application/pdf',
+          fileSizeBytes: '2048',
+          ready: true,
+        }),
+      );
+  });
+
   // ---------------------------------------------------------------------------------------------
 
   async function clearData(): Promise<void> {
@@ -816,4 +903,40 @@ function installation(): string {
 
 function responseBody<T>(response: request.Response): T {
   return response.body as T;
+}
+
+class TestDocumentStorageProvider implements DocumentStorageProvider {
+  readonly objects = new Map<string, DocumentObjectMetadata>();
+
+  createPresignedUpload(input: {
+    objectKey: string;
+    contentType: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedUploadCapability> {
+    return Promise.resolve({
+      uploadUrl: `https://upload.example/${input.objectKey}?signature=redacted`,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+      headers: { 'Content-Type': input.contentType },
+    });
+  }
+
+  headObject(objectKey: string): Promise<DocumentObjectMetadata> {
+    return Promise.resolve(this.objects.get(objectKey) ?? { exists: false });
+  }
+
+  promoteObject(input: { sourceObjectKey: string; destinationObjectKey: string }): Promise<void> {
+    const source = this.objects.get(input.sourceObjectKey);
+    if (!source?.exists) {
+      return Promise.reject(new Error('test source object missing'));
+    }
+
+    this.objects.set(input.destinationObjectKey, { ...source });
+    return Promise.resolve();
+  }
+
+  deleteObject(objectKey: string): Promise<void> {
+    this.objects.delete(objectKey);
+    return Promise.resolve();
+  }
 }

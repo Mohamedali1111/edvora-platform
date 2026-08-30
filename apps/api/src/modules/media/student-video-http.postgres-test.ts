@@ -35,11 +35,25 @@ import { testAuthConfig } from '../auth/test-helpers';
 import { CoursesModule } from '../courses/courses.module';
 import { INSTALLATION_ID_HEADER } from '../devices/types/device.types';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import type { MediaRuntimeConfig } from './media.config';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { MediaModule } from './media.module';
+import type { DocumentObjectMetadata, DocumentStorageProvider, PresignedUploadCapability } from './storage/document-storage.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
 const trustedOrigin = 'http://localhost:3000';
+const testMediaConfig: MediaRuntimeConfig = {
+  documents: {
+    r2: {
+      endpoint: 'https://example-account.r2.cloudflarestorage.com',
+      accessKeyId: 'test-access-key',
+      secretAccessKey: 'test-secret-key',
+      bucketName: 'test-documents',
+      uploadUrlTtlSeconds: 600,
+    },
+  },
+};
 
 // Fixed "now" so every startsAt/endsAt/availableFrom/availableUntil boundary assertion is
 // deterministic, matching the convention this codebase already established (see
@@ -87,6 +101,10 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
       })
       .overrideProvider(ClockService)
       .useValue({ now: () => NOW })
+      .overrideProvider(MEDIA_RUNTIME_CONFIG)
+      .useValue(testMediaConfig)
+      .overrideProvider(DOCUMENT_STORAGE_PROVIDER)
+      .useValue(new UnusedDocumentStorageProvider())
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -844,4 +862,22 @@ function installation(): string {
 
 function responseBody<T>(response: request.Response): T {
   return response.body as T;
+}
+
+class UnusedDocumentStorageProvider implements DocumentStorageProvider {
+  createPresignedUpload(): Promise<PresignedUploadCapability> {
+    return Promise.reject(new Error('not used by student video access tests'));
+  }
+
+  headObject(): Promise<DocumentObjectMetadata> {
+    return Promise.reject(new Error('not used by student video access tests'));
+  }
+
+  promoteObject(): Promise<void> {
+    return Promise.reject(new Error('not used by student video access tests'));
+  }
+
+  deleteObject(): Promise<void> {
+    return Promise.reject(new Error('not used by student video access tests'));
+  }
 }

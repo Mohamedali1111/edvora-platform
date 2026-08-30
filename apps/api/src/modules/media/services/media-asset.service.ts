@@ -1,15 +1,40 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { AssetProcessingStatus } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
+import { ClockService } from '../../auth/services/clock.service';
+import { UuidV7Service } from '../../auth/services/uuid-v7.service';
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
-import { DocumentAssetNotFoundError, VideoAssetNotFoundError } from '../errors/media.errors';
-import type { DocumentAssetSummary, VideoAssetSummary } from '../types/media.types';
+import {
+  DocumentAssetNotFoundError,
+  DocumentUploadNotFoundError,
+  DocumentUploadVerificationFailedError,
+  UnsupportedDocumentMimeTypeError,
+  VideoAssetNotFoundError,
+} from '../errors/media.errors';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from '../media.constants';
+import type { MediaRuntimeConfig } from '../media.config';
+import {
+  DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES,
+  type CreateDocumentUploadIntentDto,
+} from '../dto/document-upload.dto';
+import type { DocumentStorageProvider } from '../storage/document-storage.provider';
+import type {
+  DocumentAssetSummary,
+  DocumentUploadConfirmation,
+  DocumentUploadIntent,
+  VideoAssetSummary,
+} from '../types/media.types';
 
 @Injectable()
 export class MediaAssetService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly authorization: TenantAuthorizationService,
+    private readonly uuid: UuidV7Service,
+    private readonly clock: ClockService,
+    @Inject(MEDIA_RUNTIME_CONFIG) private readonly mediaConfig: MediaRuntimeConfig,
+    @Inject(DOCUMENT_STORAGE_PROVIDER) private readonly documentStorage: DocumentStorageProvider,
   ) {}
 
   async listVideoAssets(
@@ -83,6 +108,255 @@ export class MediaAssetService {
 
     return toDocumentAssetSummary(asset);
   }
+
+  async createDocumentUploadIntent(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    input: CreateDocumentUploadIntentDto,
+  ): Promise<DocumentUploadIntent> {
+    await this.authorization.assertInstructorTenantAccess(principal, tenantId);
+    assertSupportedDocumentMimeType(input.mimeType);
+
+    const documentAssetId = this.uuid.create();
+    const temporaryObjectKey = temporaryDocumentObjectKey(tenantId, documentAssetId);
+    const now = this.clock.now();
+
+    await this.prismaService.client.documentAsset.create({
+      data: {
+        id: documentAssetId,
+        tenantId,
+        uploadedByUserId: principal.userId,
+        externalAssetRef: temporaryObjectKey,
+        fileName: input.fileName.trim(),
+        mimeType: input.mimeType,
+        fileSizeBytes: BigInt(input.fileSizeBytes),
+        processingStatus: AssetProcessingStatus.UPLOADING,
+      },
+    });
+
+    let capability: Awaited<ReturnType<DocumentStorageProvider['createPresignedUpload']>>;
+
+    try {
+      capability = await this.documentStorage.createPresignedUpload({
+        objectKey: temporaryObjectKey,
+        contentType: input.mimeType,
+        expiresInSeconds: this.mediaConfig.documents.r2.uploadUrlTtlSeconds,
+        now,
+      });
+    } catch (error) {
+      await this.prismaService.client.documentAsset.updateMany({
+        where: {
+          id: documentAssetId,
+          tenantId,
+          processingStatus: AssetProcessingStatus.UPLOADING,
+          externalAssetRef: temporaryObjectKey,
+        },
+        data: {
+          processingStatus: AssetProcessingStatus.FAILED,
+          failureReason: 'DOCUMENT_UPLOAD_SIGNING_FAILED',
+        },
+      });
+      throw error;
+    }
+
+    return {
+      documentAssetId,
+      uploadUrl: capability.uploadUrl,
+      expiresAt: capability.expiresAt,
+      headers: capability.headers,
+    };
+  }
+
+  async confirmDocumentUpload(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    documentAssetId: string,
+  ): Promise<DocumentUploadConfirmation> {
+    await this.authorization.assertInstructorTenantAccess(principal, tenantId);
+
+    const asset = await this.prismaService.client.documentAsset.findUnique({
+      where: { id_tenantId: { id: documentAssetId, tenantId } },
+      select: {
+        id: true,
+        externalAssetRef: true,
+        fileName: true,
+        mimeType: true,
+        fileSizeBytes: true,
+        processingStatus: true,
+      },
+    });
+
+    if (!asset) {
+      throw new DocumentAssetNotFoundError();
+    }
+
+    if (asset.processingStatus === AssetProcessingStatus.READY) {
+      return toDocumentUploadConfirmation(asset, null);
+    }
+
+    if (asset.processingStatus !== AssetProcessingStatus.UPLOADING) {
+      throw new DocumentUploadNotFoundError();
+    }
+
+    const temporaryObjectKey = temporaryDocumentObjectKey(tenantId, documentAssetId);
+    const finalObjectKey = finalDocumentObjectKey(tenantId, documentAssetId);
+
+    const metadata = await this.documentStorage.headObject(asset.externalAssetRef);
+
+    if (!metadata.exists) {
+      const current = await this.readDocumentConfirmationRow(tenantId, documentAssetId);
+      if (current?.processingStatus === AssetProcessingStatus.READY) {
+        return toDocumentUploadConfirmation(current, null);
+      }
+      throw new DocumentUploadNotFoundError();
+    }
+
+    const sizeMatches = metadata.contentLengthBytes === asset.fileSizeBytes;
+    const contentTypeMatches = !metadata.contentType || metadata.contentType === asset.mimeType;
+
+    if (!sizeMatches || !contentTypeMatches) {
+      await this.prismaService.client.documentAsset.updateMany({
+        where: {
+          id: documentAssetId,
+          tenantId,
+          processingStatus: AssetProcessingStatus.UPLOADING,
+        },
+        data: {
+          processingStatus: AssetProcessingStatus.FAILED,
+          failureReason: !sizeMatches ? 'DOCUMENT_UPLOAD_SIZE_MISMATCH' : 'DOCUMENT_UPLOAD_CONTENT_TYPE_MISMATCH',
+        },
+      });
+
+      const current = await this.prismaService.client.documentAsset.findUniqueOrThrow({
+        where: { id_tenantId: { id: documentAssetId, tenantId } },
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          fileSizeBytes: true,
+          processingStatus: true,
+        },
+      });
+
+      return toDocumentUploadConfirmation(current, null);
+    }
+
+    try {
+      await this.documentStorage.promoteObject({
+        sourceObjectKey: temporaryObjectKey,
+        destinationObjectKey: finalObjectKey,
+      });
+    } catch (error) {
+      const current = await this.readDocumentConfirmationRow(tenantId, documentAssetId);
+      if (current?.processingStatus === AssetProcessingStatus.READY) {
+        return toDocumentUploadConfirmation(current, null);
+      }
+      throw error;
+    }
+
+    const finalMetadata = await this.documentStorage.headObject(finalObjectKey);
+    const finalSizeMatches = finalMetadata.exists && finalMetadata.contentLengthBytes === asset.fileSizeBytes;
+    const finalContentTypeMatches = !finalMetadata.contentType || finalMetadata.contentType === asset.mimeType;
+
+    if (!finalSizeMatches || !finalContentTypeMatches) {
+      const current = await this.readDocumentConfirmationRow(tenantId, documentAssetId);
+      if (current?.processingStatus === AssetProcessingStatus.READY) {
+        return toDocumentUploadConfirmation(current, null);
+      }
+      throw new DocumentUploadVerificationFailedError();
+    }
+
+    const verifiedAt = this.clock.now();
+    const updated = await this.prismaService.client.documentAsset.updateMany({
+      where: {
+        id: documentAssetId,
+        tenantId,
+        processingStatus: AssetProcessingStatus.UPLOADING,
+        externalAssetRef: temporaryObjectKey,
+      },
+      data: {
+        externalAssetRef: finalObjectKey,
+        processingStatus: AssetProcessingStatus.READY,
+        failureReason: null,
+      },
+    });
+
+    if (updated.count === 0) {
+      const current = await this.prismaService.client.documentAsset.findUnique({
+        where: { id_tenantId: { id: documentAssetId, tenantId } },
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          fileSizeBytes: true,
+          processingStatus: true,
+        },
+      });
+
+      if (current?.processingStatus === AssetProcessingStatus.READY) {
+        return toDocumentUploadConfirmation(current, verifiedAt);
+      }
+
+      throw new DocumentUploadVerificationFailedError();
+    }
+
+    const ready = await this.prismaService.client.documentAsset.findUniqueOrThrow({
+      where: { id_tenantId: { id: documentAssetId, tenantId } },
+      select: {
+        id: true,
+        fileName: true,
+        mimeType: true,
+        fileSizeBytes: true,
+        processingStatus: true,
+      },
+    });
+
+    await this.tryDeleteTemporaryObjectIfStillSafe(ready, temporaryObjectKey);
+
+    return toDocumentUploadConfirmation(ready, verifiedAt);
+  }
+
+  private async readDocumentConfirmationRow(
+    tenantId: string,
+    documentAssetId: string,
+  ): Promise<{
+    id: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: bigint;
+    processingStatus: DocumentUploadConfirmation['processingStatus'];
+  } | null> {
+    return this.prismaService.client.documentAsset.findUnique({
+      where: { id_tenantId: { id: documentAssetId, tenantId } },
+      select: {
+        id: true,
+        fileName: true,
+        mimeType: true,
+        fileSizeBytes: true,
+        processingStatus: true,
+      },
+    });
+  }
+
+  private async tryDeleteTemporaryObjectIfStillSafe(
+    ready: {
+      id: string;
+      processingStatus: DocumentUploadConfirmation['processingStatus'];
+    },
+    temporaryObjectKey: string,
+  ): Promise<void> {
+    if (ready.processingStatus !== AssetProcessingStatus.READY) {
+      return;
+    }
+
+    try {
+      await this.documentStorage.deleteObject(temporaryObjectKey);
+    } catch {
+      // Cleanup is deliberately best-effort after the final object and DB READY state exist. A
+      // stale temporary object may still be overwritten by the old bearer PUT, but READY points at
+      // the separate final key, so the finalized asset cannot be mutated by that capability.
+    }
+  }
 }
 
 function toVideoAssetSummary(row: {
@@ -126,5 +400,39 @@ function toDocumentAssetSummary(row: {
     processingStatus: row.processingStatus,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function assertSupportedDocumentMimeType(mimeType: string): void {
+  if (!DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES.includes(mimeType as (typeof DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES)[number])) {
+    throw new UnsupportedDocumentMimeTypeError();
+  }
+}
+
+function temporaryDocumentObjectKey(tenantId: string, documentAssetId: string): string {
+  return `tenants/${tenantId}/document-uploads/${documentAssetId}`;
+}
+
+function finalDocumentObjectKey(tenantId: string, documentAssetId: string): string {
+  return `tenants/${tenantId}/documents/${documentAssetId}`;
+}
+
+function toDocumentUploadConfirmation(
+  row: {
+    id: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: bigint;
+    processingStatus: DocumentUploadConfirmation['processingStatus'];
+  },
+  verifiedAt: Date | null,
+): DocumentUploadConfirmation {
+  return {
+    documentAssetId: row.id,
+    processingStatus: row.processingStatus,
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    fileSizeBytes: row.fileSizeBytes.toString(),
+    verifiedAt,
   };
 }

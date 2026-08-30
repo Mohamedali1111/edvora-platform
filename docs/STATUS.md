@@ -8,7 +8,23 @@ Edvora Platform
 
 Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), and Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary) are completed. The repository has minimal framework foundations for API, web, and mobile; actual signed/ephemeral document/video access issuance, real streaming/DRM integration, and course lifecycle transitions are not implemented yet.
 
+Current media update: Media Slice D is now completed. Documents are locked to Cloudflare R2 and
+Videos are locked to Bunny Stream Standard Network. Actual student R2 download capability issuance
+and Bunny video integration remain pending.
+
 ## Completed Work
+
+- Media Slice D is completed: Documents are backed by Cloudflare R2 using the S3-compatible API,
+  while the locked video provider is Bunny Stream Standard Network. Instructor document upload now
+  uses a server-authorized direct-upload lifecycle: backend-generated `DocumentAsset` ID, short-lived
+  direct R2 PUT bearer capability for temporary key
+  `tenants/{tenantId}/document-uploads/{documentAssetId}`, client bytes flowing directly to R2,
+  backend `HEAD` verification of the temporary object, promotion/copy to final key
+  `tenants/{tenantId}/documents/{documentAssetId}`, final verification, and `UPLOADING -> READY`
+  only after `DocumentAsset.externalAssetRef` is set to the final key. A reused original PUT can
+  only overwrite the temporary key, never the READY asset's final object. Filenames remain metadata
+  only. NestJS does not proxy document bytes, R2 credentials/configuration are not exposed to
+  clients, and cleanup for abandoned `UPLOADING` assets is deferred.
 
 - Established root documentation for product, architecture, security, UI, release compliance, reliability, decisions, and future handoffs.
 - Established a pnpm workspace monorepo foundation.
@@ -113,6 +129,9 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 
 ## Pending Decisions
 
+- Provider selection is locked for V1 media: Documents = Cloudflare R2; Videos = Bunny Stream
+  Standard Network. Remaining media decisions are implementation details for student R2 download
+  capabilities and Bunny playback/DRM integration, not provider reselection.
 - Video/security provider selection after dedicated technical and cost evaluation.
 - Final visual branding, fonts, colors, and logo.
 - Final production auth hardening/tuning after implementation benchmarks and UX review.
@@ -446,6 +465,10 @@ Media Slice C (protected student Video Lesson playback authorization boundary) v
 - No formal provider-port interface was introduced (same rationale as Slice B, documented in `docs/MEDIA.md`); no HTTP route resembling `/student/videos/:videoAssetId` was added; no playback URL, signed URL, playback token, DRM license, or provider credential was fabricated anywhere in the response or tests. Media Slice A's instructor VideoAsset routes/response fields were not modified.
 
 ## Exact Recommended Next Step
+
+Implement student signed/ephemeral R2 document download issuance behind the now-complete Media
+Slice B authorization boundary, then implement Bunny Stream Standard Network video asset/playback
+capability integration behind Media Slice C without changing the locked provider decision.
 
 Select a storage/video provider (dedicated technical and cost evaluation, per `docs/STATUS.md`'s Pending Decisions), then implement actual ephemeral document/video access issuance behind the now-complete Media Slice B/C authorization boundaries, per `docs/DECISIONS.md`'s DRM-ready-not-DRM-implemented requirement. Also design an attempt result/review screen on top of the now-complete Quiz attempt/scoring/completion engine (Slices C and D). Also run a full auth/device/tenancy/workspace validation gate, since none has been run since the Course Slice B review's shared-utility fix.
 

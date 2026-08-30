@@ -25,11 +25,29 @@ import { UuidV7Service } from '../auth/services/uuid-v7.service';
 import { testAuthConfig } from '../auth/test-helpers';
 import { CoursesModule } from '../courses/courses.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import type { MediaRuntimeConfig } from './media.config';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { MediaModule } from './media.module';
+import type {
+  DocumentObjectMetadata,
+  DocumentStorageProvider,
+  PresignedUploadCapability,
+} from './storage/document-storage.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
 const trustedOrigin = 'http://localhost:3000';
+const testMediaConfig: MediaRuntimeConfig = {
+  documents: {
+    r2: {
+      endpoint: 'https://example-account.r2.cloudflarestorage.com',
+      accessKeyId: 'test-access-key',
+      secretAccessKey: 'test-secret-key',
+      bucketName: 'test-documents',
+      uploadUrlTtlSeconds: 600,
+    },
+  },
+};
 
 maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
   let app: INestApplication;
@@ -38,6 +56,7 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
   let accessTokens: AccessTokenService;
   let refreshSessions: RefreshSessionService;
   let uuid: UuidV7Service;
+  let documentStorage: FakeDocumentStorageProvider;
 
   beforeEach(async () => {
     const databaseConfig: DatabaseRuntimeConfig = {
@@ -48,6 +67,8 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
         idleTimeoutMillis: 10_000,
       },
     };
+
+    documentStorage = new FakeDocumentStorageProvider();
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule, TenancyModule, CoursesModule, MediaModule],
@@ -68,6 +89,10 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
           sameSite: 'lax',
         },
       })
+      .overrideProvider(MEDIA_RUNTIME_CONFIG)
+      .useValue(testMediaConfig)
+      .overrideProvider(DOCUMENT_STORAGE_PROVIDER)
+      .useValue(documentStorage)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -97,7 +122,7 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
     await app?.close();
   });
 
-  it('does not expose fake media registration routes before provider upload integration exists', async () => {
+  it('does not expose fake video registration or old fake document registration routes', async () => {
     const { token, tenantId } = await createInstructorTenant('registration-deferred');
 
     await request(server)
@@ -124,6 +149,357 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
 
     await expect(prisma.client.videoAsset.count()).resolves.toBe(0);
     await expect(prisma.client.documentAsset.count()).resolves.toBe(0);
+  });
+
+  it('creates an authorized direct R2 document upload intent with server-owned asset state and key', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('upload-intent');
+
+    const response = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fileName: 'Syllabus Week 1.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 2048,
+        tenantId: uuid.create(),
+        uploadedByUserId: uuid.create(),
+        externalAssetRef: 'client-controlled/key',
+        processingStatus: AssetProcessingStatus.READY,
+      })
+      .expect(HttpStatus.BAD_REQUEST);
+    expect(response.body).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+
+    const ok = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        fileName: 'Syllabus Week 1.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 2048,
+      })
+      .expect(HttpStatus.CREATED);
+
+    const body = responseBody<{
+      documentAssetId: string;
+      uploadUrl: string;
+      expiresAt: string;
+      headers: Record<string, string>;
+    }>(ok);
+
+    expect(body.documentAssetId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.uploadUrl).toBe(`https://upload.example/${documentStorage.lastUploadObjectKey}?signature=redacted`);
+    expect(body.headers).toEqual({ 'Content-Type': 'application/pdf' });
+    expect(new Date(body.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(610_000);
+    expect(JSON.stringify(body)).not.toMatch(/externalAssetRef|accessKey|secret|bucket|r2\.cloudflarestorage|client-controlled/i);
+
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: body.documentAssetId } });
+    expect(asset).toMatchObject({
+      tenantId,
+      uploadedByUserId: instructorId,
+      fileName: 'Syllabus Week 1.pdf',
+      mimeType: 'application/pdf',
+      processingStatus: AssetProcessingStatus.UPLOADING,
+    });
+    expect(asset.fileSizeBytes).toBe(BigInt(2048));
+    expect(asset.externalAssetRef).toBe(`tenants/${tenantId}/document-uploads/${body.documentAssetId}`);
+    expect(asset.externalAssetRef).not.toContain('Syllabus');
+    expect(documentStorage.uploadRequests).toEqual([
+      {
+        objectKey: asset.externalAssetRef,
+        contentType: 'application/pdf',
+        expiresInSeconds: 600,
+      },
+    ]);
+  });
+
+  it('rejects invalid document upload metadata without creating an asset', async () => {
+    const { token, tenantId } = await createInstructorTenant('invalid-metadata');
+
+    for (const payload of [
+      { fileName: '', mimeType: 'application/pdf', fileSizeBytes: 1024 },
+      { fileName: '   ', mimeType: 'application/pdf', fileSizeBytes: 1024 },
+      { fileName: 'x'.repeat(256), mimeType: 'application/pdf', fileSizeBytes: 1024 },
+      { fileName: 'notes.pdf', mimeType: 'text/html', fileSizeBytes: 1024 },
+      { fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes: 0 },
+      { fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes: 25 * 1024 * 1024 + 1 },
+    ]) {
+      await request(server)
+        .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(payload)
+        .expect(HttpStatus.BAD_REQUEST);
+    }
+
+    await expect(prisma.client.documentAsset.count()).resolves.toBe(0);
+  });
+
+  it('denies non-instructors and foreign tenants for document upload intents', async () => {
+    const { tenantId } = await createInstructorTenant('upload-denied-owner');
+    const { token: foreignToken } = await createInstructorTenant('upload-denied-foreign');
+    const studentToken = await issueAccessToken(await createUser('upload-denied-student', PlatformRole.STUDENT), PlatformRole.STUDENT);
+
+    const payload = { fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes: 1024 };
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send(payload)
+      .expect(HttpStatus.FORBIDDEN);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${foreignToken}`)
+      .send(payload)
+      .expect(HttpStatus.FORBIDDEN);
+
+    await expect(prisma.client.documentAsset.count()).resolves.toBe(0);
+  });
+
+  it('does not create a successful asset state when provider signing fails', async () => {
+    const { token, tenantId } = await createInstructorTenant('signing-fails');
+    documentStorage.failSigning = true;
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes: 1024 })
+      .expect(HttpStatus.INTERNAL_SERVER_ERROR);
+
+    await expect(prisma.client.documentAsset.count()).resolves.toBe(1);
+    await expect(prisma.client.documentAsset.findFirstOrThrow()).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.FAILED,
+      failureReason: 'DOCUMENT_UPLOAD_SIGNING_FAILED',
+    });
+  });
+
+  it('confirms an uploaded R2 document by promoting the verified temporary object to the final READY key', async () => {
+    const { token, tenantId } = await createInstructorTenant('confirm-ready');
+    const created = await createUploadIntent(token, tenantId, 2048);
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } });
+    documentStorage.objects.set(asset.externalAssetRef, {
+      exists: true,
+      contentLengthBytes: BigInt(2048),
+      contentType: 'application/pdf',
+    });
+
+    const confirmed = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    expect(confirmed.body).toMatchObject({
+      documentAssetId: created.documentAssetId,
+      processingStatus: AssetProcessingStatus.READY,
+      fileSizeBytes: '2048',
+    });
+    expect(JSON.stringify(confirmed.body)).not.toMatch(/externalAssetRef|accessKey|secret|bucket|uploadUrl|signature/i);
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } }),
+    ).resolves.toMatchObject({
+      externalAssetRef: `tenants/${tenantId}/documents/${created.documentAssetId}`,
+      processingStatus: AssetProcessingStatus.READY,
+      failureReason: null,
+    });
+    expect(documentStorage.objects.has(`tenants/${tenantId}/document-uploads/${created.documentAssetId}`)).toBe(false);
+    expect(documentStorage.objects.get(`tenants/${tenantId}/documents/${created.documentAssetId}`)).toEqual({
+      exists: true,
+      contentLengthBytes: BigInt(2048),
+      contentType: 'application/pdf',
+    });
+
+    const repeated = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    expect(repeated.body).toMatchObject({
+      documentAssetId: created.documentAssetId,
+      processingStatus: AssetProcessingStatus.READY,
+    });
+  });
+
+  it('keeps READY pointed at the finalized object when the old upload capability overwrites the temporary key', async () => {
+    const { token, tenantId } = await createInstructorTenant('old-put-reuse');
+    const created = await createUploadIntent(token, tenantId, 1024);
+    const temporaryKey = `tenants/${tenantId}/document-uploads/${created.documentAssetId}`;
+    const finalKey = `tenants/${tenantId}/documents/${created.documentAssetId}`;
+    documentStorage.objects.set(temporaryKey, {
+      exists: true,
+      contentLengthBytes: BigInt(1024),
+      contentType: 'application/pdf',
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    const ready = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } });
+    expect(ready).toMatchObject({
+      externalAssetRef: finalKey,
+      processingStatus: AssetProcessingStatus.READY,
+    });
+    expect(documentStorage.objects.get(finalKey)).toMatchObject({
+      contentLengthBytes: BigInt(1024),
+      contentType: 'application/pdf',
+    });
+
+    documentStorage.objects.set(temporaryKey, {
+      exists: true,
+      contentLengthBytes: BigInt(1),
+      contentType: 'application/pdf',
+    });
+
+    const afterOverwrite = await prisma.client.documentAsset.findUniqueOrThrow({
+      where: { id: created.documentAssetId },
+    });
+    expect(afterOverwrite.externalAssetRef).toBe(finalKey);
+    expect(documentStorage.objects.get(afterOverwrite.externalAssetRef)).toMatchObject({
+      contentLengthBytes: BigInt(1024),
+      contentType: 'application/pdf',
+    });
+  });
+
+  it('does not mark missing or transient-provider-failure uploads READY', async () => {
+    const { token, tenantId } = await createInstructorTenant('confirm-missing');
+    const missing = await createUploadIntent(token, tenantId, 1024);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${missing.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'DOCUMENT_UPLOAD_NOT_FOUND' } }));
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: missing.documentAssetId } }),
+    ).resolves.toMatchObject({ processingStatus: AssetProcessingStatus.UPLOADING });
+
+    const transient = await createUploadIntent(token, tenantId, 1024);
+    documentStorage.failHead = true;
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${transient.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.INTERNAL_SERVER_ERROR);
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: transient.documentAssetId } }),
+    ).resolves.toMatchObject({ processingStatus: AssetProcessingStatus.UPLOADING });
+  });
+
+  it('marks definite invalid uploads FAILED without trusting client claims', async () => {
+    const { token, tenantId } = await createInstructorTenant('confirm-invalid');
+    const created = await createUploadIntent(token, tenantId, 1024);
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } });
+    documentStorage.objects.set(asset.externalAssetRef, {
+      exists: true,
+      contentLengthBytes: BigInt(2048),
+      contentType: 'application/pdf',
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ succeeded: true, fileSizeBytes: 1024, processingStatus: AssetProcessingStatus.READY })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ processingStatus: AssetProcessingStatus.FAILED }));
+
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } }),
+    ).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.FAILED,
+      failureReason: 'DOCUMENT_UPLOAD_SIZE_MISMATCH',
+    });
+  });
+
+  it('marks a definite provider content-type mismatch FAILED and never READY', async () => {
+    const { token, tenantId } = await createInstructorTenant('confirm-mime-invalid');
+    const created = await createUploadIntent(token, tenantId, 1024);
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } });
+    documentStorage.objects.set(asset.externalAssetRef, {
+      exists: true,
+      contentLengthBytes: BigInt(1024),
+      contentType: 'text/html',
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ processingStatus: AssetProcessingStatus.FAILED }));
+
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } }),
+    ).resolves.toMatchObject({
+      externalAssetRef: asset.externalAssetRef,
+      processingStatus: AssetProcessingStatus.FAILED,
+      failureReason: 'DOCUMENT_UPLOAD_CONTENT_TYPE_MISMATCH',
+    });
+    expect(documentStorage.objects.has(`tenants/${tenantId}/documents/${created.documentAssetId}`)).toBe(false);
+  });
+
+  it('denies random and cross-tenant confirmation without leaking or regressing state', async () => {
+    const owner = await createInstructorTenant('confirm-owner');
+    const other = await createInstructorTenant('confirm-other');
+    const created = await createUploadIntent(owner.token, owner.tenantId, 1024);
+
+    await request(server)
+      .post(`/instructor/tenants/${owner.tenantId}/media/documents/${uuid.create()}/confirm-upload`)
+      .set('Authorization', `Bearer ${owner.token}`)
+      .expect(HttpStatus.NOT_FOUND)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'DOCUMENT_ASSET_NOT_FOUND' } }));
+
+    await request(server)
+      .post(`/instructor/tenants/${other.tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+      .set('Authorization', `Bearer ${other.token}`)
+      .expect(HttpStatus.NOT_FOUND)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'DOCUMENT_ASSET_NOT_FOUND' } }));
+
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } }),
+    ).resolves.toMatchObject({ processingStatus: AssetProcessingStatus.UPLOADING });
+  });
+
+  it('concurrent successful confirmations converge to READY', async () => {
+    const { token, tenantId } = await createInstructorTenant('confirm-concurrent');
+    const created = await createUploadIntent(token, tenantId, 4096);
+    const asset = await prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } });
+    documentStorage.objects.set(asset.externalAssetRef, {
+      exists: true,
+      contentLengthBytes: BigInt(4096),
+      contentType: 'application/pdf',
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        request(server)
+          .post(`/instructor/tenants/${tenantId}/media/documents/${created.documentAssetId}/confirm-upload`)
+          .set('Authorization', `Bearer ${token}`),
+      ),
+    );
+
+    expect(responses.map((response) => response.status)).toEqual([
+      HttpStatus.OK,
+      HttpStatus.OK,
+      HttpStatus.OK,
+      HttpStatus.OK,
+    ]);
+    await expect(
+      prisma.client.documentAsset.findUniqueOrThrow({ where: { id: created.documentAssetId } }),
+    ).resolves.toMatchObject({
+      externalAssetRef: `tenants/${tenantId}/documents/${created.documentAssetId}`,
+      processingStatus: AssetProcessingStatus.READY,
+    });
+  });
+
+  it('does not accept document bytes through NestJS upload-intent routes', async () => {
+    const { token, tenantId } = await createInstructorTenant('bytes-not-proxied');
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/pdf')
+      .send(Buffer.from('%PDF fake body'))
+      .expect(HttpStatus.BAD_REQUEST);
+
+    await expect(prisma.client.documentAsset.count()).resolves.toBe(0);
+    expect(documentStorage.uploadRequests).toEqual([]);
   });
 
   it('lists video and document assets by tenant with deterministic bounded pagination', async () => {
@@ -419,4 +795,77 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
     const session = await refreshSessions.createSession({ userId, channel: 'MOBILE' });
     return accessTokens.sign({ userId, sessionId: session.sessionId, platformRole });
   }
+
+  async function createUploadIntent(
+    token: string,
+    tenantId: string,
+    fileSizeBytes: number,
+  ): Promise<{ documentAssetId: string }> {
+    const response = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes })
+      .expect(HttpStatus.CREATED);
+
+    return responseBody<{ documentAssetId: string }>(response);
+  }
 });
+
+class FakeDocumentStorageProvider implements DocumentStorageProvider {
+  readonly uploadRequests: Array<{ objectKey: string; contentType: string; expiresInSeconds: number }> = [];
+  readonly objects = new Map<string, DocumentObjectMetadata>();
+  lastUploadObjectKey = '';
+  failSigning = false;
+  failHead = false;
+
+  createPresignedUpload(input: {
+    objectKey: string;
+    contentType: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedUploadCapability> {
+    if (this.failSigning) {
+      return Promise.reject(new Error('test signing failure'));
+    }
+
+    this.lastUploadObjectKey = input.objectKey;
+    this.uploadRequests.push({
+      objectKey: input.objectKey,
+      contentType: input.contentType,
+      expiresInSeconds: input.expiresInSeconds,
+    });
+
+    return Promise.resolve({
+      uploadUrl: `https://upload.example/${input.objectKey}?signature=redacted`,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+      headers: { 'Content-Type': input.contentType },
+    });
+  }
+
+  headObject(objectKey: string): Promise<DocumentObjectMetadata> {
+    if (this.failHead) {
+      return Promise.reject(new Error('test transient provider failure'));
+    }
+
+    return Promise.resolve(this.objects.get(objectKey) ?? { exists: false });
+  }
+
+  promoteObject(input: { sourceObjectKey: string; destinationObjectKey: string }): Promise<void> {
+    const source = this.objects.get(input.sourceObjectKey);
+    if (!source?.exists) {
+      return Promise.reject(new Error('test source object missing'));
+    }
+
+    this.objects.set(input.destinationObjectKey, { ...source });
+    return Promise.resolve();
+  }
+
+  deleteObject(objectKey: string): Promise<void> {
+    this.objects.delete(objectKey);
+    return Promise.resolve();
+  }
+}
+
+function responseBody<T>(response: request.Response): T {
+  return response.body as T;
+}
