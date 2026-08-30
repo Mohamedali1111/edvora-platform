@@ -1,13 +1,17 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { StudentDeviceGuard } from '../../devices/http/student-device.guard';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
-import { StudentCourseIdParamDto } from '../dto/course-params.dto';
+import { StudentCourseIdParamDto, StudentLessonIdParamDto } from '../dto/course-params.dto';
 import { StudentCourseAccessService } from '../services/student-course-access.service';
-import type { StudentCourseDetail, StudentCourseSummary } from '../types/student-course.types';
+import type {
+  StudentCourseDetail,
+  StudentCourseSummary,
+  StudentLessonProgressSummary,
+} from '../types/student-course.types';
 
 type StudentCourseListResponse = {
   items: StudentCourseSummary[];
@@ -50,5 +54,14 @@ export class StudentCourseController {
     @Param() params: StudentCourseIdParamDto,
   ): Promise<StudentCourseDetail> {
     return this.access.getCourseStructure(principal, params.courseId);
+  }
+
+  @Post(':courseId/lessons/:lessonId/complete')
+  @HttpCode(HttpStatus.OK)
+  async complete(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: StudentLessonIdParamDto,
+  ): Promise<StudentLessonProgressSummary> {
+    return this.access.completeLesson(principal, params.courseId, params.lessonId);
   }
 }

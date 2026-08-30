@@ -7,7 +7,8 @@ export type CourseErrorCode =
   | 'INVALID_SECTION_REORDER'
   | 'INVALID_LESSON_REORDER'
   | 'INVALID_LESSON_TYPE_REFERENCE'
-  | 'LESSON_REFERENCE_NOT_FOUND';
+  | 'LESSON_REFERENCE_NOT_FOUND'
+  | 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED';
 
 export class CourseError extends Error {
   constructor(
@@ -81,6 +82,15 @@ export class LessonReferenceNotFoundError extends CourseError {
     super(
       'LESSON_REFERENCE_NOT_FOUND',
       'Referenced video asset, document asset, or quiz was not found.',
+    );
+  }
+}
+
+export class QuizLessonCompletionNotAllowedError extends CourseError {
+  constructor() {
+    super(
+      'QUIZ_LESSON_COMPLETION_NOT_ALLOWED',
+      'Quiz lessons cannot be manually marked completed.',
     );
   }
 }

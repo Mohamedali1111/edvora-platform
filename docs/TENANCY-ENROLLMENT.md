@@ -12,12 +12,13 @@ Implemented:
 - Instructor tenant-scoped enrollment creation and revocation.
 - Student enrollment listing behind authentication and student-device authorization.
 - Student course entitlement and read access (own entitled course list, entitled course structure) behind authentication, student-device authorization, and the full course-content entitlement chain. Course, section, and lesson *authoring* APIs are documented separately (see `docs/STATUS.md`'s Course Slice A/B entries).
+- Minimal student lesson progress: reading own progress alongside course structure, and marking an accessible non-quiz lesson completed.
 
 Not implemented:
 
 - Video, document, or quiz authoring/upload APIs.
 - Protected content delivery (playback authorization, document access, quiz execution).
-- Lesson progress.
+- Video watch-time/resume-position tracking, quiz-derived progress, and persisted aggregate course-percentage fields.
 - Student/instructor frontend or mobile UI.
 - Email delivery for activation links.
 - Payments, MFA, Redis, push notifications, or distributed rate limiting.
@@ -142,6 +143,16 @@ Implemented by one focused, reusable `StudentCourseAccessService` (`apps/api/src
 - **Unavailable lessons are omitted, not exposed as locked metadata.** A lesson outside its `availableFrom`/`availableUntil` window (or not `PUBLISHED`) is simply absent from the response — this is the conservative choice where neither `docs/PRODUCT.md` nor `docs/BACKEND-DOMAIN.md` specify one, since omission leaks no title, type, or existence of content the student cannot yet reach, whereas a "locked" placeholder would.
 - **Responses are student-safe by construction.** New `Student*` response types (distinct from the instructor-facing `CourseSummary`/`CourseSectionSummary`/`LessonSummary` family) never include ownership/authoring fields, and for typed lessons expose only: VIDEO — processing status and duration; DOCUMENT — file name, MIME type, size; QUIZ — title and status. Provider keys, external asset references, internal asset/quiz IDs, playback/download URLs, and quiz questions/options/answers are never included. Protected playback authorization, document access, and quiz execution remain separate, later endpoints.
 
+## Minimal Lesson Progress (Course Milestone Slice D)
+
+Built directly on the Slice C entitlement chain — no new controller-level authorization logic. `StudentCourseAccessService` gained two capabilities:
+
+- **Read**: `GET /student/courses/:courseId` now includes each lesson's `progress: { status, completedAt }`. This is one additional query scoped to `(studentUserId, enrollmentId)` alongside the existing course-structure query (never per-lesson), with results mapped onto lessons by ID in memory. A lesson with no `LessonProgress` row reads as `NOT_STARTED` with `completedAt: null` — a row is never created merely to serve a read.
+- **Write**: `POST /student/courses/:courseId/lessons/:lessonId/complete` marks a VIDEO or DOCUMENT lesson completed. It reuses the same entitlement proof as the read side, then re-applies the identical published-section/published-lesson/availability-window predicate the structure query uses before allowing completion — a lesson that would not currently appear in the student's course structure cannot be completed either, and the failure (wrong course/tenant, DRAFT/ARCHIVED, outside its availability window) is the same `LessonNotFoundError` used elsewhere, so nothing new leaks existence. QUIZ lessons are explicitly rejected (`QuizLessonCompletionNotAllowedError`, 400) — quiz completion belongs to the future quiz-execution domain.
+- **Ownership**: `studentUserId` is always `principal.userId` and `enrollmentId` is always the value the same entitlement check just resolved — neither is ever accepted as a request input, so there is no way to reference or mutate another student's `LessonProgress` row.
+- **Idempotency**: completion attempts a `create` first (the common case). On the `(studentUserId, lessonId, enrollmentId)` unique-constraint conflict, it falls back to an `updateMany` guarded by `status: { not: COMPLETED }` — this is what makes a stale NOT_STARTED/STARTED row transition exactly once, an already-COMPLETED row return unchanged without re-stamping `completedAt`, and any number of concurrent duplicate requests converge to exactly one row, all without an explicit lock.
+- **Deliberately not implemented**: video watch-time/resume-position writes, quiz-derived completion, and persisted aggregate course-percentage fields — all explicitly out of this milestone's scope.
+
 ## Concurrency And Integrity
 
 The implementation relies on existing PostgreSQL uniqueness and foreign-key constraints plus transactions:
@@ -169,7 +180,7 @@ Events contain stable IDs and state metadata only. They must not contain raw act
 ## Deferred
 
 - Instructor/student UI.
-- LessonProgress reads/writes and completion tracking.
+- Video watch-time/resume-position tracking, quiz-derived completion, and persisted aggregate course-percentage fields.
 - Protected video playback authorization, document access, and quiz authoring/execution.
 - Uploads/provider integration for video and document assets.
 - Student removal/reactivation endpoints.

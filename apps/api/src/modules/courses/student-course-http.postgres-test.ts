@@ -39,9 +39,12 @@ const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
 const trustedOrigin = 'http://localhost:3000';
 
-// Fixed "now" so every startsAt/endsAt boundary assertion is deterministic.
+// Fixed "now" so every startsAt/endsAt boundary assertion is deterministic. `currentNow` is
+// mutable (reset to NOW in beforeEach) so individual tests can advance the clock between calls
+// to prove a completion timestamp is stamped once and never silently re-stamped later.
 const NOW = new Date('2026-06-15T12:00:00.000Z');
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+let currentNow = NOW;
 
 maybeDescribe('student course HTTP PostgreSQL integration', () => {
   let app: INestApplication;
@@ -53,6 +56,7 @@ maybeDescribe('student course HTTP PostgreSQL integration', () => {
   let uuid: UuidV7Service;
 
   beforeEach(async () => {
+    currentNow = NOW;
     const databaseConfig: DatabaseRuntimeConfig = {
       databaseUrl: testDatabaseUrl as string,
       pool: {
@@ -82,7 +86,7 @@ maybeDescribe('student course HTTP PostgreSQL integration', () => {
         },
       })
       .overrideProvider(ClockService)
-      .useValue({ now: () => NOW })
+      .useValue({ now: () => currentNow })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -226,6 +230,7 @@ maybeDescribe('student course HTTP PostgreSQL integration', () => {
       string,
       unknown
     >;
+    expect(videoLesson.progress).toEqual({ status: 'NOT_STARTED', completedAt: null });
     expect(videoLesson.video).toMatchObject({ processingStatus: 'UPLOADING', durationSeconds: null });
     expect(Object.keys(videoLesson.video as object).sort()).toEqual(['durationSeconds', 'processingStatus'].sort());
     expect(videoLesson.document).toBeNull();
@@ -559,6 +564,405 @@ maybeDescribe('student course HTTP PostgreSQL integration', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .set(INSTALLATION_ID_HEADER, installation(12))
       .expect(HttpStatus.FORBIDDEN);
+  });
+
+  it('reads missing progress as NOT_STARTED without inserting a LessonProgress row', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('progress-default');
+    const studentId = await createStudent('progress-default-student');
+    const installationId = installation(13);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Progress default course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Lesson',
+      position: 1,
+      type: LessonType.QUIZ,
+      status: LessonStatus.PUBLISHED,
+      reference: { quizId },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const response = await request(server)
+      .get(`/student/courses/${courseId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const detail = responseBody<{
+      sections: Array<{ lessons: Array<{ lessonId: string; progress: { status: string; completedAt: null } }> }>;
+    }>(response);
+    expect(detail.sections[0].lessons[0]).toMatchObject({
+      lessonId,
+      progress: { status: 'NOT_STARTED', completedAt: null },
+    });
+
+    await expect(prisma.client.lessonProgress.count({ where: { lessonId } })).resolves.toBe(0);
+  });
+
+  it('completes an accessible VIDEO lesson and an accessible DOCUMENT lesson, creating exactly one row each', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('complete-basic');
+    const studentId = await createStudent('complete-basic-student');
+    const installationId = installation(14);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Complete basic course', CourseStatus.PUBLISHED);
+    const enrollmentId = await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const documentAssetId = await createDocumentAssetDirect(tenantId, instructorId);
+    const videoLessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Video lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+    const documentLessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Document lesson',
+      position: 2,
+      type: LessonType.DOCUMENT,
+      status: LessonStatus.PUBLISHED,
+      reference: { documentAssetId },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const videoResponse = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${videoLessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    expect(videoResponse.body).toMatchObject({ lessonId: videoLessonId, status: 'COMPLETED' });
+
+    const documentResponse = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${documentLessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    expect(documentResponse.body).toMatchObject({ lessonId: documentLessonId, status: 'COMPLETED' });
+
+    for (const lessonId of [videoLessonId, documentLessonId]) {
+      const rows = await prisma.client.lessonProgress.findMany({ where: { lessonId } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        tenantId,
+        courseId,
+        studentUserId: studentId,
+        enrollmentId,
+        status: 'COMPLETED',
+      });
+      expect(rows[0].completedAt?.toISOString()).toBe(currentNow.toISOString());
+    }
+  });
+
+  it('is idempotent on repeated completion and does not re-stamp an already-COMPLETED lesson', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('idempotent');
+    const studentId = await createStudent('idempotent-student');
+    const installationId = installation(15);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Idempotent course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const first = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const firstCompletedAt = (first.body as { completedAt: string }).completedAt;
+    expect(firstCompletedAt).toBe(currentNow.toISOString());
+
+    // Advance the clock, then complete again: a stable, already-COMPLETED lesson must not be
+    // re-stamped with the new time.
+    currentNow = new Date(NOW.getTime() + ONE_DAY_MS);
+
+    const second = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    expect(second.body).toMatchObject({ lessonId, status: 'COMPLETED', completedAt: firstCompletedAt });
+
+    await expect(prisma.client.lessonProgress.count({ where: { lessonId } })).resolves.toBe(1);
+  });
+
+  it('transitions existing STARTED progress to COMPLETED', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('started-transition');
+    const studentId = await createStudent('started-transition-student');
+    const installationId = installation(16);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Started course', CourseStatus.PUBLISHED);
+    const enrollmentId = await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+    await prisma.client.lessonProgress.create({
+      data: {
+        id: uuid.create(),
+        tenantId,
+        courseId,
+        lessonId,
+        studentUserId: studentId,
+        enrollmentId,
+        status: 'STARTED',
+        startedAt: new Date(NOW.getTime() - ONE_DAY_MS),
+      },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const response = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    expect(response.body).toMatchObject({ lessonId, status: 'COMPLETED', completedAt: currentNow.toISOString() });
+
+    const rows = await prisma.client.lessonProgress.findMany({ where: { lessonId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('COMPLETED');
+  });
+
+  it('cannot manually complete a QUIZ lesson', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('quiz-complete');
+    const studentId = await createStudent('quiz-complete-student');
+    const installationId = installation(17);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Quiz course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Quiz lesson',
+      position: 1,
+      type: LessonType.QUIZ,
+      status: LessonStatus.PUBLISHED,
+      reference: { quizId },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const response = await request(server)
+      .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.BAD_REQUEST);
+    expect(response.body).toMatchObject({ error: { code: 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED' } });
+
+    await expect(prisma.client.lessonProgress.count({ where: { lessonId } })).resolves.toBe(0);
+  });
+
+  it('cannot complete an unavailable lesson (DRAFT, ARCHIVED, before availableFrom, or at/after availableUntil)', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('unavailable-complete');
+    const studentId = await createStudent('unavailable-complete-student');
+    const installationId = installation(18);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Unavailable course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const draftSectionId = await createSectionDirect(tenantId, courseId, 'Draft section', 2, SectionStatus.DRAFT);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+
+    const draftLesson = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Draft lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.DRAFT,
+      reference: { videoAssetId },
+    });
+    const archivedLesson = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Archived lesson',
+      position: 2,
+      type: LessonType.VIDEO,
+      status: LessonStatus.ARCHIVED,
+      reference: { videoAssetId },
+    });
+    const notYetAvailable = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Not yet available',
+      position: 3,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+      availableFrom: new Date(NOW.getTime() + ONE_DAY_MS),
+    });
+    const noLongerAvailable = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'No longer available',
+      position: 4,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+      availableUntil: NOW,
+    });
+    const lessonUnderDraftSection = await createLessonDirect(tenantId, courseId, draftSectionId, {
+      title: 'Lesson under draft section',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    for (const lessonId of [draftLesson, archivedLesson, notYetAvailable, noLongerAvailable, lessonUnderDraftSection]) {
+      const response = await request(server)
+        .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+        .set('Authorization', `Bearer ${token}`)
+        .set(INSTALLATION_ID_HEADER, installationId)
+        .expect(HttpStatus.NOT_FOUND);
+      expect(response.body).toMatchObject({ error: { code: 'LESSON_NOT_FOUND' } });
+    }
+
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+  });
+
+  it('cannot complete a lesson belonging to another Course', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('foreign-course-complete');
+    const studentId = await createStudent('foreign-course-complete-student');
+    const installationId = installation(19);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const authorizedCourse = await createCourseDirect(tenantId, instructorId, 'Authorized course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, authorizedCourse, instructorId, EnrollmentStatus.ACTIVE);
+
+    const foreignCourse = await createCourseDirect(tenantId, instructorId, 'Foreign course', CourseStatus.PUBLISHED);
+    const foreignSection = await createSectionDirect(tenantId, foreignCourse, 'Foreign section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const foreignLesson = await createLessonDirect(tenantId, foreignCourse, foreignSection, {
+      title: 'Foreign lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const response = await request(server)
+      .post(`/student/courses/${authorizedCourse}/lessons/${foreignLesson}/complete`)
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.NOT_FOUND);
+    expect(response.body).toMatchObject({ error: { code: 'LESSON_NOT_FOUND' } });
+
+    await expect(prisma.client.lessonProgress.count({ where: { lessonId: foreignLesson } })).resolves.toBe(0);
+  });
+
+  it("isolates progress per student: one student's completion never appears in another student's read, and Course detail returns only the authenticated student's own progress", async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('progress-isolation');
+    const studentA = await createStudent('progress-isolation-a');
+    const studentB = await createStudent('progress-isolation-b');
+    const installationA = installation(21);
+    const installationB = installation(22);
+    await createTenantStudent(tenantId, studentA, TenantStudentStatus.ACTIVE);
+    await createTenantStudent(tenantId, studentB, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Shared course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentA, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    await createEnrollmentDirect(tenantId, studentB, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Shared lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+
+    await createActiveDevice(studentA, installationA);
+    await createActiveDevice(studentB, installationB);
+    const tokenA = await issueAccessToken(studentA, PlatformRole.STUDENT);
+    const tokenB = await issueAccessToken(studentB, PlatformRole.STUDENT);
+
+    // Student B completes the lesson; student A never called complete.
+    await request(server)
+      .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+      .set('Authorization', `Bearer ${tokenB}`)
+      .set(INSTALLATION_ID_HEADER, installationB)
+      .expect(HttpStatus.OK);
+
+    const detailForA = await request(server)
+      .get(`/student/courses/${courseId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .set(INSTALLATION_ID_HEADER, installationA)
+      .expect(HttpStatus.OK);
+    const lessonsForA = responseBody<{
+      sections: Array<{ lessons: Array<{ lessonId: string; progress: { status: string } }> }>;
+    }>(detailForA).sections[0].lessons;
+    expect(lessonsForA.find((lesson) => lesson.lessonId === lessonId)?.progress.status).toBe('NOT_STARTED');
+
+    const detailForB = await request(server)
+      .get(`/student/courses/${courseId}`)
+      .set('Authorization', `Bearer ${tokenB}`)
+      .set(INSTALLATION_ID_HEADER, installationB)
+      .expect(HttpStatus.OK);
+    const lessonsForB = responseBody<{
+      sections: Array<{ lessons: Array<{ lessonId: string; progress: { status: string } }> }>;
+    }>(detailForB).sections[0].lessons;
+    expect(lessonsForB.find((lesson) => lesson.lessonId === lessonId)?.progress.status).toBe('COMPLETED');
+
+    const rows = await prisma.client.lessonProgress.findMany({ where: { lessonId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].studentUserId).toBe(studentB);
+  });
+
+  it('does not create duplicate LessonProgress rows under concurrent duplicate completion', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('concurrent-complete');
+    const studentId = await createStudent('concurrent-complete-student');
+    const installationId = installation(23);
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Concurrent complete course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Lesson',
+      position: 1,
+      type: LessonType.VIDEO,
+      status: LessonStatus.PUBLISHED,
+      reference: { videoAssetId },
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const responses = await Promise.all([
+      request(server)
+        .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+        .set('Authorization', `Bearer ${token}`)
+        .set(INSTALLATION_ID_HEADER, installationId),
+      request(server)
+        .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+        .set('Authorization', `Bearer ${token}`)
+        .set(INSTALLATION_ID_HEADER, installationId),
+      request(server)
+        .post(`/student/courses/${courseId}/lessons/${lessonId}/complete`)
+        .set('Authorization', `Bearer ${token}`)
+        .set(INSTALLATION_ID_HEADER, installationId),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(HttpStatus.OK);
+      expect(response.body).toMatchObject({ lessonId, status: 'COMPLETED' });
+    }
+
+    await expect(prisma.client.lessonProgress.count({ where: { lessonId } })).resolves.toBe(1);
   });
 
   async function clearStudentCourseData(): Promise<void> {

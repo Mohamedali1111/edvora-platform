@@ -1,4 +1,9 @@
-import type { AssetProcessingStatus, LessonType, QuizStatus } from '../../../../.generated/prisma/client';
+import type {
+  AssetProcessingStatus,
+  LessonProgressStatus,
+  LessonType,
+  QuizStatus,
+} from '../../../../.generated/prisma/client';
 
 /**
  * Student-facing response shapes are deliberately separate from the instructor `CourseSummary`/
@@ -35,6 +40,14 @@ export type StudentQuizLessonMetadata = {
   status: QuizStatus;
 };
 
+// A missing LessonProgress row is represented as NOT_STARTED with no completedAt — a row is
+// never created merely to serve a read. `progress` intentionally omits video watch-time/resume
+// fields and the internal LessonProgress ID; only what the app needs to render lesson state.
+export type StudentLessonProgress = {
+  status: LessonProgressStatus;
+  completedAt: Date | null;
+};
+
 export type StudentLessonSummary = {
   lessonId: string;
   sectionId: string;
@@ -45,6 +58,13 @@ export type StudentLessonSummary = {
   video: StudentVideoLessonMetadata | null;
   document: StudentDocumentLessonMetadata | null;
   quiz: StudentQuizLessonMetadata | null;
+  progress: StudentLessonProgress;
+};
+
+export type StudentLessonProgressSummary = {
+  lessonId: string;
+  status: LessonProgressStatus;
+  completedAt: Date | null;
 };
 
 export type StudentSectionSummary = {

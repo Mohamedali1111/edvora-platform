@@ -22,3 +22,8 @@ export class StudentCourseIdParamDto {
   @Matches(UUID_PARAM_PATTERN)
   courseId!: string;
 }
+
+export class StudentLessonIdParamDto extends StudentCourseIdParamDto {
+  @Matches(UUID_PARAM_PATTERN)
+  lessonId!: string;
+}
