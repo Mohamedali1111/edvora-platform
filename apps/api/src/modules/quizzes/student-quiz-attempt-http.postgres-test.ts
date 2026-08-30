@@ -8,6 +8,7 @@ import {
   CourseStatus,
   DevicePlatform,
   EnrollmentStatus,
+  LessonProgressStatus,
   LessonStatus,
   LessonType,
   PlatformRole,
@@ -944,7 +945,9 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
       gradedAt: NOW.toISOString(),
     });
 
-    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+    // A passing GRADED attempt against a configured threshold completes the Quiz Lesson (Slice D
+    // rule) — see the dedicated "Quiz Lesson completion" test section below for full coverage.
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(1);
   });
 
   it('scores a mixed correct/incorrect/unanswered attempt and fails it against the passing threshold', async () => {
@@ -1181,6 +1184,342 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
     await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
   });
 
+  // ---------------------------------------------------------------------------------------------
+  // Quiz Lesson completion -> LessonProgress integration (V1 rule: a GRADED attempt completes the
+  // Lesson when it has no passing-threshold snapshot, or when a configured-threshold attempt
+  // passed; a failed threshold-based attempt never creates or downgrades progress).
+  // ---------------------------------------------------------------------------------------------
+
+  it('does not complete the Lesson for a failed threshold-configured attempt, but completes it with correct ownership for a passing one', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-threshold', { passingScorePercent: 60 });
+    const q1 = await createQuestionDirect(setup.tenantId, setup.quizId, QuestionType.MULTIPLE_CHOICE, 1, QuestionStatus.ACTIVE, 7);
+    const q1OptA = await createQuestionOptionDirect(setup.tenantId, q1, 'A', 1, true);
+    await createQuestionOptionDirect(setup.tenantId, q1, 'B', 2, false);
+    const q2 = await createQuestionDirect(setup.tenantId, setup.quizId, QuestionType.MULTIPLE_CHOICE, 2, QuestionStatus.ACTIVE, 3);
+    await createQuestionOptionDirect(setup.tenantId, q2, 'A', 1, true);
+    await createQuestionOptionDirect(setup.tenantId, q2, 'B', 2, false);
+
+    // Attempt 1: unanswered -> 0% -> fails against 60%.
+    const failedStarted = await start(setup).expect(HttpStatus.CREATED);
+    const failedAttemptId = responseBody<{ attemptId: string }>(failedStarted).attemptId;
+    const failedSubmitted = await request(server)
+      .post(submitPath(setup, failedAttemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    expect(responseBody<{ result: { passed: boolean } }>(failedSubmitted).result.passed).toBe(false);
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+
+    // Attempt 2: answer the 7-point Question correctly -> 70% -> passes.
+    const passedStarted = await start(setup).expect(HttpStatus.CREATED);
+    const passedAttemptId = responseBody<{ attemptId: string }>(passedStarted).attemptId;
+    await request(server)
+      .put(answerPath(setup, passedAttemptId, q1))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .send({ optionId: q1OptA })
+      .expect(HttpStatus.OK);
+    const passedSubmitted = await request(server)
+      .post(submitPath(setup, passedAttemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    expect(responseBody<{ result: { passed: boolean } }>(passedSubmitted).result.passed).toBe(true);
+
+    const rows = await prisma.client.lessonProgress.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      studentUserId: setup.studentId,
+      lessonId: setup.lessonId,
+      enrollmentId: setup.enrollmentId,
+      status: LessonProgressStatus.COMPLETED,
+    });
+    expect(rows[0].completedAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
+  it('completes the Lesson for a GRADED attempt with no passing-threshold snapshot, even though passed is null', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-no-threshold');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+
+    // Leave everything unanswered; there is no threshold, so grading alone qualifies.
+    const started = await start(setup).expect(HttpStatus.CREATED);
+    const attemptId = responseBody<{ attemptId: string }>(started).attemptId;
+    const submitted = await request(server)
+      .post(submitPath(setup, attemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    expect(responseBody<{ result: { passed: boolean | null } }>(submitted).result.passed).toBeNull();
+
+    const rows = await prisma.client.lessonProgress.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe(LessonProgressStatus.COMPLETED);
+    expect(rows[0].completedAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
+  it('transitions an existing NOT_STARTED or STARTED progress row to COMPLETED on a passing submission', async () => {
+    for (const initialStatus of [LessonProgressStatus.NOT_STARTED, LessonProgressStatus.STARTED]) {
+      const setup = await setUpAccessibleQuizLesson(`completion-existing-${initialStatus.toLowerCase()}`);
+      await setUpTwoQuestions(setup.tenantId, setup.quizId);
+
+      await prisma.client.lessonProgress.create({
+        data: {
+          id: uuid.create(),
+          tenantId: setup.tenantId,
+          courseId: setup.courseId,
+          lessonId: setup.lessonId,
+          studentUserId: setup.studentId,
+          enrollmentId: setup.enrollmentId,
+          status: initialStatus,
+          startedAt: NOW,
+        },
+      });
+
+      const started = await start(setup).expect(HttpStatus.CREATED);
+      const attemptId = responseBody<{ attemptId: string }>(started).attemptId;
+      await request(server)
+        .post(submitPath(setup, attemptId))
+        .set('Authorization', `Bearer ${setup.token}`)
+        .set(INSTALLATION_ID_HEADER, setup.installationId)
+        .expect(HttpStatus.OK);
+
+      const rows = await prisma.client.lessonProgress.findMany({ where: { enrollmentId: setup.enrollmentId } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe(LessonProgressStatus.COMPLETED);
+      expect(rows[0].completedAt?.toISOString()).toBe(NOW.toISOString());
+    }
+  });
+
+  it('never downgrades or restamps an already-COMPLETED Lesson across a fail-then-pass-then-fail-then-pass attempt sequence', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-multi-attempt', { passingScorePercent: 60 });
+    const q1 = await createQuestionDirect(setup.tenantId, setup.quizId, QuestionType.MULTIPLE_CHOICE, 1, QuestionStatus.ACTIVE, 7);
+    const q1OptA = await createQuestionOptionDirect(setup.tenantId, q1, 'A', 1, true);
+    await createQuestionOptionDirect(setup.tenantId, q1, 'B', 2, false);
+    const q2 = await createQuestionDirect(setup.tenantId, setup.quizId, QuestionType.MULTIPLE_CHOICE, 2, QuestionStatus.ACTIVE, 3);
+    await createQuestionOptionDirect(setup.tenantId, q2, 'A', 1, true);
+    await createQuestionOptionDirect(setup.tenantId, q2, 'B', 2, false);
+
+    async function attempt(shouldPass: boolean): Promise<boolean> {
+      const started = await start(setup).expect(HttpStatus.CREATED);
+      const attemptId = responseBody<{ attemptId: string }>(started).attemptId;
+      if (shouldPass) {
+        await request(server)
+          .put(answerPath(setup, attemptId, q1))
+          .set('Authorization', `Bearer ${setup.token}`)
+          .set(INSTALLATION_ID_HEADER, setup.installationId)
+          .send({ optionId: q1OptA })
+          .expect(HttpStatus.OK);
+      }
+      const submitted = await request(server)
+        .post(submitPath(setup, attemptId))
+        .set('Authorization', `Bearer ${setup.token}`)
+        .set(INSTALLATION_ID_HEADER, setup.installationId)
+        .expect(HttpStatus.OK);
+      return responseBody<{ result: { passed: boolean } }>(submitted).result.passed;
+    }
+
+    // Attempt 1: fails -> no completion.
+    expect(await attempt(false)).toBe(false);
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+
+    // Attempt 2: passes -> completes exactly once.
+    expect(await attempt(true)).toBe(true);
+    const afterFirstPass = await prisma.client.lessonProgress.findFirstOrThrow();
+    expect(afterFirstPass.status).toBe(LessonProgressStatus.COMPLETED);
+    const completedAt = afterFirstPass.completedAt?.toISOString();
+    expect(completedAt).toBe(NOW.toISOString());
+
+    // Attempt 3: fails -> remains COMPLETED, unchanged.
+    expect(await attempt(false)).toBe(false);
+    const afterSecondFail = await prisma.client.lessonProgress.findFirstOrThrow();
+    expect(afterSecondFail.status).toBe(LessonProgressStatus.COMPLETED);
+    expect(afterSecondFail.completedAt?.toISOString()).toBe(completedAt);
+
+    // Attempt 4: passes again -> still unchanged, no restamp.
+    expect(await attempt(true)).toBe(true);
+    const afterThirdPass = await prisma.client.lessonProgress.findFirstOrThrow();
+    expect(afterThirdPass.status).toBe(LessonProgressStatus.COMPLETED);
+    expect(afterThirdPass.completedAt?.toISOString()).toBe(completedAt);
+
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(1);
+    await expect(prisma.client.quizAttempt.count()).resolves.toBe(4);
+  });
+
+  it('is idempotent on repeated submit of a qualifying attempt: no duplicate progress row, no restamped completedAt', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-idempotent');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+    const started = await start(setup).expect(HttpStatus.CREATED);
+    const attemptId = responseBody<{ attemptId: string }>(started).attemptId;
+
+    await request(server)
+      .post(submitPath(setup, attemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    const first = await prisma.client.lessonProgress.findFirstOrThrow();
+
+    await request(server)
+      .post(submitPath(setup, attemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+
+    const rows = await prisma.client.lessonProgress.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].completedAt?.toISOString()).toBe(first.completedAt?.toISOString());
+  });
+
+  it('converges concurrent submits of the SAME qualifying attempt to exactly one LessonProgress row', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-concurrent-same-attempt');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+    const started = await start(setup).expect(HttpStatus.CREATED);
+    const attemptId = responseBody<{ attemptId: string }>(started).attemptId;
+
+    const responses = await Promise.all(
+      [1, 2, 3].map(() =>
+        request(server)
+          .post(submitPath(setup, attemptId))
+          .set('Authorization', `Bearer ${setup.token}`)
+          .set(INSTALLATION_ID_HEADER, setup.installationId),
+      ),
+    );
+    for (const response of responses) {
+      expect(response.status).toBe(HttpStatus.OK);
+    }
+
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(1);
+    const row = await prisma.client.lessonProgress.findFirstOrThrow();
+    expect(row.status).toBe(LessonProgressStatus.COMPLETED);
+    expect(row.completedAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
+  it('converges concurrent qualifying submits of TWO SEPARATE attempts for the same Quiz Lesson to exactly one LessonProgress row', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-concurrent-separate-attempts');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+
+    const startedA = await start(setup).expect(HttpStatus.CREATED);
+    const attemptAId = responseBody<{ attemptId: string }>(startedA).attemptId;
+    const startedB = await start(setup).expect(HttpStatus.CREATED);
+    const attemptBId = responseBody<{ attemptId: string }>(startedB).attemptId;
+
+    const responses = await Promise.all([
+      request(server)
+        .post(submitPath(setup, attemptAId))
+        .set('Authorization', `Bearer ${setup.token}`)
+        .set(INSTALLATION_ID_HEADER, setup.installationId),
+      request(server)
+        .post(submitPath(setup, attemptBId))
+        .set('Authorization', `Bearer ${setup.token}`)
+        .set(INSTALLATION_ID_HEADER, setup.installationId),
+    ]);
+    for (const response of responses) {
+      expect(response.status).toBe(HttpStatus.OK);
+    }
+
+    // Both attempts individually graded successfully; only progress converges to one row.
+    await expect(
+      prisma.client.quizAttempt.count({ where: { id: { in: [attemptAId, attemptBId] } } }),
+    ).resolves.toBe(2);
+    await expect(
+      prisma.client.quizAttempt.count({ where: { id: { in: [attemptAId, attemptBId] }, status: QuizAttemptStatus.GRADED } }),
+    ).resolves.toBe(2);
+
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(1);
+    const row = await prisma.client.lessonProgress.findFirstOrThrow();
+    expect(row.status).toBe(LessonProgressStatus.COMPLETED);
+    expect(row.completedAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
+  it("ties completed progress exclusively to the submitting student's own Enrollment/Lesson, never a foreign student's", async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-isolation');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+
+    // A second, independently-enrolled student on the SAME Course/Lesson.
+    const otherStudentId = await createStudent('completion-isolation-other-student');
+    await createTenantStudent(setup.tenantId, otherStudentId, TenantStudentStatus.ACTIVE);
+    const otherEnrollmentId = await createEnrollmentDirect(
+      setup.tenantId,
+      otherStudentId,
+      setup.courseId,
+      setup.instructorId,
+      EnrollmentStatus.ACTIVE,
+    );
+    const otherInstallationId = installation();
+    await createActiveDevice(otherStudentId, otherInstallationId);
+    const otherToken = await issueAccessToken(otherStudentId, PlatformRole.STUDENT);
+
+    const startedOwn = await start(setup).expect(HttpStatus.CREATED);
+    await request(server)
+      .post(submitPath(setup, responseBody<{ attemptId: string }>(startedOwn).attemptId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+
+    const startedOther = await request(server)
+      .post(startPath(setup))
+      .set('Authorization', `Bearer ${otherToken}`)
+      .set(INSTALLATION_ID_HEADER, otherInstallationId)
+      .expect(HttpStatus.CREATED);
+    await request(server)
+      .post(submitPath(setup, responseBody<{ attemptId: string }>(startedOther).attemptId))
+      .set('Authorization', `Bearer ${otherToken}`)
+      .set(INSTALLATION_ID_HEADER, otherInstallationId)
+      .expect(HttpStatus.OK);
+
+    const rows = await prisma.client.lessonProgress.findMany();
+    expect(rows).toHaveLength(2);
+    const ownRow = rows.find((r) => r.studentUserId === setup.studentId);
+    const otherRow = rows.find((r) => r.studentUserId === otherStudentId);
+    expect(ownRow).toMatchObject({ enrollmentId: setup.enrollmentId, lessonId: setup.lessonId, status: LessonProgressStatus.COMPLETED });
+    expect(otherRow).toMatchObject({ enrollmentId: otherEnrollmentId, lessonId: setup.lessonId, status: LessonProgressStatus.COMPLETED });
+    expect(ownRow?.enrollmentId).not.toBe(otherRow?.enrollmentId);
+  });
+
+  it('still rejects QUIZ Lessons via the generic manual completion endpoint, while VIDEO and DOCUMENT completion continue to work', async () => {
+    const setup = await setUpAccessibleQuizLesson('completion-generic-endpoint-protection');
+    await setUpTwoQuestions(setup.tenantId, setup.quizId);
+
+    const videoAssetId = await createVideoAssetDirect(setup.tenantId, setup.instructorId);
+    const videoLessonId = await createLessonDirect(setup.tenantId, setup.courseId, setup.sectionId, {
+      title: 'Video lesson',
+      position: 2,
+      status: LessonStatus.PUBLISHED,
+      videoAssetId,
+    });
+    const documentAssetId = await createDocumentAssetDirect(setup.tenantId, setup.instructorId);
+    const documentLessonId = await createLessonDirect(setup.tenantId, setup.courseId, setup.sectionId, {
+      title: 'Document lesson',
+      position: 3,
+      status: LessonStatus.PUBLISHED,
+      documentAssetId,
+    });
+
+    const quizRejected = await request(server)
+      .post(`/student/courses/${setup.courseId}/lessons/${setup.lessonId}/complete`)
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.BAD_REQUEST);
+    expect(quizRejected.body).toMatchObject({ error: { code: 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED' } });
+
+    const videoCompleted = await request(server)
+      .post(`/student/courses/${setup.courseId}/lessons/${videoLessonId}/complete`)
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    expect(videoCompleted.body).toMatchObject({ lessonId: videoLessonId, status: 'COMPLETED' });
+
+    const documentCompleted = await request(server)
+      .post(`/student/courses/${setup.courseId}/lessons/${documentLessonId}/complete`)
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.OK);
+    expect(documentCompleted.body).toMatchObject({ lessonId: documentLessonId, status: 'COMPLETED' });
+
+    const rows = await prisma.client.lessonProgress.findMany();
+    expect(rows.map((r) => r.lessonId).sort()).toEqual([videoLessonId, documentLessonId].sort());
+    expect(rows.find((r) => r.lessonId === setup.lessonId)).toBeUndefined();
+  });
+
   async function clearData(): Promise<void> {
     await prisma.client.quizAttemptAnswer.deleteMany();
     await prisma.client.quizAttempt.deleteMany();
@@ -1191,6 +1530,7 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
     await prisma.client.lesson.deleteMany();
     await prisma.client.courseSection.deleteMany();
     await prisma.client.videoAsset.deleteMany();
+    await prisma.client.documentAsset.deleteMany();
     await prisma.client.questionOption.deleteMany();
     await prisma.client.question.deleteMany();
     await prisma.client.quiz.deleteMany();
@@ -1306,12 +1646,13 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
       status: LessonStatus;
       quizId?: string;
       videoAssetId?: string;
+      documentAssetId?: string;
       availableFrom?: Date;
       availableUntil?: Date;
     },
   ): Promise<string> {
     const id = uuid.create();
-    const type = spec.quizId ? LessonType.QUIZ : LessonType.VIDEO;
+    const type = spec.quizId ? LessonType.QUIZ : spec.documentAssetId ? LessonType.DOCUMENT : LessonType.VIDEO;
     await prisma.client.lesson.create({
       data: {
         id,
@@ -1331,6 +1672,10 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
       await prisma.client.quizLesson.create({
         data: { lessonId: id, tenantId, quizId: spec.quizId as string },
       });
+    } else if (type === LessonType.DOCUMENT) {
+      await prisma.client.documentLesson.create({
+        data: { lessonId: id, tenantId, documentAssetId: spec.documentAssetId as string },
+      });
     } else {
       await prisma.client.videoLesson.create({
         data: { lessonId: id, tenantId, videoAssetId: spec.videoAssetId as string },
@@ -1344,6 +1689,22 @@ maybeDescribe('student quiz attempt HTTP PostgreSQL integration', () => {
     const id = uuid.create();
     await prisma.client.videoAsset.create({
       data: { id, tenantId, uploadedByUserId, externalAssetRef: `test-provider/video/${id}` },
+    });
+    return id;
+  }
+
+  async function createDocumentAssetDirect(tenantId: string, uploadedByUserId: string): Promise<string> {
+    const id = uuid.create();
+    await prisma.client.documentAsset.create({
+      data: {
+        id,
+        tenantId,
+        uploadedByUserId,
+        externalAssetRef: `test-provider/document/${id}`,
+        fileName: 'notes.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: BigInt(1024),
+      },
     });
     return id;
   }

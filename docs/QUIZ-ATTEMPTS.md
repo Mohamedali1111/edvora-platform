@@ -1,17 +1,21 @@
-# Quiz Attempts (Slice C)
+# Quiz Attempts (Slices C & D)
 
 This document describes the implemented behavior of student Quiz Attempts: creation, immutable
-snapshotting, answer submission, and server-side scoring. It covers only what is actually
-implemented — see `docs/BACKEND-DOMAIN.md` (Quiz Model and Historical Integrity) and
-`docs/DECISIONS.md` (DEC-0025) for the originating design decisions this implementation follows.
+snapshotting, answer submission, server-side scoring (Slice C), and the resulting Quiz Lesson
+`LessonProgress` completion (Slice D). It covers only what is actually implemented — see
+`docs/BACKEND-DOMAIN.md` (Quiz Model and Historical Integrity) and `docs/DECISIONS.md` (DEC-0025)
+for the originating design decisions this implementation follows.
 
 ## Scope
 
 Implemented: starting an attempt, reading the authenticated student's own attempt, saving/changing
-an answer while an attempt is open, submitting/finalizing an attempt, and server-side scoring.
+an answer while an attempt is open, submitting/finalizing an attempt, server-side scoring, and
+automatic Quiz Lesson `LessonProgress` completion on a qualifying finalized attempt (see "Quiz
+Lesson completion" below).
 
-Not implemented (explicitly out of scope for this slice): quiz-derived `LessonProgress`
-completion, attempt result/review UI, frontend/mobile, and randomization.
+Not implemented (explicitly out of scope): aggregate Course completion percentages, attempt
+result/review UI, frontend/mobile, randomization, and an abandonment API (nothing in this codebase
+ever produces `QuizAttemptStatus.ABANDONED`).
 
 The passing threshold used to compute `passed` is **frozen when the attempt starts** and grading
 never consults the live `Quiz` threshold — see "Passing-threshold snapshot" below.
@@ -168,6 +172,80 @@ the now-updated count inside its own transaction and is correctly rejected. Prov
 persisted database state — the final attempt count for a limited Quiz/Enrollment never exceeds the
 configured limit under a real concurrent race.
 
+## Quiz Lesson completion (V1 rule)
+
+**A `GRADED` attempt completes its Quiz Lesson automatically when the attempt has no
+passing-threshold snapshot, or when a configured-threshold attempt has `passed === true`. Failed
+threshold-based attempts do not complete or downgrade progress.** Precisely, using only the
+already-persisted attempt result — never a separate recalculation, and never live `Quiz` state:
+
+```text
+attempt.status === GRADED
+AND (attempt.passingScorePercentSnapshot === null OR attempt.passed === true)
+```
+
+- **No threshold configured** (`passingScorePercentSnapshot === null`): an ungraded/practice Quiz.
+  Any successfully `GRADED` attempt qualifies — `passed` is legitimately `null` in this case (no
+  threshold to evaluate), and that is not treated as "not qualifying."
+- **Threshold configured**: only `passed === true` qualifies. A failed attempt never creates or
+  downgrades progress; the Lesson simply keeps whatever state it already had (including staying
+  `NOT_STARTED`/absent, if no prior attempt ever passed).
+
+This is the *only* authoritative path to Quiz Lesson completion — there is no separate student
+Quiz-completion endpoint, and `POST /student/courses/:courseId/lessons/:lessonId/complete` (the
+generic manual-completion endpoint) continues to reject `QUIZ` lessons unconditionally, exactly as
+before Slice D.
+
+### Atomicity
+
+The qualification check and, when it qualifies, the `LessonProgress` transition both happen inside
+`submitAttempt`'s existing single database transaction — the same transaction that grades and
+finalizes the attempt (`status -> GRADED`, `scorePoints`/`maxPoints`/`passed` persisted). There is
+no committed state where a qualifying attempt is finalized but its progress transition didn't
+happen, or vice versa: both commit together, or (on any error) both roll back together. No new
+transaction boundary or lock scope was introduced — this reuses the attempt's own existing
+`quiz-attempt:{attemptId}` per-attempt advisory lock.
+
+An already-`GRADED` attempt's repeat submit takes the existing idempotent short-circuit path
+(returns the stable persisted result) and deliberately does **not** re-run the completion check:
+the qualifying decision was already made correctly in the attempt's one grading transaction, and
+the progress upsert below is itself idempotent, so nothing would change on a repeat besides wasted
+work. No repair/backfill semantics were introduced.
+
+### Progress transitions and ownership
+
+Ownership is entirely server-derived from the same proof `submitAttempt` already required to act
+on the attempt at all — never client-supplied:
+
+- `studentUserId` = `principal.userId`
+- `lessonId` = the authorized Quiz Lesson from the route (`assertAccessibleQuizLesson`)
+- `enrollmentId` = the value `assertAccessibleQuizLesson` resolved for this exact request
+
+Transitions reuse the existing `(studentUserId, lessonId, enrollmentId)` unique identity and the
+existing progress semantics: a missing row is created `COMPLETED`; an existing `NOT_STARTED` or
+`STARTED` row transitions to `COMPLETED`; an existing `COMPLETED` row is left completely stable —
+`completedAt` is stamped with `ClockService.now()` (the same `now` value used for the attempt's
+own `submittedAt`/`gradedAt`) only on the *first* transition to `COMPLETED`, never restamped after.
+Progress is never downgraded (`COMPLETED -> STARTED/NOT_STARTED` never happens).
+
+### Race safety: two different attempts completing the same Lesson
+
+Because two *different* `QuizAttempt`s for the same Quiz Lesson each run in their own transaction
+behind their own per-attempt advisory lock, they can be submitted genuinely concurrently — the
+per-attempt lock does not serialize them against each other. `upsertCompletedProgress`
+(`StudentCourseAccessService`, reused rather than duplicated — see below) handles this with a
+single native PostgreSQL `INSERT ... ON CONFLICT ("student_user_id", "lesson_id",
+"enrollment_id") DO UPDATE ... WHERE status <> 'COMPLETED'` statement: the conflict/no-op case is
+handled entirely inside PostgreSQL for one statement and never raises an application-level
+exception, so it is safe to call from within an already-open transaction (unlike the create-then
+catch-unique-violation pattern used elsewhere in this codebase — see the code comment on
+`upsertCompletedProgress` for why that pattern was not reused here: a caught exception does not
+roll a PostgreSQL transaction back to a safe point, so continuing to issue statements in the same
+transaction after catching one would fail). This was proven with a dedicated PostgreSQL test:
+starting two attempts, then submitting both concurrently, converges to exactly one `COMPLETED`
+`LessonProgress` row with a stable `completedAt`, while both `QuizAttempt`s still grade and
+finalize independently and successfully.
+
 ## Reveal behavior — conservative, documented decision
 
 DEC-0025 states correct-answer snapshots are backend-only and "must not be exposed before the
@@ -200,6 +278,11 @@ cannot leak answer-key or per-question scoring data even in principle.
 - **Concurrent submit**: multiple simultaneous submit requests for the same attempt converge to
   exactly one persisted final result (proven directly against the database, and by asserting every
   concurrent response is byte-identical).
+- **Progress completion (Slice D)**: repeated submit of an already-`GRADED` qualifying attempt
+  never duplicates the `LessonProgress` row or restamps `completedAt`; concurrent submits of the
+  *same* attempt converge to one row via the per-attempt lock; concurrent qualifying submits of
+  *different* attempts for the same Lesson converge to one row via the native `ON CONFLICT`
+  upsert (see "Quiz Lesson completion" above) — no global lock.
 
 ## Concurrency / locking strategy
 

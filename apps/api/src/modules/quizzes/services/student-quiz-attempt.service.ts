@@ -340,6 +340,21 @@ export class StudentQuizAttemptService {
    * throughout to avoid floating-point error; percentage is derived at read time from the
    * persisted `scorePoints`/`maxPoints` rather than stored separately, so it can never drift from
    * the values it is computed from.
+   *
+   * Quiz Lesson completion (V1 rule, `docs/QUIZ-ATTEMPTS.md`): a `GRADED` attempt completes the
+   * Lesson's `LessonProgress` when `passingScorePercentSnapshot === null` (an ungraded/practice
+   * Quiz — any successful grading qualifies, since `passed` is legitimately `null`) or when
+   * `passed === true` for a configured-threshold Quiz. A failed threshold-based attempt never
+   * creates or downgrades progress. This is the *only* authoritative path to Quiz Lesson
+   * completion — there is no separate student Quiz-completion endpoint. The qualification check
+   * reuses the exact `passed` value just computed for persistence — never a second recalculation
+   * — and, when it qualifies, calls `StudentCourseAccessService.upsertCompletedProgress` with
+   * this same transaction's `tx`, so attempt finalization and the resulting progress transition
+   * commit or roll back together atomically; there is never a committed state where one succeeded
+   * without the other. The short-circuit path for an already-`GRADED` attempt (below) deliberately
+   * does not re-run this check: the qualifying decision was already made correctly in the
+   * attempt's one grading transaction, and `upsertCompletedProgress` is itself idempotent, so
+   * nothing would change on a repeat besides wasted work.
    */
   async submitAttempt(
     principal: AuthenticatedPrincipal,
@@ -347,7 +362,11 @@ export class StudentQuizAttemptService {
     lessonId: string,
     attemptId: string,
   ): Promise<StudentQuizAttemptDetail> {
-    const { tenantId, quizId } = await this.access.assertAccessibleQuizLesson(principal, courseId, lessonId);
+    const { tenantId, quizId, enrollmentId } = await this.access.assertAccessibleQuizLesson(
+      principal,
+      courseId,
+      lessonId,
+    );
 
     return this.prismaService.client.$transaction(async (tx) => {
       await this.lockAttempt(tx, attemptId);
@@ -415,6 +434,18 @@ export class StudentQuizAttemptService {
         },
         select: ATTEMPT_DETAIL_SELECT,
       });
+
+      // Quiz Lesson completion — see the class-level doc comment above for the exact V1 rule.
+      // Uses the frozen `passingScorePercentSnapshot` already fetched at the top of this
+      // function and the `passed` value just persisted above; never a second recalculation and
+      // never live Quiz state. Runs inside this same transaction, so it commits or rolls back
+      // atomically with the attempt finalization above.
+      if (attempt.passingScorePercentSnapshot === null || passed === true) {
+        await this.access.upsertCompletedProgress(
+          { tenantId, courseId, lessonId, studentUserId: principal.userId, enrollmentId, now },
+          tx,
+        );
+      }
 
       return toStudentQuizAttemptDetail(graded);
     });

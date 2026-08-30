@@ -16,7 +16,7 @@ import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
-import { isKnownUniqueViolation } from '../../tenancy/services/prisma-error.util';
+import type { PrismaTransactionClient } from '../../auth/types/prisma-transaction.type';
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
 import { CourseNotFoundError, LessonNotFoundError, QuizLessonCompletionNotAllowedError } from '../errors/course.errors';
 import type {
@@ -37,8 +37,6 @@ const LESSON_DETAIL_INCLUDE = {
   },
   quizLesson: { include: { quiz: { select: { title: true, status: true } } } },
 } as const;
-
-const LESSON_PROGRESS_CONSTRAINT = 'lesson_progress_student_user_id_lesson_id_enrollment_id_key';
 
 type CourseSummaryRow = {
   id: string;
@@ -302,64 +300,73 @@ export class StudentCourseAccessService {
   }
 
   /**
-   * Attempts to create a fresh COMPLETED row first (the common case — no prior progress). If one
-   * already exists, the unique constraint on (studentUserId, lessonId, enrollmentId) rejects the
-   * insert; the fallback then atomically flips it to COMPLETED only if it is not already
-   * COMPLETED (`updateMany` with a `status: { not: COMPLETED }` guard), so a concurrent
-   * duplicate-completion race and a simple repeated call both converge to exactly one row
-   * without ever re-stamping `completedAt` on an already-completed lesson.
+   * Creates a fresh COMPLETED row if none exists, or flips an existing non-COMPLETED row to
+   * COMPLETED, or leaves an already-COMPLETED row completely untouched — as one atomic, native
+   * PostgreSQL `INSERT ... ON CONFLICT (...) DO UPDATE ... WHERE status <> 'COMPLETED'` statement,
+   * so a concurrent duplicate-completion race and a simple repeated call both converge to exactly
+   * one row without ever re-stamping `completedAt` on an already-completed lesson.
+   *
+   * Public (not private) and takes the Prisma client/transaction to operate within, following the
+   * same `client: PrismaService['client'] | PrismaTransactionClient = this.prismaService.client`
+   * convention already established by `TenantAuthorizationService`: `completeLesson` below calls
+   * this with no third argument (its own single-statement atomicity is enough), while
+   * `StudentQuizAttemptService.submitAttempt` passes its own `tx` so attempt finalization and this
+   * progress transition commit or roll back together as one atomic unit — never a state where one
+   * succeeds and the other doesn't.
+   *
+   * This deliberately does NOT use Prisma's `create()` guarded by a caught unique-constraint
+   * violation (the pattern used elsewhere in this codebase, e.g.
+   * `StudentDeviceService`/`QuestionOptionService`): that pattern relies on the failed `create()`
+   * being its own independent statement, which is true for the plain top-level Prisma client
+   * `completeLesson` uses, but is unsafe when reused inside an already-open, multi-statement
+   * transaction like `submitAttempt`'s — a caught application-level exception does not roll
+   * PostgreSQL back to a safe point, so the *entire* surrounding transaction (including the
+   * attempt-grading writes already made) would be left aborted, and every subsequent statement
+   * in it (including this method's own fallback `updateMany`) would itself fail. A native
+   * `ON CONFLICT` upsert is handled entirely inside PostgreSQL for a single statement and never
+   * raises an application-level exception for the conflict case at all, so it is safe in both
+   * calling contexts with no special-casing — and is exactly the reachable cross-attempt
+   * concurrency case this method must also handle: two different `QuizAttempt`s (each in its own
+   * transaction, each behind its own per-attempt advisory lock) can race to complete the same
+   * Lesson, and PostgreSQL's own `ON CONFLICT` handling serializes that race correctly with no
+   * additional locking.
    */
-  private async upsertCompletedProgress(input: {
-    tenantId: string;
-    courseId: string;
-    lessonId: string;
-    studentUserId: string;
-    enrollmentId: string;
-    now: Date;
-  }): Promise<StudentLessonProgressSummary> {
-    try {
-      const created = await this.prismaService.client.lessonProgress.create({
-        data: {
-          id: this.uuid.create(),
-          tenantId: input.tenantId,
-          courseId: input.courseId,
-          lessonId: input.lessonId,
+  async upsertCompletedProgress(
+    input: {
+      tenantId: string;
+      courseId: string;
+      lessonId: string;
+      studentUserId: string;
+      enrollmentId: string;
+      now: Date;
+    },
+    client: PrismaService['client'] | PrismaTransactionClient = this.prismaService.client,
+  ): Promise<StudentLessonProgressSummary> {
+    const id = this.uuid.create();
+
+    await client.$executeRaw`
+      INSERT INTO "lesson_progress"
+        ("id", "tenant_id", "course_id", "lesson_id", "student_user_id", "enrollment_id", "status", "completed_at", "created_at", "updated_at")
+      VALUES
+        (${id}::uuid, ${input.tenantId}::uuid, ${input.courseId}::uuid, ${input.lessonId}::uuid, ${input.studentUserId}::uuid, ${input.enrollmentId}::uuid, 'COMPLETED', ${input.now}, ${input.now}, ${input.now})
+      ON CONFLICT ("student_user_id", "lesson_id", "enrollment_id")
+      DO UPDATE SET "status" = 'COMPLETED', "completed_at" = ${input.now}, "updated_at" = ${input.now}
+      WHERE "lesson_progress"."status" <> 'COMPLETED'
+    `;
+
+    // Read back through the SAME client/transaction the write just went through — reading via a
+    // different connection here would not see this row if `client` is still an open, uncommitted
+    // transaction (`tx`).
+    return client.lessonProgress.findUniqueOrThrow({
+      where: {
+        studentUserId_lessonId_enrollmentId: {
           studentUserId: input.studentUserId,
-          enrollmentId: input.enrollmentId,
-          status: LessonProgressStatus.COMPLETED,
-          completedAt: input.now,
-        },
-      });
-
-      return { lessonId: created.lessonId, status: created.status, completedAt: created.completedAt };
-    } catch (error) {
-      if (!isKnownUniqueViolation(error, LESSON_PROGRESS_CONSTRAINT, 'student_user_id', 'studentUserId', 'lesson_id', 'lessonId', 'enrollment_id', 'enrollmentId')) {
-        throw error;
-      }
-
-      await this.prismaService.client.lessonProgress.updateMany({
-        where: {
-          studentUserId: input.studentUserId,
           lessonId: input.lessonId,
           enrollmentId: input.enrollmentId,
-          status: { not: LessonProgressStatus.COMPLETED },
         },
-        data: { status: LessonProgressStatus.COMPLETED, completedAt: input.now },
-      });
-
-      const current = await this.prismaService.client.lessonProgress.findUniqueOrThrow({
-        where: {
-          studentUserId_lessonId_enrollmentId: {
-            studentUserId: input.studentUserId,
-            lessonId: input.lessonId,
-            enrollmentId: input.enrollmentId,
-          },
-        },
-        select: { lessonId: true, status: true, completedAt: true },
-      });
-
-      return current;
-    }
+      },
+      select: { lessonId: true, status: true, completedAt: true },
+    });
   }
 }
 
