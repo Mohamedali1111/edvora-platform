@@ -530,11 +530,12 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
     const { token, tenantId } = await createInstructorTenant('signing-fails');
     documentStorage.failSigning = true;
 
-    await request(server)
+    const response = await request(server)
       .post(`/instructor/tenants/${tenantId}/media/documents/upload-intents`)
       .set('Authorization', `Bearer ${token}`)
       .send({ fileName: 'notes.pdf', mimeType: 'application/pdf', fileSizeBytes: 1024 })
-      .expect(HttpStatus.INTERNAL_SERVER_ERROR);
+      .expect(HttpStatus.BAD_GATEWAY);
+    expect(response.body).toMatchObject({ error: { code: 'DOCUMENT_UPLOAD_SIGNING_FAILED' } });
 
     await expect(prisma.client.documentAsset.count()).resolves.toBe(1);
     await expect(prisma.client.documentAsset.findFirstOrThrow()).resolves.toMatchObject({

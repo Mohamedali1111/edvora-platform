@@ -44,7 +44,7 @@ export function createMediaRuntimeConfig(env: NodeJS.ProcessEnv = process.env): 
           env.MEDIA_DOCUMENTS_R2_SECRET_ACCESS_KEY,
           'MEDIA_DOCUMENTS_R2_SECRET_ACCESS_KEY',
         ),
-        bucketName: readRequiredValue(env.MEDIA_DOCUMENTS_R2_BUCKET_NAME, 'MEDIA_DOCUMENTS_R2_BUCKET_NAME'),
+        bucketName: readNonPlaceholderValue(env.MEDIA_DOCUMENTS_R2_BUCKET_NAME, 'MEDIA_DOCUMENTS_R2_BUCKET_NAME'),
         uploadUrlTtlSeconds: readBoundedTtlSeconds(
           env.MEDIA_DOCUMENTS_R2_UPLOAD_URL_TTL_SECONDS,
           'MEDIA_DOCUMENTS_R2_UPLOAD_URL_TTL_SECONDS',
@@ -136,13 +136,22 @@ function readRequiredValue(value: string | undefined, name: string): string {
 }
 
 function readSecretValue(value: string | undefined, name: string): string {
-  const secret = readRequiredValue(value, name);
+  return readNonPlaceholderValue(value, name);
+}
 
-  if (secret.startsWith('replace-') || secret.includes('placeholder')) {
+// Rejects the repository's own `.env.example` convention (`replace-with-...`) so a config value
+// that is not a secret but is still critical to get right — an R2 bucket name, a Bunny CDN
+// hostname — cannot be silently carried into production unedited. A wrong-but-plausible-looking
+// hostname/bucket name would not fail this validation (that is inherent to any string field); this
+// only catches the concrete, common failure mode of the example placeholder being left in place.
+function readNonPlaceholderValue(value: string | undefined, name: string): string {
+  const trimmed = readRequiredValue(value, name);
+
+  if (trimmed.startsWith('replace-') || trimmed.includes('placeholder')) {
     throw new Error(`${name} must be a real value, not an example placeholder.`);
   }
 
-  return secret;
+  return trimmed;
 }
 
 function readBunnyLibraryId(value: string | undefined): string {
@@ -156,7 +165,7 @@ function readBunnyLibraryId(value: string | undefined): string {
 }
 
 function readBunnyCdnHostname(value: string | undefined): string {
-  const hostname = readRequiredValue(value, 'MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME');
+  const hostname = readNonPlaceholderValue(value, 'MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME');
 
   if (!/^[a-zA-Z0-9.-]+$/.test(hostname) || hostname.includes('..') || hostname.includes('/')) {
     throw new Error('MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME must be a bare hostname, with no protocol, path, or query.');

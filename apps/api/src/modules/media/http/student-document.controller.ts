@@ -11,9 +11,9 @@ import type { StudentDocumentAccessStatus } from '../types/student-document-acce
 // Deliberately routed as a nested resource under the already-authorized Course/Lesson path
 // (never a bare `/student/documents/:documentAssetId`) so a document can only ever be reached
 // through the exact DOCUMENT Lesson that references it — see
-// `StudentCourseAccessService.assertAccessibleDocumentLesson`. GET, not POST: this is a pure
-// authorization read (no ephemeral capability is issued yet, no provider selected), not an
-// action that creates or generates anything.
+// `StudentCourseAccessService.assertAccessibleDocumentLesson`. GET, not POST: this issues a
+// short-lived R2 download capability (see `StudentDocumentAccessService`), but it remains a pure,
+// side-effect-free authorization/capability read — not an action that creates or mutates anything.
 const STUDENT_DOCUMENT_THROTTLE = {
   document: {
     limit: 60,

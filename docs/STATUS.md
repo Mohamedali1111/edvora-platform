@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, and Media Slice G (protected Bunny video playback capability issuance) are completed. The repository has minimal framework foundations for API, web, and mobile; DRM integration and course lifecycle transitions are not implemented yet.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), and Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate) are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration and course lifecycle transitions are not implemented yet.
 
 Current media update: Media Slice D is completed, and the student DOCUMENT Lesson access route issues
 a short-lived Cloudflare R2/S3 presigned GET for the finalized READY object. Documents are locked to
@@ -135,6 +135,51 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
   action: no `LessonProgress`/`QuizAttempt`/`Enrollment`/`SecurityEvent` write, no playback-session
   row, no DRM. See `docs/MEDIA.md` for the full design, including why manifest-only protection was
   rejected and the exact IP-binding/TTL reasoning.
+- Completed Media Slice H, a full backend Media domain audit intended to close the backend Media
+  milestone, with no schema/migration change. Read the complete `modules/media/**` tree, the Media
+  Prisma models, the Media-relevant portions of `StudentCourseAccessService`/`TenantAuthorizationService`/
+  `StudentDeviceGuard`, and the HTTP bootstrap/exception-filter/logging surfaces Media depends on.
+  Reconstructed and verified every `DocumentAsset`/`VideoAsset` state transition (signing failure,
+  abandoned upload, missing/mismatched temp object, copy/promotion failure, final verification
+  failure, DB failure after provider copy, repeated/concurrent confirmation, and every Bunny webhook
+  status including stale/duplicate/concurrent/wrong-library/unknown-video callbacks) against the
+  actual code, not assumption, and confirmed the existing architecture is already correct: `READY`
+  never regresses for either asset type, concurrent confirmations/webhooks converge via existing
+  guarded conditional `updateMany` writes with no read-then-write race, and every student-facing
+  object key/video ID is derived strictly from a DB row that already passed the full
+  READY-plus-entitlement chain (structurally ruling out object-key injection, provider-asset
+  substitution, and orphan-object exposure). Found and fixed four narrow, concrete gaps: (1) Bunny CDN
+  hostname and R2 bucket name could silently boot with the repository's own `.env.example` placeholder
+  value, since only credential-typed config values were checked for the `replace-`/`placeholder`
+  pattern — extended the existing check (`readNonPlaceholderValue`, replacing the narrower
+  `readSecretValue`) to cover both; (2) a Cloudflare R2 upload-signing failure re-threw the raw
+  provider error instead of a typed, documented `MediaError`, unlike every other
+  provider-capability-signing-failure path in this module — added `DocumentUploadSigningFailedError`
+  (`DOCUMENT_UPLOAD_SIGNING_FAILED`, `502`) for parity with `VideoUploadSigningFailedError`; (3) two
+  student controller doc comments (`StudentDocumentController`, `StudentVideoController`) still
+  claimed "no ephemeral capability is issued yet, no provider selected," stale since Slices D and G
+  respectively — corrected; (4) `media.config.ts`'s startup validation (every R2/Bunny secret,
+  hostname/URL shape, and TTL bound) had zero direct unit test coverage — added
+  `media.config.spec.ts` (41 tests) covering every required-value/placeholder/format/TTL-bound path,
+  closing a real regression-detection gap the audit itself would otherwise have had to rely on manual
+  code reading to catch. Explicitly reviewed and *did not* change: the FAILED -> READY webhook
+  transition (deliberate and safe — documented with its exact allowed-source-state table in
+  `docs/MEDIA.md`), PDF magic-byte content verification (deliberately deferred — instructor-only
+  upload actor, no server-side parsing of uploaded bytes anywhere; documented trust boundary rather
+  than adding full-file proxying or a new partial-range provider call), and cleanup/orphan handling
+  for abandoned uploads and orphaned R2/Bunny provider objects (deliberately not built — a scheduler
+  does not exist in this repository and would be new infrastructure with no `AGENTS.md`-required
+  demonstrated need; documented what can accumulate, confirmed the security impact is none because
+  every orphan is structurally unreachable through any API route, and recorded a concrete future
+  cleanup cadence instead of building a scheduler now). Ran the complete PostgreSQL backend suite
+  (not just Media) against a fresh disposable PostgreSQL 16 database with all four existing
+  migrations applied from empty — 14 suites, 222 tests — twice for determinism, plus the 3 Media
+  suites (77 tests) an additional two times and the Media-suite concurrency-tagged tests specifically
+  an additional two times, all fully deterministic. Prisma format/validate/generate, API lint,
+  typecheck, unit tests (93, up from 51: 41 new config tests plus 1 already added in the prior
+  slice), API build, web build, mobile lint/typecheck, root `corepack pnpm check`, and
+  `git diff --check` all passed. The disposable PostgreSQL container was removed after validation;
+  the unrelated `mini-inventory-system-db-1` and `goofy_solomon` containers were not touched.
 - Preserved the existing Git repository and root pnpm lockfile model.
 
 ## Current Architecture Baseline
@@ -181,7 +226,7 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
 
 - Course/content product functionality does not exist yet.
 - No seed data, product modules, or product repositories exist yet.
-- Media Slice A exists for instructor-side VideoAsset/DocumentAsset tenant-scoped reads. Media Slice B exists for the student-side DOCUMENT Lesson runtime authorization boundary (`GET /student/courses/:courseId/lessons/:lessonId/document/access`) and issues an ephemeral R2 download capability for the finalized READY object after that boundary succeeds. Media Slice C exists for the equivalent student-side VIDEO Lesson runtime authorization boundary (`GET /student/courses/:courseId/lessons/:lessonId/video/access`); as of Media Slice G it also issues a real, short-lived, path-scoped Bunny CDN HLS playback capability (`playbackUrl`/`expiresAt`) once entitlement and READY-state video readiness are proven. R2 document upload/download capability issuance and Bunny video upload/playback capability issuance exist; DRM, piracy prevention, abandoned-upload cleanup, and provider-object cleanup remain deferred.
+- Media Slice A exists for instructor-side VideoAsset/DocumentAsset tenant-scoped reads. Media Slice B exists for the student-side DOCUMENT Lesson runtime authorization boundary (`GET /student/courses/:courseId/lessons/:lessonId/document/access`) and issues an ephemeral R2 download capability for the finalized READY object after that boundary succeeds. Media Slice C exists for the equivalent student-side VIDEO Lesson runtime authorization boundary (`GET /student/courses/:courseId/lessons/:lessonId/video/access`); as of Media Slice G it also issues a real, short-lived, path-scoped Bunny CDN HLS playback capability (`playbackUrl`/`expiresAt`) once entitlement and READY-state video readiness are proven. R2 document upload/download capability issuance and Bunny video upload/playback capability issuance exist. Media Slice H audited the complete Media domain (config/capability/lifecycle/webhook/IDOR/leakage/logging/concurrency) and found the architecture already correct end-to-end; it applied a small number of focused hardening fixes (config placeholder-rejection extended to the R2 bucket name and Bunny CDN hostname, a stable `DOCUMENT_UPLOAD_SIGNING_FAILED` error code replacing a raw-error fallthrough, two stale in-code doc comments corrected, and a new `media.config.spec.ts` covering config validation directly) and documented, rather than built, deferred cleanup/DRM/PDF-content-verification policy — see `docs/MEDIA.md`. DRM, piracy prevention, and provider-object cleanup tooling remain deferred by deliberate, documented V1 decision, not oversight.
 - Course authoring Slice A (core course metadata), Slice B (Section/Lesson create, metadata update, archive, and whole-list reorder), Slice C (student course authorization/read), and Slice D (minimal lesson progress) exist. Lesson creation for VIDEO/DOCUMENT/QUIZ types requires the instructor to reference an already-existing tenant-scoped VideoAsset/DocumentAsset/Quiz row by ID; Quiz authoring exists and DocumentAsset upload exists, but VideoAsset upload still has no flow. A currently-unavailable lesson (before `availableFrom` or at/after `availableUntil`) is omitted entirely from the student structure response rather than returned as locked metadata — the conservative choice since neither `docs/PRODUCT.md` nor `docs/BACKEND-DOMAIN.md` specify this, and omission leaks no title/type/existence about content the student cannot yet reach. Lesson progress is currently limited to a tri-state status (NOT_STARTED/STARTED/COMPLETED), with manual completion for non-quiz lessons and automatic completion for QUIZ lessons on a qualifying Quiz Attempt (Quiz Milestone Slice D — see below) — video watch-time/resume-position writes and persisted aggregate course percentages are deliberately not implemented. Course lifecycle transitions, real video streaming, and frontend/mobile course UI remain pending.
 - Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery, `GET /student/courses/:courseId/lessons/:lessonId/quiz`), Quiz Milestone Slice C (student Quiz attempt start/read/answer/submit with server-side scoring, `attemptLimit` enforcement, and an immutable per-attempt passing-threshold snapshot), and Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration, per the V1 rule documented in `docs/QUIZ-ATTEMPTS.md`) exist. A QUIZ Lesson can now be completed exactly one way — a qualifying `GRADED` attempt — and the generic manual-completion endpoint continues to reject QUIZ lessons. Attempt result/review UI, aggregate Course completion percentages, and `clientSubmissionKey`-based idempotent attempt start (an optional schema field for deduplicating mobile retry-created attempts; not required by any specified request shape, and submission is already fully idempotent via attempt-status short-circuiting) remain pending/deferred.
 - Authentication/session behavior and V1 onboarding decisions are designed; internal primitives, orchestration services, public auth HTTP transport, and student device authorization foundation exist.
@@ -198,9 +243,10 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
 ## Pending Decisions
 
 - Provider selection is locked for V1 media: Documents = Cloudflare R2; Videos = Bunny Stream
-  Standard Network. Upload and playback capability issuance are both implemented; remaining media
-  decisions are future DRM integration (Bunny MediaCage) and cleanup/operational policy, not
-  provider reselection.
+  Standard Network. The backend Media milestone is closed (Media Slice H); the only remaining media
+  decision is future DRM integration (Bunny MediaCage Enterprise) if/when product need and cost
+  justify it. Cleanup/operational tooling is a documented, deliberately-deferred V1 policy, not an
+  open decision — see `docs/MEDIA.md`'s Cleanup / Orphan Policy section.
 - Video/security provider selection after dedicated technical and cost evaluation.
 - Final visual branding, fonts, colors, and logo.
 - Final production auth hardening/tuning after implementation benchmarks and UX review.
@@ -557,19 +603,74 @@ Media Slice G (protected Bunny video playback capability) validation passed:
 - Verified directly: the raw JSON response never contains `videoAssetId`, `tenantId`, `providerKey`, `externalAssetRef`, or any Bunny credential value (API key, webhook signing secret, token authentication key); `playbackUrl` targets the exact authorized video's `/{videoId}/playlist.m3u8` path; TTL is computed as `clamp(duration + 900, 300, 14400)` with a 7200s fallback for unknown duration; and no `LessonProgress`/`QuizAttempt`/`SecurityEvent` row is created by any playback-authorization call, including a failed one.
 - No migration was required or added. No mobile UI was implemented — this slice is API-only, and the response (`playbackUrl` consumable directly by a native HLS player, no per-segment backend calls) is designed to be ready for that future integration.
 
+Media Slice H (backend Media milestone audit, hardening, and final gate) validation passed — **Media
+milestone: APPROVED / CLOSED**:
+
+- Confirmed repository started clean at `30e7649 feat(media): add protected Bunny video playback`.
+- Read `AGENTS.md`, `docs/MEDIA.md`, `docs/STATUS.md`, the complete Prisma Media models/enums
+  (`VideoAsset`, `DocumentAsset`, `VideoLesson`, `DocumentLesson`, `AssetProcessingStatus`), every
+  file under `apps/api/src/modules/media/`, the Media-relevant portions of
+  `StudentCourseAccessService`, `TenantAuthorizationService`, and `StudentDeviceGuard`, and the
+  security/config/bootstrap surfaces Media depends on (`main.ts`, `app.module.ts`,
+  `http-bootstrap.ts`, `api-exception.filter.ts`) before making any change.
+  Confirmed no request/response logging middleware exists anywhere in the API (only one generic,
+  non-sensitive `Logger.error` call in `PrismaService`), so there is no logging surface capable of
+  leaking a presigned URL, Bunny token, or webhook signature.
+- Treated this as an audit first: reconstructed every documented and actual `DocumentAsset`/
+  `VideoAsset` state transition against the real code (not assumption) and confirmed the existing
+  architecture is already correct — no fix was needed for entitlement/IDOR/cross-tenant/leakage/
+  concurrency behavior, all of which were re-verified directly rather than re-implemented.
+- Made four narrow, concrete fixes (see the Completed Work entry above for full detail):
+  extended config placeholder-rejection to the R2 bucket name and Bunny CDN hostname
+  (`readNonPlaceholderValue`); added `DocumentUploadSigningFailedError`
+  (`DOCUMENT_UPLOAD_SIGNING_FAILED`, `502`) for parity with the video upload path, replacing a raw
+  re-thrown provider error; corrected two stale controller doc comments; added
+  `media.config.spec.ts` (41 tests) for config-validation coverage that did not exist before.
+- Documented, rather than built: the `FAILED -> READY` webhook transition's exact per-target
+  allowed-source-state table and rationale; the PDF magic-byte content-verification trust-boundary
+  decision; and a full Cleanup / Orphan Policy section (what can accumulate, why the security impact
+  is none, cost impact, and a recommended future cleanup cadence) — all added to `docs/MEDIA.md`.
+- Updated one existing test (`does not create a successful asset state when provider signing fails`
+  in `media-http.postgres-test.ts`) to assert the new `502`/`DOCUMENT_UPLOAD_SIGNING_FAILED` behavior
+  in place of the prior generic, unmapped `500`.
+- Prisma format, validate, and generate passed; confirmed via `git status`/`git diff` that no
+  `prisma/schema.prisma` or migration file was touched.
+- API lint and typecheck passed. API unit tests: 93 passed (up from 51: 41 new
+  `media.config.spec.ts` tests, plus the 1 Bunny-official-vector test already added during Slice G's
+  own review).
+- A fresh disposable PostgreSQL 16 container was created; all four existing migrations were applied
+  in order from empty. The complete PostgreSQL backend suite (not Media-only) — 14 suites, 222
+  tests, spanning auth/device/tenancy/course/quiz/media — was run twice against the same database for
+  determinism (both runs: 222/222). The 3 Media suites (77 tests) were run an additional two times,
+  and the Media concurrency-tagged tests specifically an additional two times beyond that — all fully
+  deterministic across every run.
+- API build, web build, mobile lint/typecheck (via root `pnpm -r lint`/`typecheck`), and root
+  `corepack pnpm check` (install, prisma generate, lint, typecheck, test, API build, web build) all
+  passed. `git diff --check` passed.
+- The disposable PostgreSQL container was removed after validation; the unrelated
+  `mini-inventory-system-db-1` and `goofy_solomon` containers were not touched.
+- No migration was required, requested, or added. No product functionality, feature, provider, or
+  authorization behavior was added or changed — every code change this task made is a narrow
+  correctness/consistency/test-coverage fix, confirmed by the fact that all pre-existing Media/Course/
+  Quiz/auth/device/tenancy test coverage passed unchanged.
+
 ## Exact Recommended Next Step
 
-Media provider/upload/playback foundations are now complete for V1 (documents on Cloudflare R2,
-video on Bunny Stream Standard Network, including real signed HLS playback issuance). Remaining
-media work is operational, not architectural: cleanup for abandoned uploads/orphan provider objects,
-optional document download-header refinements, and any future DRM (Bunny MediaCage) integration if a
-later threat model requires it.
+The backend Media milestone is closed as of Media Slice H: Cloudflare R2 document upload/download and
+Bunny Stream video upload/playback are implemented end-to-end, audited, hardened, and covered by a
+passing full-workspace regression gate. Remaining media work is deliberately deferred, documented
+policy, not open architecture work: cleanup tooling for abandoned uploads/orphan provider objects
+(build only when real usage volume creates an actual need), optional document download-header
+refinements, PDF magic-byte content verification (only if a lower-trust upload actor is introduced),
+and any future DRM (Bunny MediaCage Enterprise) integration if a later threat model requires it.
 
 Design an attempt result/review screen on top of the now-complete Quiz attempt/scoring/completion
-engine (Slices C and D). Begin the actual mobile video/document player integration (the API side is
-now ready for a native HLS player consuming `playbackUrl` directly). Also run a full
-auth/device/tenancy/workspace validation gate, since none has been run since the Course Slice B
-review's shared-utility fix.
+engine (Slices C and D). Begin the actual mobile video/document player integration — the API side is
+now ready for a native HLS player consuming `playbackUrl` directly, and for the R2 document
+`downloadUrl`. The full auth/device/tenancy/media/course/quiz PostgreSQL suite and the full root
+`corepack pnpm check` gate were both run and passed as part of Media Slice H, closing the outstanding
+"none has been run since the Course Slice B review's shared-utility fix" gap this section previously
+noted.
 
 ## Handoff Instructions
 

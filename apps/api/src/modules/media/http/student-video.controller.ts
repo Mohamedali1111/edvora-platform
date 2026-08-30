@@ -11,9 +11,10 @@ import type { StudentVideoAccessStatus } from '../types/student-video-access.typ
 // Deliberately routed as a nested resource under the already-authorized Course/Lesson path
 // (never a bare `/student/videos/:videoAssetId`) so a video can only ever be reached through the
 // exact VIDEO Lesson that references it — see
-// `StudentCourseAccessService.assertAccessibleVideoLesson`. GET, not POST: this is a pure
-// authorization read (no ephemeral playback capability is issued yet, no provider selected), not
-// an action that creates or generates anything. Mirrors `StudentDocumentController` exactly.
+// `StudentCourseAccessService.assertAccessibleVideoLesson`. GET, not POST: this issues a
+// short-lived, path-scoped Bunny HLS playback capability (see `StudentVideoAccessService`), but it
+// remains a pure, side-effect-free authorization/capability read — not an action that creates or
+// mutates anything. Mirrors `StudentDocumentController` exactly.
 const STUDENT_VIDEO_THROTTLE = {
   video: {
     limit: 60,

@@ -5,6 +5,7 @@ export type MediaErrorCode =
   | 'DOCUMENT_UPLOAD_NOT_FOUND'
   | 'DOCUMENT_UPLOAD_VERIFICATION_FAILED'
   | 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION'
+  | 'DOCUMENT_UPLOAD_SIGNING_FAILED'
   | 'VIDEO_UPLOAD_SIGNING_FAILED'
   | 'VIDEO_PROVIDER_CREATE_FAILED'
   | 'INVALID_VIDEO_PROVIDER_WEBHOOK'
@@ -54,6 +55,12 @@ export class DocumentUploadVerificationFailedError extends MediaError {
 export class DocumentAssetStorageInvariantViolationError extends MediaError {
   constructor() {
     super('DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION', 'Document asset storage state is invalid.');
+  }
+}
+
+export class DocumentUploadSigningFailedError extends MediaError {
+  constructor() {
+    super('DOCUMENT_UPLOAD_SIGNING_FAILED', 'Document upload authorization could not be created.');
   }
 }
 

@@ -8,6 +8,7 @@ import { TenantAuthorizationService } from '../../tenancy/services/tenant-author
 import {
   DocumentAssetNotFoundError,
   DocumentUploadNotFoundError,
+  DocumentUploadSigningFailedError,
   DocumentUploadVerificationFailedError,
   UnsupportedDocumentMimeTypeError,
   VideoUploadSigningFailedError,
@@ -148,7 +149,13 @@ export class MediaAssetService {
         expiresInSeconds: this.mediaConfig.documents.r2.uploadUrlTtlSeconds,
         now,
       });
-    } catch (error) {
+    } catch {
+      // Mirrors `createVideoUploadIntent`'s signing-failure handling exactly: the asset moves to
+      // FAILED so a client can never be misled into holding an upload capability that was never
+      // actually issued, and the original provider error is not re-thrown as-is — a typed,
+      // documented `MediaError` is thrown instead so this failure mode gets the same stable error
+      // code/HTTP status (502) as every other provider-capability-signing failure in this module,
+      // rather than falling through to a generic, unmapped `INTERNAL_SERVER_ERROR`.
       await this.prismaService.client.documentAsset.updateMany({
         where: {
           id: documentAssetId,
@@ -161,7 +168,7 @@ export class MediaAssetService {
           failureReason: 'DOCUMENT_UPLOAD_SIGNING_FAILED',
         },
       });
-      throw error;
+      throw new DocumentUploadSigningFailedError();
     }
 
     return {

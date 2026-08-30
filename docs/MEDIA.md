@@ -166,6 +166,27 @@ maximum. The repository does not currently specify a broader V1 document-format 
 implementation rejects arbitrary blobs, executables, HTML, scripts, archives, and generic binary
 uploads.
 
+### PDF Content Verification Trust Boundary (Media Slice H Audit)
+
+Confirmation verifies the declared MIME type (`application/pdf`, enforced by DTO validation and
+cryptographically bound into the R2 presigned PUT's `Content-Type`, so a client cannot successfully
+upload with a different header value) and the exact declared file size against R2's own reported
+object metadata. It does **not** inspect the uploaded bytes themselves (no PDF magic-number/file-type
+sniffing). A byte-level check was deliberately not added in this slice: doing it correctly would mean
+either downloading the full object (up to 25 MiB) through NestJS to inspect it — reintroducing exactly
+the "bytes flow through the API" architecture this module otherwise avoids everywhere — or adding a
+new partial-range R2 `GET` call with its own retry/failure semantics, for a benefit that is narrow
+given the actual trust boundary: only an authenticated, ACTIVE, tenant-membership-verified
+**instructor** can ever create a document upload intent (never a student, never an unauthenticated
+caller), and the uploaded object is never parsed, rendered, or executed anywhere in this backend —
+it is only ever handed back to a student as an opaque, short-lived signed download URL, to be opened
+by whatever PDF viewer exists on that student's own device. A mismatched-content file uploaded by a
+malicious or careless instructor is a real but low-severity, narrow-blast-radius risk (bounded to
+that instructor's own tenant and content, and to whatever the student's own OS/app does with a
+misnamed file), not a server-side code-execution or cross-tenant risk. If a concrete future need
+arises (e.g. instructor self-service at a much larger scale, or a lower-trust upload actor), a
+lightweight partial-range magic-byte check is the recommended addition — not full-file proxying.
+
 ### Confirmation And Readiness
 
 `POST /instructor/tenants/:tenantId/media/documents/:documentAssetId/confirm-upload` never trusts a
@@ -196,10 +217,10 @@ archive/delete stale upload intents and provider objects.
 
 ## Playback And Document Access
 
-Student video playback byte delivery is still fully deferred: no route streams or proxies video
-bytes. Media Slice C adds the runtime authorization boundary for VIDEO Lessons, proving whether a
-student may play a specific video now without moving any video bytes or issuing any real playback
-capability.
+Video bytes never flow through NestJS: no route streams, buffers, or proxies video bytes — the only
+supported path is Bunny CDN -> student client. Media Slice C added the runtime authorization boundary
+for VIDEO Lessons; Media Slice G (below) extends it with real, short-lived Bunny playback capability
+issuance once that authorization succeeds.
 
 Student DOCUMENT Lesson access now extends the Media Slice B authorization boundary with real
 short-lived Cloudflare R2 download capability issuance. It still composes exactly:
@@ -518,11 +539,95 @@ Bunny status `4` means a single resolution is ready/playable, but Edvora does no
 `READY`; student video authorization still denies until status `3` confirms the video is fully
 finished. When a trusted webhook supplies duration, Edvora stores it as `VideoAsset.durationSeconds`.
 
+### Exact Per-Target Transition Sets (Media Slice H Audit)
+
+`MediaAssetService.handleVideoProviderWebhook` guards every transition with an explicit source-state
+allowlist, enforced as a single atomic conditional `updateMany` per target (never a separate
+read-then-write), so concurrent/out-of-order webhooks for the same video converge correctly:
+
+| Target       | Allowed source states                 |
+| ------------ | -------------------------------------- |
+| `UPLOADING`  | `UPLOADING`                            |
+| `PROCESSING` | `UPLOADING`, `PROCESSING`               |
+| `READY`      | `UPLOADING`, `PROCESSING`, `FAILED`     |
+| `FAILED`     | `UPLOADING`, `PROCESSING`               |
+
+`READY` is a genuine terminal state with respect to webhooks: no target's allowlist includes `READY`
+as a source, so nothing (a stale/replayed webhook, a later `FAILED`, a duplicate `READY`) can ever
+regress it. `FAILED -> READY` is deliberately allowed and is not a bug: Bunny's own TUS upload
+protocol is resumable, so a real, legitimate sequence is upload interruption (Bunny reports status
+`8`, Edvora records `FAILED`) followed by the instructor's client resuming the same TUS session,
+after which Bunny's pipeline genuinely completes and reports status `3`. Because every transition is
+authenticated by Bunny's HMAC-verified webhook signature and matched to an existing row by the exact
+`(providerKey, externalAssetRef)` pair already persisted from `createVideoUploadIntent`, there is no
+way for this to let an attacker mark an arbitrary or foreign asset `READY` — the transition only ever
+reflects Bunny's own authoritative processing state for that exact video.
+
 ### Instructor Media Surface Unchanged
 
 Media Slice A's instructor `VideoAsset` list/detail routes and response fields are unchanged by this
 slice. No VideoAsset create/update endpoint was added; provider-backed video creation remains
 deferred.
+
+## Cleanup / Orphan Policy (Media Slice H Decision)
+
+No cleanup scheduler, cron job, or background worker exists for Media in V1, and this slice
+deliberately did not add one — there is no CI/CD or scheduler infrastructure in this repository yet
+(see `AGENTS.md`), and building one solely to justify this audit slice would be exactly the kind of
+unrequested infrastructure/scope expansion `AGENTS.md` warns against. This section documents the
+explicit, reviewed operational policy that governs V1 instead.
+
+### What Can Accumulate
+
+- **Stale `UPLOADING` `DocumentAsset`/`VideoAsset` rows**: created whenever an instructor starts an
+  upload intent but never completes it (never PUTs to R2 / never performs the Bunny TUS upload, or
+  performs it but never calls `confirm-upload` for documents). These rows persist indefinitely.
+- **Stale temporary R2 objects** at `tenants/{tenantId}/document-uploads/{documentAssetId}`: exist
+  when an instructor's client successfully PUTs bytes but the asset is never confirmed.
+- **Orphaned final R2 objects**: `promoteObject` succeeds but the subsequent DB `updateMany` to
+  `READY` fails (e.g. a database blip) before the temporary-object cleanup step. The DB row stays
+  `UPLOADING`, so a retry safely re-promotes and converges — the orphan risk here is a redundant
+  copy on retry, not permanent accumulation, unless the client never retries.
+- **Orphaned Bunny video resources**: `createVideoUploadIntent` creates the real Bunny video via
+  Bunny's API *before* the Edvora `VideoAsset` row is inserted (an intentional ordering choice — see
+  "Implemented Scope" above); if the DB insert itself fails after a successful Bunny create call, the
+  Bunny-side resource has no corresponding Edvora row at all.
+- **`FAILED` `DocumentAsset`/`VideoAsset` rows**: retained indefinitely once an upload is definitively
+  rejected (size/content-type mismatch, signing failure, Bunny-reported encoding failure).
+
+### Security Impact: None
+
+Every student-facing read path derives the object key or Bunny video ID **strictly from a DB row
+that has already passed the full READY-plus-entitlement chain** — `StudentDocumentAccessService` and
+`StudentVideoAccessService` never accept or discover a raw provider key/GUID from any other source.
+An orphaned R2 object or Bunny video resource with no matching `READY`, tenant/entitlement-proven DB
+row is therefore **structurally unreachable** through any Edvora API route, regardless of how long it
+persists. Instructor list/detail routes are tenant- and DB-scoped, so an orphan with no DB row is
+invisible there too. Accumulation is not a confidentiality, integrity, or authorization gap.
+
+### Cost/Operational Impact
+
+Bounded, non-urgent, and provider-billed: extra R2 storage for undiscovered temporary/orphaned
+objects, extra Bunny library storage/slot usage for orphaned or abandoned video resources, and
+DB row growth in `document_assets`/`video_assets` for stale `UPLOADING`/`FAILED` rows (negligible at
+V1 scale; both tables are already indexed on `(tenantId, processingStatus)`). The only
+user-observable effect is instructor list/detail views accumulating stale entries over time — a data
+hygiene concern, not a security one.
+
+### Recommended Future Cleanup Cadence
+
+Once real scheduling infrastructure exists (a NestJS `@nestjs/schedule` cron, or an external
+scheduler calling a new Platform-Admin-only maintenance endpoint), a periodic job — daily is a
+reasonable starting cadence — should:
+
+1. Archive or delete `DocumentAsset`/`VideoAsset` rows stuck `UPLOADING` or `FAILED` past a generous
+   grace window (e.g. 24–48 hours), using the existing `(tenantId, processingStatus)` index.
+2. Delete matching orphaned R2 objects under the `document-uploads/` temporary prefix older than the
+   same window.
+3. Delete matching orphaned/abandoned Bunny video resources via Bunny's Delete Video API for
+   `VideoAsset` rows that never progressed past `UPLOADING`/`FAILED` within the window.
+
+This is intentionally not built now. Shipping V1 without it is safe per the security analysis above.
 
 ## DRM-Ready Boundary
 
