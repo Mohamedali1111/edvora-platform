@@ -59,6 +59,15 @@ const testMediaConfig: MediaRuntimeConfig = {
       downloadUrlTtlSeconds: 300,
     },
   },
+  video: {
+    bunnyStream: {
+      libraryId: '123456',
+      apiKey: 'test-bunny-api-key',
+      webhookSigningSecret: 'test-bunny-webhook-secret',
+      tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
+      tusAuthorizationTtlSeconds: 21_600,
+    },
+  },
 };
 
 // Fixed "now" so every startsAt/endsAt/availableFrom/availableUntil boundary assertion is

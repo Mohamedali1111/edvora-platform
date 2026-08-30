@@ -11,7 +11,14 @@ Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/Po
 Current media update: Media Slice D is now completed, and the existing student DOCUMENT Lesson
 access route now issues a short-lived Cloudflare R2/S3 presigned GET for the finalized READY object.
 Documents are locked to Cloudflare R2 and Videos are locked to Bunny Stream Standard Network. Bunny
-video integration remains pending.
+video upload and processing lifecycle is implemented; student playback capability remains pending.
+
+Current video update: instructor video upload intents create a real Bunny Stream video resource,
+persist a truthful `VideoAsset` with `externalAssetRef` set to the Bunny GUID and `providerKey` set
+to the Bunny Library ID, then return only the short-lived Bunny TUS upload capability needed for
+direct client-to-Bunny upload. Bunny signed webhooks are verified with HMAC-SHA256 over the raw body
+and update `VideoAsset` state monotonically. Bunny status `4` remains Edvora `PROCESSING`; only
+status `3` becomes Edvora `READY`.
 
 ## Completed Work
 
@@ -37,6 +44,18 @@ video integration remains pending.
   permanent/public URLs, and remains side-effect-free for `LessonProgress`, `QuizAttempt`,
   `Enrollment`, and asset state. Student document bytes flow Cloudflare R2 -> student client, never
   through NestJS. The signed GET is an ephemeral bearer capability, not DRM or piracy prevention.
+
+- Bunny Stream video upload/processing lifecycle is implemented for instructors. The API route
+  `POST /instructor/tenants/:tenantId/media/videos/upload-intents` authorizes instructor tenant
+  access, creates the Bunny Stream video object, persists a backend-generated `VideoAsset` in
+  `UPLOADING`, and returns only Bunny TUS upload headers and endpoint. Video bytes flow instructor
+  client -> Bunny Stream, never through NestJS. The provider webhook route
+  `POST /provider-webhooks/bunny/stream` is unauthenticated by user credentials and accepts only
+  valid Bunny HMAC-SHA256 signatures over the raw request body. Because Bunny v1 signatures have no
+  timestamp/replay expiry, state transitions are monotonic and replay-safe: `READY` cannot regress to
+  `PROCESSING`, `UPLOADING`, or `FAILED`; duplicate `READY` is safe; unknown provider videos are
+  acknowledged as no-op. Status mapping is documented in `docs/MEDIA.md`, including status `4`
+  staying non-ready and status `3` becoming `READY`. Student playback capability remains deferred.
 
 - Established root documentation for product, architecture, security, UI, release compliance, reliability, decisions, and future handoffs.
 - Established a pnpm workspace monorepo foundation.
@@ -478,10 +497,10 @@ Media Slice C (protected student Video Lesson playback authorization boundary) v
 
 ## Exact Recommended Next Step
 
-Implement Bunny Stream Standard Network video asset/playback capability integration behind Media
-Slice C without changing the locked provider decision. Future document work is operational cleanup
-for abandoned uploads/orphan provider objects and optional download-header refinements, not provider
-selection.
+Implement Bunny Stream Standard Network student playback capability issuance behind Media Slice C
+without changing the locked provider decision. Future document/video operational work includes
+cleanup for abandoned uploads/orphan provider objects and optional document download-header
+refinements, not provider selection.
 
 Design an attempt result/review screen on top of the now-complete Quiz attempt/scoring/completion
 engine (Slices C and D). Also run a full auth/device/tenancy/workspace validation gate, since none

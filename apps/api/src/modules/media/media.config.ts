@@ -1,9 +1,12 @@
 const DEFAULT_DOCUMENT_UPLOAD_TTL_SECONDS = 10 * 60;
 const DEFAULT_DOCUMENT_DOWNLOAD_TTL_SECONDS = 5 * 60;
+const DEFAULT_VIDEO_TUS_AUTH_TTL_SECONDS = 6 * 60 * 60;
 const MIN_DOCUMENT_UPLOAD_TTL_SECONDS = 60;
 const MAX_DOCUMENT_UPLOAD_TTL_SECONDS = 30 * 60;
 const MIN_DOCUMENT_DOWNLOAD_TTL_SECONDS = 60;
 const MAX_DOCUMENT_DOWNLOAD_TTL_SECONDS = 15 * 60;
+const MIN_VIDEO_TUS_AUTH_TTL_SECONDS = 5 * 60;
+const MAX_VIDEO_TUS_AUTH_TTL_SECONDS = 24 * 60 * 60;
 
 export type MediaRuntimeConfig = {
   documents: {
@@ -14,6 +17,15 @@ export type MediaRuntimeConfig = {
       bucketName: string;
       uploadUrlTtlSeconds: number;
       downloadUrlTtlSeconds: number;
+    };
+  };
+  video: {
+    bunnyStream: {
+      libraryId: string;
+      apiKey: string;
+      webhookSigningSecret: string;
+      tusUploadUrl: string;
+      tusAuthorizationTtlSeconds: number;
     };
   };
 };
@@ -44,6 +56,27 @@ export function createMediaRuntimeConfig(env: NodeJS.ProcessEnv = process.env): 
           DEFAULT_DOCUMENT_DOWNLOAD_TTL_SECONDS,
           MIN_DOCUMENT_DOWNLOAD_TTL_SECONDS,
           MAX_DOCUMENT_DOWNLOAD_TTL_SECONDS,
+        ),
+      },
+    },
+    video: {
+      bunnyStream: {
+        libraryId: readBunnyLibraryId(env.MEDIA_VIDEO_BUNNY_STREAM_LIBRARY_ID),
+        apiKey: readSecretValue(env.MEDIA_VIDEO_BUNNY_STREAM_API_KEY, 'MEDIA_VIDEO_BUNNY_STREAM_API_KEY'),
+        webhookSigningSecret: readSecretValue(
+          env.MEDIA_VIDEO_BUNNY_STREAM_WEBHOOK_SIGNING_SECRET,
+          'MEDIA_VIDEO_BUNNY_STREAM_WEBHOOK_SIGNING_SECRET',
+        ),
+        tusUploadUrl: readHttpsUrl(
+          env.MEDIA_VIDEO_BUNNY_STREAM_TUS_UPLOAD_URL?.trim() || 'https://video.bunnycdn.com/tusupload',
+          'MEDIA_VIDEO_BUNNY_STREAM_TUS_UPLOAD_URL',
+        ),
+        tusAuthorizationTtlSeconds: readBoundedTtlSeconds(
+          env.MEDIA_VIDEO_BUNNY_STREAM_TUS_AUTHORIZATION_TTL_SECONDS,
+          'MEDIA_VIDEO_BUNNY_STREAM_TUS_AUTHORIZATION_TTL_SECONDS',
+          DEFAULT_VIDEO_TUS_AUTH_TTL_SECONDS,
+          MIN_VIDEO_TUS_AUTH_TTL_SECONDS,
+          MAX_VIDEO_TUS_AUTH_TTL_SECONDS,
         ),
       },
     },
@@ -103,6 +136,16 @@ function readSecretValue(value: string | undefined, name: string): string {
   }
 
   return secret;
+}
+
+function readBunnyLibraryId(value: string | undefined): string {
+  const libraryId = readRequiredValue(value, 'MEDIA_VIDEO_BUNNY_STREAM_LIBRARY_ID');
+
+  if (!/^[1-9][0-9]*$/.test(libraryId)) {
+    throw new Error('MEDIA_VIDEO_BUNNY_STREAM_LIBRARY_ID must be a positive integer string.');
+  }
+
+  return libraryId;
 }
 
 function readBoundedTtlSeconds(

@@ -1,6 +1,7 @@
 import { HttpStatus, INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as request from 'supertest';
 import type { App } from 'supertest/types';
 import {
@@ -36,14 +37,21 @@ import { CoursesModule } from '../courses/courses.module';
 import { INSTALLATION_ID_HEADER } from '../devices/types/device.types';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import type { MediaRuntimeConfig } from './media.config';
-import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG, VIDEO_PROVIDER } from './media.constants';
 import { MediaModule } from './media.module';
+import { InvalidVideoProviderWebhookError } from './errors/media.errors';
 import type {
   DocumentObjectMetadata,
   DocumentStorageProvider,
   PresignedDownloadCapability,
   PresignedUploadCapability,
 } from './storage/document-storage.provider';
+import type {
+  BunnyStreamWebhookEvent,
+  ProviderVideoResource,
+  TusUploadCapability,
+  VideoProvider,
+} from './video/video.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
@@ -57,6 +65,15 @@ const testMediaConfig: MediaRuntimeConfig = {
       bucketName: 'test-documents',
       uploadUrlTtlSeconds: 600,
       downloadUrlTtlSeconds: 300,
+    },
+  },
+  video: {
+    bunnyStream: {
+      libraryId: '123456',
+      apiKey: 'test-bunny-api-key',
+      webhookSigningSecret: 'test-bunny-webhook-secret',
+      tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
+      tusAuthorizationTtlSeconds: 21_600,
     },
   },
 };
@@ -75,6 +92,7 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
   let refreshSessions: RefreshSessionService;
   let tokenCrypto: TokenCryptoService;
   let uuid: UuidV7Service;
+  let videoProvider: FakeVideoProvider;
 
   beforeEach(async () => {
     const databaseConfig: DatabaseRuntimeConfig = {
@@ -85,6 +103,8 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
         idleTimeoutMillis: 10_000,
       },
     };
+
+    videoProvider = new FakeVideoProvider();
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule, TenancyModule, CoursesModule, MediaModule],
@@ -111,9 +131,11 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
       .useValue(testMediaConfig)
       .overrideProvider(DOCUMENT_STORAGE_PROVIDER)
       .useValue(new UnusedDocumentStorageProvider())
+      .overrideProvider(VIDEO_PROVIDER)
+      .useValue(videoProvider)
       .compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ rawBody: true });
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
@@ -230,6 +252,69 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
     expect(raw).not.toMatch(/externalAssetRef|providerKey|videoAssetId|tenantId|processingStatus|url|token|secret|signed|playback|hls|dash|drm|license/i);
     expect(raw).not.toContain(setup.videoAssetId);
     expect(raw).not.toContain(setup.tenantId);
+  });
+
+  it('keeps student denied until Bunny reports fully finished status 3 for an upload-intent asset', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('bunny-lifecycle');
+    const instructorToken = await issueAccessToken(instructorId, PlatformRole.INSTRUCTOR);
+    const studentId = await createStudent('bunny-lifecycle-student');
+    const installationId = installation();
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Bunny Lifecycle', CourseStatus.PUBLISHED);
+    const enrollmentId = await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    await createActiveDevice(studentId, installationId);
+
+    const uploadIntent = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${instructorToken}`)
+      .send({ title: 'Lifecycle Video' })
+      .expect(HttpStatus.CREATED);
+    const uploadBody = responseBody<{
+      videoAssetId: string;
+      provider: { bunnyStream: { libraryId: string; videoId: string } };
+    }>(uploadIntent);
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Video lesson',
+      position: 1,
+      status: LessonStatus.PUBLISHED,
+      videoAssetId: uploadBody.videoAssetId,
+    });
+    const setup: Setup = {
+      tenantId,
+      instructorId,
+      studentId,
+      installationId,
+      token: await issueAccessToken(studentId, PlatformRole.STUDENT),
+      courseId,
+      sectionId,
+      lessonId,
+      videoAssetId: uploadBody.videoAssetId,
+      enrollmentId,
+    };
+
+    await getAccess(setup).expect(HttpStatus.NOT_FOUND);
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: uploadBody.provider.bunnyStream.videoId, Status: 1 }).expect(HttpStatus.OK);
+    await getAccess(setup).expect(HttpStatus.NOT_FOUND);
+    await postBunnyWebhook({
+      VideoLibraryId: 123456,
+      VideoGuid: uploadBody.provider.bunnyStream.videoId,
+      Status: 4,
+      Length: 70,
+    }).expect(HttpStatus.OK);
+    await getAccess(setup).expect(HttpStatus.NOT_FOUND);
+    await postBunnyWebhook({
+      VideoLibraryId: 123456,
+      VideoGuid: uploadBody.provider.bunnyStream.videoId,
+      Status: 3,
+      Length: 70,
+    }).expect(HttpStatus.OK);
+
+    const access = await getAccess(setup).expect(HttpStatus.OK);
+    expect(access.body).toMatchObject({ lessonId, ready: true, durationSeconds: 70 });
+    expect(JSON.stringify(access.body)).not.toMatch(/url|token|playback|hls|dash|drm|license|externalAssetRef|providerKey/i);
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+    await expect(prisma.client.quizAttempt.count()).resolves.toBe(0);
   });
 
   it('creates no LessonProgress, QuizAttempt, or other side-effect row on authorization, and does not mutate the Enrollment', async () => {
@@ -857,7 +942,24 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
     const session = await refreshSessions.createSession({ userId, channel: 'MOBILE' });
     return accessTokens.sign({ userId, sessionId: session.sessionId, platformRole });
   }
+
+  function postBunnyWebhook(payload: Record<string, unknown>): request.Test {
+    const rawBody = JSON.stringify(payload);
+    return request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', signBunnyWebhook(rawBody))
+      .send(rawBody);
+  }
 });
+
+const BUNNY_WEBHOOK_SECRET = 'test-bunny-webhook-secret';
+
+function signBunnyWebhook(rawBody: string): string {
+  return createHmac('sha256', BUNNY_WEBHOOK_SECRET).update(Buffer.from(rawBody, 'utf8')).digest('hex');
+}
 
 let installationCounter = 0;
 
@@ -890,4 +992,65 @@ class UnusedDocumentStorageProvider implements DocumentStorageProvider {
   createPresignedDownload(): Promise<PresignedDownloadCapability> {
     return Promise.reject(new Error('not used by student video access tests'));
   }
+}
+
+class FakeVideoProvider implements VideoProvider {
+  readonly providerKey = '123456';
+  private nextVideoNumber = 1;
+
+  createVideoResource(): Promise<ProviderVideoResource> {
+    const videoId = `fake-bunny-video-${this.nextVideoNumber}`;
+    this.nextVideoNumber += 1;
+    return Promise.resolve({ videoId });
+  }
+
+  createTusUploadCapability(input: {
+    videoId: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): TusUploadCapability {
+    return {
+      endpoint: 'https://video.bunnycdn.com/tusupload',
+      libraryId: this.providerKey,
+      videoId: input.videoId,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+      headers: {
+        AuthorizationSignature: `signature-for-${input.videoId}`,
+        AuthorizationExpire: String(input.expiresInSeconds),
+        VideoId: input.videoId,
+        LibraryId: this.providerKey,
+      },
+    };
+  }
+
+  verifyAndParseWebhook(input: {
+    headers: Record<string, string | string[] | undefined>;
+    rawBody: Buffer;
+  }): BunnyStreamWebhookEvent {
+    const signature = readHeader(input.headers, 'x-bunnystream-signature');
+    const expected = signBunnyWebhook(input.rawBody.toString('utf8'));
+    const actual = Buffer.from(signature, 'hex');
+    const expectedBytes = Buffer.from(expected, 'hex');
+    if (
+      readHeader(input.headers, 'x-bunnystream-signature-version') !== 'v1' ||
+      readHeader(input.headers, 'x-bunnystream-signature-algorithm') !== 'hmac-sha256' ||
+      actual.length !== expectedBytes.length ||
+      !timingSafeEqual(actual, expectedBytes)
+    ) {
+      throw new InvalidVideoProviderWebhookError();
+    }
+
+    const payload = JSON.parse(input.rawBody.toString('utf8')) as Record<string, unknown>;
+    return {
+      libraryId: String(payload.VideoLibraryId),
+      videoId: String(payload.VideoGuid),
+      status: payload.Status as BunnyStreamWebhookEvent['status'],
+      durationSeconds: typeof payload.Length === 'number' ? payload.Length : null,
+    };
+  }
+}
+
+function readHeader(headers: Record<string, string | string[] | undefined>, name: string): string {
+  const value = headers[name];
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }

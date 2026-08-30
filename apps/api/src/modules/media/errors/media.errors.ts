@@ -4,7 +4,10 @@ export type MediaErrorCode =
   | 'UNSUPPORTED_DOCUMENT_MIME_TYPE'
   | 'DOCUMENT_UPLOAD_NOT_FOUND'
   | 'DOCUMENT_UPLOAD_VERIFICATION_FAILED'
-  | 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION';
+  | 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION'
+  | 'VIDEO_UPLOAD_SIGNING_FAILED'
+  | 'VIDEO_PROVIDER_CREATE_FAILED'
+  | 'INVALID_VIDEO_PROVIDER_WEBHOOK';
 
 export class MediaError extends Error {
   constructor(
@@ -49,5 +52,23 @@ export class DocumentUploadVerificationFailedError extends MediaError {
 export class DocumentAssetStorageInvariantViolationError extends MediaError {
   constructor() {
     super('DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION', 'Document asset storage state is invalid.');
+  }
+}
+
+export class VideoUploadSigningFailedError extends MediaError {
+  constructor() {
+    super('VIDEO_UPLOAD_SIGNING_FAILED', 'Video upload authorization could not be created.');
+  }
+}
+
+export class VideoProviderCreateFailedError extends MediaError {
+  constructor() {
+    super('VIDEO_PROVIDER_CREATE_FAILED', 'Video provider resource could not be created.');
+  }
+}
+
+export class InvalidVideoProviderWebhookError extends MediaError {
+  constructor() {
+    super('INVALID_VIDEO_PROVIDER_WEBHOOK', 'Video provider webhook signature is invalid.');
   }
 }

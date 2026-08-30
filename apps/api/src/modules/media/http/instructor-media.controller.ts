@@ -6,6 +6,7 @@ import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
 import { CreateDocumentUploadIntentDto } from '../dto/document-upload.dto';
+import { CreateVideoUploadIntentDto } from '../dto/video-upload.dto';
 import { DocumentAssetIdParamDto, VideoAssetIdParamDto } from '../dto/media-params.dto';
 import { MediaAssetService } from '../services/media-asset.service';
 import type {
@@ -13,6 +14,7 @@ import type {
   DocumentUploadConfirmation,
   DocumentUploadIntent,
   VideoAssetSummary,
+  VideoUploadIntent,
 } from '../types/media.types';
 
 type VideoAssetListResponse = {
@@ -98,6 +100,16 @@ export class InstructorMediaController {
     @Body() body: CreateDocumentUploadIntentDto,
   ): Promise<DocumentUploadIntent> {
     return this.media.createDocumentUploadIntent(principal, params.tenantId, body);
+  }
+
+  @Post('videos/upload-intents')
+  @HttpCode(HttpStatus.CREATED)
+  async createVideoUploadIntent(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: TenantIdParamDto,
+    @Body() body: CreateVideoUploadIntentDto,
+  ): Promise<VideoUploadIntent> {
+    return this.media.createVideoUploadIntent(principal, params.tenantId, body);
   }
 
   @Post('documents/:documentAssetId/confirm-upload')

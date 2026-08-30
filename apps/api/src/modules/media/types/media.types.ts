@@ -29,6 +29,19 @@ export type DocumentUploadIntent = {
   headers: Record<string, string>;
 };
 
+export type VideoUploadIntent = {
+  videoAssetId: string;
+  tusEndpoint: string;
+  expiresAt: Date;
+  headers: Record<string, string>;
+  provider: {
+    bunnyStream: {
+      libraryId: string;
+      videoId: string;
+    };
+  };
+};
+
 export type DocumentUploadConfirmation = {
   documentAssetId: string;
   processingStatus: AssetProcessingStatus;

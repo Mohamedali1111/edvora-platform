@@ -10,7 +10,8 @@ import { CoursesModule } from '../courses/courses.module';
 import { DeviceModule } from '../devices/device.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { createMediaRuntimeConfig } from './media.config';
-import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG, VIDEO_PROVIDER } from './media.constants';
+import { BunnyStreamWebhookController } from './http/bunny-stream-webhook.controller';
 import { InstructorMediaController } from './http/instructor-media.controller';
 import { StudentDocumentController } from './http/student-document.controller';
 import { StudentVideoController } from './http/student-video.controller';
@@ -18,6 +19,7 @@ import { MediaAssetService } from './services/media-asset.service';
 import { StudentDocumentAccessService } from './services/student-document-access.service';
 import { StudentVideoAccessService } from './services/student-video-access.service';
 import { R2DocumentStorageProvider } from './storage/r2-document-storage.provider';
+import { BunnyStreamVideoProvider } from './video/bunny-stream-video.provider';
 
 @Module({
   imports: [
@@ -34,7 +36,12 @@ import { R2DocumentStorageProvider } from './storage/r2-document-storage.provide
       },
     ]),
   ],
-  controllers: [InstructorMediaController, StudentDocumentController, StudentVideoController],
+  controllers: [
+    BunnyStreamWebhookController,
+    InstructorMediaController,
+    StudentDocumentController,
+    StudentVideoController,
+  ],
   providers: [
     {
       provide: MEDIA_RUNTIME_CONFIG,
@@ -43,6 +50,10 @@ import { R2DocumentStorageProvider } from './storage/r2-document-storage.provide
     {
       provide: DOCUMENT_STORAGE_PROVIDER,
       useClass: R2DocumentStorageProvider,
+    },
+    {
+      provide: VIDEO_PROVIDER,
+      useClass: BunnyStreamVideoProvider,
     },
     MediaAssetService,
     StudentDocumentAccessService,

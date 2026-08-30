@@ -8,6 +8,9 @@ const ERROR_STATUS: Record<MediaErrorCode, HttpStatus> = {
   DOCUMENT_UPLOAD_NOT_FOUND: HttpStatus.CONFLICT,
   DOCUMENT_UPLOAD_VERIFICATION_FAILED: HttpStatus.BAD_GATEWAY,
   DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION: HttpStatus.BAD_GATEWAY,
+  VIDEO_UPLOAD_SIGNING_FAILED: HttpStatus.BAD_GATEWAY,
+  VIDEO_PROVIDER_CREATE_FAILED: HttpStatus.BAD_GATEWAY,
+  INVALID_VIDEO_PROVIDER_WEBHOOK: HttpStatus.UNAUTHORIZED,
 };
 
 const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
@@ -17,6 +20,9 @@ const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
   DOCUMENT_UPLOAD_NOT_FOUND: 'Document upload was not found.',
   DOCUMENT_UPLOAD_VERIFICATION_FAILED: 'Document upload verification failed.',
   DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION: 'Document asset storage state is invalid.',
+  VIDEO_UPLOAD_SIGNING_FAILED: 'Video upload authorization could not be created.',
+  VIDEO_PROVIDER_CREATE_FAILED: 'Video provider resource could not be created.',
+  INVALID_VIDEO_PROVIDER_WEBHOOK: 'Video provider webhook signature is invalid.',
 };
 
 type ErrorResponseBody = {

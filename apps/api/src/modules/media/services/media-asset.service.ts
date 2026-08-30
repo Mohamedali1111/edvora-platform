@@ -10,21 +10,25 @@ import {
   DocumentUploadNotFoundError,
   DocumentUploadVerificationFailedError,
   UnsupportedDocumentMimeTypeError,
+  VideoUploadSigningFailedError,
   VideoAssetNotFoundError,
 } from '../errors/media.errors';
-import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from '../media.constants';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG, VIDEO_PROVIDER } from '../media.constants';
 import type { MediaRuntimeConfig } from '../media.config';
 import {
   DOCUMENT_UPLOAD_ALLOWED_MIME_TYPES,
   type CreateDocumentUploadIntentDto,
 } from '../dto/document-upload.dto';
+import type { CreateVideoUploadIntentDto } from '../dto/video-upload.dto';
 import type { DocumentStorageProvider } from '../storage/document-storage.provider';
 import type {
   DocumentAssetSummary,
   DocumentUploadConfirmation,
   DocumentUploadIntent,
   VideoAssetSummary,
+  VideoUploadIntent,
 } from '../types/media.types';
+import type { BunnyStreamWebhookEvent, VideoProvider } from '../video/video.provider';
 
 @Injectable()
 export class MediaAssetService {
@@ -35,6 +39,7 @@ export class MediaAssetService {
     private readonly clock: ClockService,
     @Inject(MEDIA_RUNTIME_CONFIG) private readonly mediaConfig: MediaRuntimeConfig,
     @Inject(DOCUMENT_STORAGE_PROVIDER) private readonly documentStorage: DocumentStorageProvider,
+    @Inject(VIDEO_PROVIDER) private readonly videoProvider: VideoProvider,
   ) {}
 
   async listVideoAssets(
@@ -165,6 +170,131 @@ export class MediaAssetService {
       expiresAt: capability.expiresAt,
       headers: capability.headers,
     };
+  }
+
+  async createVideoUploadIntent(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    input: CreateVideoUploadIntentDto,
+  ): Promise<VideoUploadIntent> {
+    await this.authorization.assertInstructorTenantAccess(principal, tenantId);
+
+    const videoAssetId = this.uuid.create();
+    const providerResource = await this.videoProvider.createVideoResource({ title: input.title.trim() });
+    const now = this.clock.now();
+
+    await this.prismaService.client.videoAsset.create({
+      data: {
+        id: videoAssetId,
+        tenantId,
+        uploadedByUserId: principal.userId,
+        providerKey: this.videoProvider.providerKey,
+        externalAssetRef: providerResource.videoId,
+        processingStatus: AssetProcessingStatus.UPLOADING,
+      },
+    });
+
+    try {
+      const capability = this.videoProvider.createTusUploadCapability({
+        videoId: providerResource.videoId,
+        expiresInSeconds: this.mediaConfig.video.bunnyStream.tusAuthorizationTtlSeconds,
+        now,
+      });
+
+      return {
+        videoAssetId,
+        tusEndpoint: capability.endpoint,
+        expiresAt: capability.expiresAt,
+        headers: capability.headers,
+        provider: {
+          bunnyStream: {
+            libraryId: capability.libraryId,
+            videoId: capability.videoId,
+          },
+        },
+      };
+    } catch {
+      await this.prismaService.client.videoAsset.updateMany({
+        where: {
+          id: videoAssetId,
+          tenantId,
+          externalAssetRef: providerResource.videoId,
+          processingStatus: AssetProcessingStatus.UPLOADING,
+        },
+        data: {
+          processingStatus: AssetProcessingStatus.FAILED,
+          failureCode: 'VIDEO_UPLOAD_SIGNING_FAILED',
+          failureReason: 'VIDEO_UPLOAD_SIGNING_FAILED',
+        },
+      });
+      throw new VideoUploadSigningFailedError();
+    }
+  }
+
+  async handleVideoProviderWebhook(event: BunnyStreamWebhookEvent): Promise<void> {
+    const next = mapBunnyStatusToAssetUpdate(event);
+
+    if (next.kind === 'ignore') {
+      return;
+    }
+
+    if (next.status === AssetProcessingStatus.UPLOADING) {
+      await this.prismaService.client.videoAsset.updateMany({
+        where: {
+          providerKey: event.libraryId,
+          externalAssetRef: event.videoId,
+          processingStatus: AssetProcessingStatus.UPLOADING,
+        },
+        data: { processingStatus: AssetProcessingStatus.UPLOADING },
+      });
+      return;
+    }
+
+    if (next.status === AssetProcessingStatus.PROCESSING) {
+      await this.prismaService.client.videoAsset.updateMany({
+        where: {
+          providerKey: event.libraryId,
+          externalAssetRef: event.videoId,
+          processingStatus: { in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING] },
+        },
+        data: { processingStatus: AssetProcessingStatus.PROCESSING },
+      });
+      return;
+    }
+
+    if (next.status === AssetProcessingStatus.READY) {
+      await this.prismaService.client.videoAsset.updateMany({
+        where: {
+          providerKey: event.libraryId,
+          externalAssetRef: event.videoId,
+          processingStatus: {
+            in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING, AssetProcessingStatus.FAILED],
+          },
+        },
+        data: {
+          processingStatus: AssetProcessingStatus.READY,
+          durationSeconds: event.durationSeconds,
+          failureCode: null,
+          failureReason: null,
+        },
+      });
+      return;
+    }
+
+    if (next.status === AssetProcessingStatus.FAILED) {
+      await this.prismaService.client.videoAsset.updateMany({
+        where: {
+          providerKey: event.libraryId,
+          externalAssetRef: event.videoId,
+          processingStatus: { in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING] },
+        },
+        data: {
+          processingStatus: AssetProcessingStatus.FAILED,
+          failureCode: next.failureCode,
+          failureReason: next.failureReason,
+        },
+      });
+    }
   }
 
   async confirmDocumentUpload(
@@ -356,6 +486,54 @@ export class MediaAssetService {
       // stale temporary object may still be overwritten by the old bearer PUT, but READY points at
       // the separate final key, so the finalized asset cannot be mutated by that capability.
     }
+  }
+}
+
+type VideoAssetUpdate =
+  | { kind: 'ignore' }
+  | {
+      kind: 'update';
+      status:
+        | typeof AssetProcessingStatus.UPLOADING
+        | typeof AssetProcessingStatus.PROCESSING
+        | typeof AssetProcessingStatus.READY;
+    }
+  | {
+      kind: 'update';
+      status: typeof AssetProcessingStatus.FAILED;
+      failureCode: string;
+      failureReason: string;
+    };
+
+function mapBunnyStatusToAssetUpdate(event: BunnyStreamWebhookEvent): VideoAssetUpdate {
+  switch (event.status) {
+    case 0:
+    case 6:
+      return { kind: 'update', status: AssetProcessingStatus.UPLOADING };
+    case 1:
+    case 2:
+    case 4:
+    case 7:
+      return { kind: 'update', status: AssetProcessingStatus.PROCESSING };
+    case 3:
+      return { kind: 'update', status: AssetProcessingStatus.READY };
+    case 5:
+      return {
+        kind: 'update',
+        status: AssetProcessingStatus.FAILED,
+        failureCode: 'BUNNY_STREAM_ENCODING_FAILED',
+        failureReason: 'BUNNY_STREAM_ENCODING_FAILED',
+      };
+    case 8:
+      return {
+        kind: 'update',
+        status: AssetProcessingStatus.FAILED,
+        failureCode: 'BUNNY_STREAM_PRESIGNED_UPLOAD_FAILED',
+        failureReason: 'BUNNY_STREAM_PRESIGNED_UPLOAD_FAILED',
+      };
+    case 9:
+    case 10:
+      return { kind: 'ignore' };
   }
 }
 

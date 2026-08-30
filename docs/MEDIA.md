@@ -9,9 +9,8 @@ Edvora V1 media providers are now locked as:
 - Documents: Cloudflare R2, using its S3-compatible API.
 - Video: Bunny Stream Standard Network.
 
-Only the Documents/R2 lifecycle is implemented here. Bunny Stream integration remains deferred; the
-video provider decision is recorded only so future work does not reopen provider selection in
-ordinary implementation slices.
+Documents use Cloudflare R2. Video upload and processing now use Bunny Stream on the Standard
+Network tier. Student playback capability issuance remains deferred.
 
 ## Implemented Scope
 
@@ -39,9 +38,59 @@ authorized instructor client
 -> DocumentAsset transitions from UPLOADING to READY with externalAssetRef set to the final key
 ```
 
-Video asset creation/registration is still deferred until Bunny Stream integration exists. The
-current schema's required `externalAssetRef` represents a real storage/provider reference, so the
-API must not manufacture placeholder values such as fake pending-upload paths.
+Video asset creation is provider-backed. The current schema's required `externalAssetRef` represents
+a real provider reference, so the API must not manufacture placeholder values such as fake
+pending-upload paths.
+
+Media Slice F implements the Bunny upload/processing lifecycle:
+
+```text
+authorized instructor client
+-> backend creates a real Bunny Stream video resource
+-> backend persists VideoAsset with externalAssetRef = Bunny video GUID
+-> backend issues a short-lived Bunny TUS upload capability
+-> instructor client uploads bytes directly to Bunny TUS
+-> Bunny processes/transcodes
+-> Bunny signed webhook updates VideoAsset status monotonically
+```
+
+The supported route is:
+
+```text
+POST /instructor/tenants/:tenantId/media/videos/upload-intents
+```
+
+The request only accepts Edvora metadata needed to create the provider object (`title`). The client
+does not supply `tenantId` in the body, uploader identity, `VideoAsset` ID, provider key, provider
+GUID, or processing status. On success the backend stores:
+
+- `id`: backend-generated Edvora UUIDv7.
+- `tenantId`: route tenant after instructor authorization.
+- `uploadedByUserId`: authenticated instructor user ID.
+- `providerKey`: configured Bunny Stream Library ID.
+- `externalAssetRef`: the real Bunny Stream video GUID returned by Create Video.
+- `processingStatus`: `UPLOADING`.
+
+The response is a short-lived upload-scoped bearer capability only: `videoAssetId`, Bunny TUS
+endpoint, expiry, and required TUS headers (`AuthorizationSignature`, `AuthorizationExpire`,
+`VideoId`, `LibraryId`). Bunny's API key and webhook signing secret stay backend-only. Bunny's
+Library ID and video GUID are exposed only because Bunny TUS requires them as upload metadata; they
+are provider identifiers, not authorization secrets by themselves.
+
+Video bytes never pass through NestJS. The only supported upload bytes path is:
+
+```text
+Instructor client -> Bunny Stream TUS
+```
+
+No multipart/video-body upload route exists.
+
+Ordering is intentionally conservative. Bunny resource creation happens before DB persistence, so a
+Bunny create failure creates no Edvora asset. If DB insert fails after Bunny creation, the Bunny
+object may be temporarily orphaned; this is preferable to durable corrupt Edvora state and cleanup is
+deferred. If TUS signing fails after Bunny creation and DB persistence, the asset is moved to
+`FAILED` with `VIDEO_UPLOAD_SIGNING_FAILED`, so clients cannot be misled into uploading against a
+non-issued capability. No cleanup scheduler exists yet.
 
 ## Provider Boundaries
 
@@ -270,9 +319,9 @@ same `LESSON_NOT_FOUND` response used for every other unavailable-Lesson case.
 
 ### What The Endpoint Returns, And What It Deliberately Does Not
 
-Since Bunny Stream integration has not been implemented, this endpoint does not fabricate a playback
-URL, signed URL, playback token, provider-issued JWT, DRM license URL, or provider asset ID. Once
-authorization succeeds, the response carries only `durationSeconds` plus `ready: true` and an
+This endpoint still does not fabricate a playback URL, signed URL, playback token, provider-issued
+JWT, DRM license URL, or provider asset ID. Once authorization succeeds, the response carries only
+`durationSeconds` plus `ready: true` and an
 `authorizedAt` timestamp proving a real, just-performed authorization decision. It never includes
 `videoAssetId`, `externalAssetRef`, `providerKey`, `processingStatus`, failure details, or any other
 instructor-authoring/provider-internal field.
@@ -282,7 +331,52 @@ playback capability belongs: right after `assertAccessibleVideoLesson` resolves 
 `(tenantId, videoAssetId)` pair, and before the response is returned.
 
 Permanent raw/public media URLs must never become the authorization model. Signed/ephemeral playback
-issuance itself remains deferred until Bunny Stream integration is implemented.
+issuance itself remains deferred to Slice G.
+
+Although Bunny upload/processing is now implemented, this endpoint still does not issue playback
+capability. Bunny playback signing, HLS URL issuance, path tokens, MediaCage, and DRM remain
+deferred.
+
+## Bunny Stream Webhooks
+
+Bunny callbacks are received at:
+
+```text
+POST /provider-webhooks/bunny/stream
+```
+
+This route does not use student or instructor authentication. Authentication is the Bunny Stream
+webhook signature. Edvora verifies Bunny v1 headers
+`X-BunnyStream-Signature-Version: v1`,
+`X-BunnyStream-Signature-Algorithm: hmac-sha256`, and `X-BunnyStream-Signature`, using
+HMAC-SHA256 over the exact raw request body and timing-safe comparison. Bunny v1 does not include a
+timestamp/replay-expiry equivalent, so Edvora's replay safety is enforced by the `VideoAsset` state
+machine. Replayed valid webhooks are safe no-ops, and stale earlier webhooks cannot regress `READY`.
+
+Webhook updates locate an asset only by the provider identity Edvora already persisted:
+
+```text
+providerKey = Bunny Stream Library ID
+externalAssetRef = Bunny Stream video GUID
+```
+
+The webhook payload cannot redirect an update to an arbitrary tenant asset. Valid callbacks for an
+unknown library/video pair return success as a safe no-op, avoiding provider retry loops while
+leaking no tenant or user data.
+
+Bunny status mapping:
+
+- `0` Queued and `6` PresignedUploadStarted -> Edvora `UPLOADING`.
+- `1` Processing, `2` Encoding, `4` ResolutionFinished, and `7` PresignedUploadFinished -> Edvora
+  `PROCESSING`.
+- `3` Finished -> Edvora `READY`.
+- `5` Failed -> Edvora `FAILED` with `BUNNY_STREAM_ENCODING_FAILED`.
+- `8` PresignedUploadFailed -> Edvora `FAILED` with `BUNNY_STREAM_PRESIGNED_UPLOAD_FAILED`.
+- `9` CaptionsGenerated and `10` TitleOrDescriptionGenerated -> ignored for asset readiness.
+
+Bunny status `4` means a single resolution is ready/playable, but Edvora does not treat that as
+`READY`; student video authorization still denies until status `3` confirms the video is fully
+finished. When a trusted webhook supplies duration, Edvora stores it as `VideoAsset.durationSeconds`.
 
 ### Instructor Media Surface Unchanged
 

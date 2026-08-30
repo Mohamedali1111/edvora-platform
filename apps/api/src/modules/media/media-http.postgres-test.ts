@@ -1,6 +1,7 @@
 import { HttpStatus, INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as cookieParser from 'cookie-parser';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as request from 'supertest';
 import type { App } from 'supertest/types';
 import {
@@ -26,14 +27,21 @@ import { testAuthConfig } from '../auth/test-helpers';
 import { CoursesModule } from '../courses/courses.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import type { MediaRuntimeConfig } from './media.config';
-import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
+import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG, VIDEO_PROVIDER } from './media.constants';
 import { MediaModule } from './media.module';
+import { InvalidVideoProviderWebhookError, VideoProviderCreateFailedError } from './errors/media.errors';
 import type {
   DocumentObjectMetadata,
   DocumentStorageProvider,
   PresignedDownloadCapability,
   PresignedUploadCapability,
 } from './storage/document-storage.provider';
+import type {
+  BunnyStreamWebhookEvent,
+  ProviderVideoResource,
+  TusUploadCapability,
+  VideoProvider,
+} from './video/video.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
@@ -49,6 +57,15 @@ const testMediaConfig: MediaRuntimeConfig = {
       downloadUrlTtlSeconds: 300,
     },
   },
+  video: {
+    bunnyStream: {
+      libraryId: '123456',
+      apiKey: 'test-bunny-api-key',
+      webhookSigningSecret: 'test-bunny-webhook-secret',
+      tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
+      tusAuthorizationTtlSeconds: 21_600,
+    },
+  },
 };
 
 maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
@@ -59,6 +76,7 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
   let refreshSessions: RefreshSessionService;
   let uuid: UuidV7Service;
   let documentStorage: FakeDocumentStorageProvider;
+  let videoProvider: FakeVideoProvider;
 
   beforeEach(async () => {
     const databaseConfig: DatabaseRuntimeConfig = {
@@ -71,6 +89,7 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
     };
 
     documentStorage = new FakeDocumentStorageProvider();
+    videoProvider = new FakeVideoProvider();
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule, TenancyModule, CoursesModule, MediaModule],
@@ -95,9 +114,11 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       .useValue(testMediaConfig)
       .overrideProvider(DOCUMENT_STORAGE_PROVIDER)
       .useValue(documentStorage)
+      .overrideProvider(VIDEO_PROVIDER)
+      .useValue(videoProvider)
       .compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ rawBody: true });
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
@@ -151,6 +172,252 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
 
     await expect(prisma.client.videoAsset.count()).resolves.toBe(0);
     await expect(prisma.client.documentAsset.count()).resolves.toBe(0);
+  });
+
+  it('creates an authorized Bunny TUS upload intent with server-derived asset state', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('video-upload-intent');
+
+    const rejected = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: '  Intro Video  ',
+        tenantId: uuid.create(),
+        uploadedByUserId: uuid.create(),
+        id: uuid.create(),
+        providerKey: 'client-provider',
+        externalAssetRef: 'client-guid',
+        processingStatus: AssetProcessingStatus.READY,
+      })
+      .expect(HttpStatus.BAD_REQUEST);
+    expect(rejected.body).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+
+    const response = await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: '  Intro Video  ' })
+      .expect(HttpStatus.CREATED);
+
+    const body = responseBody<{
+      videoAssetId: string;
+      tusEndpoint: string;
+      expiresAt: string;
+      headers: Record<string, string>;
+      provider: { bunnyStream: { libraryId: string; videoId: string } };
+    }>(response);
+
+    expect(body.videoAssetId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.tusEndpoint).toBe('https://video.bunnycdn.com/tusupload');
+    expect(body.provider.bunnyStream).toEqual({ libraryId: '123456', videoId: 'fake-bunny-video-1' });
+    expect(body.headers).toEqual({
+      AuthorizationSignature: 'signature-for-fake-bunny-video-1',
+      AuthorizationExpire: '21600',
+      VideoId: 'fake-bunny-video-1',
+      LibraryId: '123456',
+    });
+    expect(JSON.stringify(body)).not.toMatch(/api[-_ ]?key|webhook|secret|test-bunny-api-key|test-bunny-webhook-secret|playback|hls|drm/i);
+    expect(videoProvider.createRequests).toEqual([{ title: 'Intro Video' }]);
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: body.videoAssetId } })).resolves.toMatchObject({
+      tenantId,
+      uploadedByUserId: instructorId,
+      providerKey: '123456',
+      externalAssetRef: 'fake-bunny-video-1',
+      processingStatus: AssetProcessingStatus.UPLOADING,
+      durationSeconds: null,
+    });
+  });
+
+  it('denies non-instructors and foreign tenants for video upload intents', async () => {
+    const { tenantId } = await createInstructorTenant('video-denied-owner');
+    const { token: foreignToken } = await createInstructorTenant('video-denied-foreign');
+    const studentToken = await issueAccessToken(await createUser('video-denied-student', PlatformRole.STUDENT), PlatformRole.STUDENT);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ title: 'Video' })
+      .expect(HttpStatus.FORBIDDEN);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${foreignToken}`)
+      .send({ title: 'Video' })
+      .expect(HttpStatus.FORBIDDEN);
+
+    await expect(prisma.client.videoAsset.count()).resolves.toBe(0);
+    expect(videoProvider.createRequests).toEqual([]);
+  });
+
+  it('creates no asset when Bunny resource creation fails', async () => {
+    const { token, tenantId } = await createInstructorTenant('video-provider-fails');
+    videoProvider.failCreate = true;
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Video' })
+      .expect(HttpStatus.BAD_GATEWAY);
+
+    await expect(prisma.client.videoAsset.count()).resolves.toBe(0);
+  });
+
+  it('leaves safe FAILED durable state when Bunny TUS signing fails after provider and DB creation', async () => {
+    const { token, tenantId } = await createInstructorTenant('video-signing-fails');
+    videoProvider.failTusSigning = true;
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/media/videos/upload-intents`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Video' })
+      .expect(HttpStatus.BAD_GATEWAY);
+
+    const asset = await prisma.client.videoAsset.findFirstOrThrow();
+    expect(asset).toMatchObject({
+      tenantId,
+      providerKey: '123456',
+      externalAssetRef: 'fake-bunny-video-1',
+      processingStatus: AssetProcessingStatus.FAILED,
+      failureCode: 'VIDEO_UPLOAD_SIGNING_FAILED',
+      failureReason: 'VIDEO_UPLOAD_SIGNING_FAILED',
+    });
+  });
+
+  it('accepts valid Bunny HMAC webhooks and applies monotonic status mapping', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-1' },
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 1 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.PROCESSING,
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 4, Length: 91 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.PROCESSING,
+      durationSeconds: null,
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 3, Length: 91 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 91,
+      failureCode: null,
+      failureReason: null,
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 1 }).expect(HttpStatus.OK);
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 5 }).expect(HttpStatus.OK);
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 3, Length: 91 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 91,
+      failureCode: null,
+      failureReason: null,
+    });
+  });
+
+  it('rejects invalid Bunny webhook signatures and raw-body tampering', async () => {
+    const payload = { VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 3 };
+    const raw = JSON.stringify(payload);
+    const validSignature = signBunnyWebhook(raw);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', 'not-hex')
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v2')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', validSignature)
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha1')
+      .set('X-BunnyStream-Signature', validSignature)
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', signBunnyWebhook(raw).replace(/^./, '0'))
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', validSignature)
+      .send(JSON.stringify({ ...payload, Status: 5 }))
+      .expect(HttpStatus.UNAUTHORIZED);
+  });
+
+  it('maps Bunny failure and unknown-provider callbacks safely without cross-library substitution', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-failure');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-1' },
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 654321, VideoGuid: 'bunny-guid-1', Status: 3, Length: 20 }).expect(HttpStatus.OK);
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'unknown-guid', Status: 3, Length: 20 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.UPLOADING,
+      durationSeconds: null,
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-1', Status: 5 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.FAILED,
+      failureCode: 'BUNNY_STREAM_ENCODING_FAILED',
+      failureReason: 'BUNNY_STREAM_ENCODING_FAILED',
+    });
+  });
+
+  it('concurrent stale and READY Bunny webhooks deterministically converge to READY', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-concurrent');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-concurrent' },
+    });
+
+    await Promise.all([
+      postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-concurrent', Status: 3, Length: 120 }),
+      postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-concurrent', Status: 1 }),
+    ]);
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 120,
+    });
   });
 
   it('creates an authorized direct R2 document upload intent with server-owned asset state and key', async () => {
@@ -811,7 +1078,99 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
 
     return responseBody<{ documentAssetId: string }>(response);
   }
+
+  function postBunnyWebhook(payload: Record<string, unknown>): request.Test {
+    const rawBody = JSON.stringify(payload);
+    return request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', signBunnyWebhook(rawBody))
+      .send(rawBody);
+  }
 });
+
+const BUNNY_WEBHOOK_SECRET = 'test-bunny-webhook-secret';
+
+function signBunnyWebhook(rawBody: string): string {
+  return createHmac('sha256', BUNNY_WEBHOOK_SECRET).update(Buffer.from(rawBody, 'utf8')).digest('hex');
+}
+
+class FakeVideoProvider implements VideoProvider {
+  readonly providerKey = '123456';
+  readonly createRequests: Array<{ title: string }> = [];
+  failCreate = false;
+  failTusSigning = false;
+  private nextVideoNumber = 1;
+
+  createVideoResource(input: { title: string }): Promise<ProviderVideoResource> {
+    if (this.failCreate) {
+      return Promise.reject(new VideoProviderCreateFailedError());
+    }
+
+    this.createRequests.push(input);
+    const videoId = `fake-bunny-video-${this.nextVideoNumber}`;
+    this.nextVideoNumber += 1;
+    return Promise.resolve({ videoId });
+  }
+
+  createTusUploadCapability(input: {
+    videoId: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): TusUploadCapability {
+    if (this.failTusSigning) {
+      throw new Error('test Bunny TUS signing failure');
+    }
+
+    return {
+      endpoint: 'https://video.bunnycdn.com/tusupload',
+      libraryId: this.providerKey,
+      videoId: input.videoId,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+      headers: {
+        AuthorizationSignature: `signature-for-${input.videoId}`,
+        AuthorizationExpire: String(input.expiresInSeconds),
+        VideoId: input.videoId,
+        LibraryId: this.providerKey,
+      },
+    };
+  }
+
+  verifyAndParseWebhook(input: {
+    headers: Record<string, string | string[] | undefined>;
+    rawBody: Buffer;
+  }): BunnyStreamWebhookEvent {
+    const version = readHeader(input.headers, 'x-bunnystream-signature-version');
+    const algorithm = readHeader(input.headers, 'x-bunnystream-signature-algorithm');
+    const signature = readHeader(input.headers, 'x-bunnystream-signature');
+
+    if (version !== 'v1' || algorithm !== 'hmac-sha256' || !/^[0-9a-f]{64}$/.test(signature)) {
+      throw new InvalidVideoProviderWebhookError();
+    }
+
+    const expected = signBunnyWebhook(input.rawBody.toString('utf8'));
+    const actual = Buffer.from(signature, 'hex');
+    const expectedBytes = Buffer.from(expected, 'hex');
+    if (actual.length !== expectedBytes.length || !timingSafeEqual(actual, expectedBytes)) {
+      throw new InvalidVideoProviderWebhookError();
+    }
+
+    const payload = JSON.parse(input.rawBody.toString('utf8')) as Record<string, unknown>;
+    return {
+      libraryId: String(payload.VideoLibraryId),
+      videoId: String(payload.VideoGuid),
+      status: payload.Status as BunnyStreamWebhookEvent['status'],
+      durationSeconds: typeof payload.Length === 'number' ? payload.Length : null,
+    };
+  }
+}
+
+function readHeader(headers: Record<string, string | string[] | undefined>, name: string): string {
+  const value = headers[name];
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
+}
 
 class FakeDocumentStorageProvider implements DocumentStorageProvider {
   readonly uploadRequests: Array<{ objectKey: string; contentType: string; expiresInSeconds: number }> = [];
