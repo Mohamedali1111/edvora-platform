@@ -9,8 +9,9 @@ Edvora V1 media providers are now locked as:
 - Documents: Cloudflare R2, using its S3-compatible API.
 - Video: Bunny Stream Standard Network.
 
-Documents use Cloudflare R2. Video upload and processing now use Bunny Stream on the Standard
-Network tier. Student playback capability issuance remains deferred.
+Documents use Cloudflare R2. Video upload and processing use Bunny Stream on the Standard Network
+tier. Student playback capability issuance is now implemented (Media Slice G): the student VIDEO
+Lesson access route issues a real, short-lived, path-scoped Bunny HLS playback capability.
 
 ## Implemented Scope
 
@@ -319,23 +320,162 @@ same `LESSON_NOT_FOUND` response used for every other unavailable-Lesson case.
 
 ### What The Endpoint Returns, And What It Deliberately Does Not
 
-This endpoint still does not fabricate a playback URL, signed URL, playback token, provider-issued
-JWT, DRM license URL, or provider asset ID. Once authorization succeeds, the response carries only
-`durationSeconds` plus `ready: true` and an
-`authorizedAt` timestamp proving a real, just-performed authorization decision. It never includes
-`videoAssetId`, `externalAssetRef`, `providerKey`, `processingStatus`, failure details, or any other
-instructor-authoring/provider-internal field.
+As of Media Slice G (see below), this endpoint issues a real, short-lived Bunny Stream HLS playback
+capability once authorization succeeds. The response carries only `lessonId`, `durationSeconds`,
+`playbackUrl`, and `expiresAt`. It never includes `videoAssetId`, `externalAssetRef`, `providerKey`,
+`processingStatus`, failure details, Bunny credentials/secrets, or any other
+instructor-authoring/provider-internal field as a separate field — the Bunny video GUID does appear
+embedded inside `playbackUrl`'s signed path, which is acceptable as part of the short-lived
+capability itself.
 
-`StudentVideoAccessService.getVideoAccess` is the exact point in code where a future Bunny Stream
-playback capability belongs: right after `assertAccessibleVideoLesson` resolves a proven
-`(tenantId, videoAssetId)` pair, and before the response is returned.
+Permanent raw/public media URLs must never become the authorization model. `playbackUrl` is a
+sensitive, short-lived bearer capability — see Media Slice G for its exact construction, TTL
+reasoning, and limitations.
 
-Permanent raw/public media URLs must never become the authorization model. Signed/ephemeral playback
-issuance itself remains deferred to Slice G.
+## Protected Bunny Video Playback Capability (Media Slice G)
 
-Although Bunny upload/processing is now implemented, this endpoint still does not issue playback
-capability. Bunny playback signing, HLS URL issuance, path tokens, MediaCage, and DRM remain
-deferred.
+Media Slice G extends the Slice C authorization boundary with real Bunny Stream playback capability
+issuance. The security boundary is unchanged: `GET
+/student/courses/:courseId/lessons/:lessonId/video/access` still composes `AccessTokenGuard` ->
+`StudentDeviceGuard` -> `StudentCourseAccessService.assertAccessibleVideoLesson`, and playback
+signing happens only after that chain proves ACTIVE STUDENT -> approved device -> ACTIVE
+TenantStudent -> valid ACTIVE Enrollment -> ACTIVE Tenant -> PUBLISHED Course/Section/Lesson ->
+tenant-linked READY `VideoAsset`. `assertAccessibleVideoLesson` was extended (not duplicated) to also
+return the proven asset's own `providerKey`/`externalAssetRef`, so `StudentVideoAccessService` never
+re-queries or accepts these from the client.
+
+### Two Different Bunny Token Mechanisms, And Why We Use The Other One
+
+Bunny Stream has two independent security mechanisms that are easy to conflate:
+
+1. **Embed/iframe view token** (`bunny.net/docs/stream/token-authentication`):
+   `token = SHA256_HEX(security_key + video_id + expires)`, checked only on
+   `https://iframe.mediadelivery.net/embed/{libraryId}/{videoId}?token=...&expires=...`. This gates
+   Bunny's own iframe player page. It does **not** protect the underlying HLS files a native player
+   fetches — a design that would leave the manifest gated but every segment URL freely reusable once
+   observed. This slice deliberately does not return an iframe/embed URL at all.
+2. **CDN Pull Zone token authentication** (`bunny.net/docs/cdn/security/token-authentication/advanced`),
+   which `bunny.net/docs/stream/security` documents as operating "at the Pull Zone level" and
+   protecting "MP4 fallbacks, HLS playlists and segments, thumbnails, and previews" for Bunny Stream's
+   underlying storage. This is the mechanism Slice G uses.
+
+### Path-Style (Directory) Token Construction
+
+Every file for one video — `playlist.m3u8`, every per-resolution sub-playlist, and every segment —
+lives under one Bunny-managed prefix, `/{videoId}/` (Bunny's "Video storage structure" docs). Slice G
+signs a **directory-scoped** CDN token bound to exactly that prefix (`token_path=/{videoId}/`), so one
+signature authorizes the manifest and every segment/quality file a player resolves relative to it —
+never a manifest-only token that leaves segment requests unprotected — while staying scoped to this
+one video and never reusable for another.
+
+The token is embedded as a **URL path segment**, not a query string:
+
+```text
+https://{cdnHostname}/bcdn_token={token}&token_path=%2F{videoId}%2F&expires={unixSeconds}/{videoId}/playlist.m3u8
+```
+
+This is Bunny's documented "directory token" pattern, and it is deliberately chosen over a
+query-string token (`?token=...&expires=...` on the manifest URL) because of how native HLS players
+resolve relative URIs: an `AVPlayer`/`ExoPlayer`/`expo-video` client resolves each segment URL
+relative to everything *before the last `/`* of the manifest URL it fetched. A path-embedded token
+prefix (`/bcdn_token=...&expires=.../{videoId}/`) is carried forward into every derived segment
+request automatically, with no player-side code needed. A query-string token would not be: the
+player would have to re-append `?token=...` to every derived segment URL itself, which native HLS
+player stacks generally do not support without custom interception — the documented limitation this
+design avoids.
+
+The exact HMAC construction (independently reproduced from Bunny's own official reference
+implementation, `github.com/BunnyWay/BunnyCDN.TokenAuthentication`, and verified byte-for-byte
+against its published test vectors before implementation):
+
+```text
+signingData = "token_path=" + tokenPath
+digest      = HMAC-SHA256(key = tokenAuthenticationKey,
+                           message = tokenPath || expires || signingData)
+token       = "HS256-" + base64url(digest)   // '+'->'-', '/'->'_', no '=' padding
+```
+
+`BunnyStreamVideoProvider.createPlaybackCapability` implements this directly (no Bunny SDK
+dependency, consistent with how the existing TUS/webhook code already does its own crypto). It
+refuses to sign a `videoId` that is not a well-formed Bunny GUID rather than embedding arbitrary
+input into a path — see the READY/provider-identity invariant below.
+
+### TTL Decision
+
+Bunny's directory-token `expires` is one fixed wall-clock deadline checked on every request under the
+signed path — it is **not** a sliding per-segment or per-session window. A flat short TTL (e.g. a flat
+~5 minutes) would therefore return 403 mid-playback for any lecture longer than that, the exact
+failure mode `AGENTS.md`-level product judgment must avoid. Slice G instead computes TTL from the
+specific video's own known `durationSeconds`:
+
+```text
+ttl = clamp(durationSeconds + 900s buffer, 300s, 14400s)     // 5 min .. 4 hours
+```
+
+with a bounded fallback of 7200s (2 hours) — not the 4-hour maximum — when `durationSeconds` is
+unknown. The 15-minute buffer covers the gap between authorization and first byte, pausing, and
+seeking backward into already-played segments after the video's nominal end point. The 4-hour ceiling
+keeps even an unusually long recording bounded and short-lived rather than defaulting to a
+multi-hour/day TTL "to be safe." If a student's session outlives the issued TTL, the client simply
+calls the same authorized route again for a fresh capability — no playback-session state exists to
+resume.
+
+### IP Binding: Disabled For V1
+
+Bunny's CDN token authentication supports optional IP binding (`user_ip`) folded into the signature.
+Slice G does **not** enable it. Reasoning: Egyptian/MENA mobile carriers frequently rotate client IPs
+mid-session (CGNAT, cell tower handoff, Wi-Fi/cellular switching), and IP-bound tokens would then fail
+requests from a legitimate device mid-playback — a reliability cost with no corresponding security
+benefit for V1, since the capability is already short-lived, scoped to one video, and reachable only
+through the full server-side entitlement chain. This is a deliberate, documented choice, not an
+oversight; it can be revisited if a future threat model specifically requires it.
+
+### Provider Identity Safety (READY/Final Invariant)
+
+Only a READY `VideoAsset` ever reaches signing. Two independent checks guard against signing the
+wrong or a malformed path, both leaving the `VideoAsset`/`Enrollment`/progress state completely
+untouched on failure (`VideoAssetProviderInvariantViolationError` /
+`VideoPlaybackSigningFailedError`, both mapped to `502 Bad Gateway`, never leaking internals):
+
+- `StudentVideoAccessService` rejects if the asset's persisted `providerKey` does not equal the
+  currently configured Bunny Stream library ID (`VideoProvider.providerKey`) — e.g. an asset created
+  against a different library.
+- `BunnyStreamVideoProvider.createPlaybackCapability` rejects if `externalAssetRef` is not a
+  well-formed Bunny GUID, refusing to sign an arbitrary path.
+
+Both checks run before any HMAC computation. Playback signing is a synchronous, local computation
+with no network call, so there is no genuinely transient failure mode beyond these two validations —
+unlike document/video upload signing, there is nothing to retry.
+
+### Response Safety, Logging, And Persistence
+
+The response (`lessonId`, `durationSeconds`, `playbackUrl`, `expiresAt`) never includes
+`videoAssetId`, `tenantId`, `providerKey`, `externalAssetRef` as a separate field, or any Bunny
+credential (API key, webhook signing secret, token authentication key). `playbackUrl` is sensitive
+short-lived bearer material: it is never logged, never persisted to any table, and never written into
+`SecurityEvent`. This slice creates no playback-audit or watch-session row of any kind. Repeated
+authorized calls simply issue a fresh capability each time (no persistence, no caching, no reuse of a
+prior signature); there is no server-side notion of a "playback session" to create, resume, or clean
+up.
+
+### Native Mobile Compatibility
+
+`playbackUrl` is a direct `playlist.m3u8` HLS URL, consumable by a standard native HLS player stack —
+`AVPlayer` on iOS, `ExoPlayer`/Media3 on Android (e.g. through `expo-video`) — with **no custom
+per-segment backend calls**: the path-embedded token is carried forward automatically by ordinary
+relative-URL resolution for every quality sub-playlist and segment request, exactly as reasoned about
+above. Nothing about this response is iframe/WebView-shaped, and nothing precludes reusing the same
+`VideoProvider.createPlaybackCapability` seam for a future web player.
+
+### What This Is Not
+
+A signed, short-lived playback URL is authorization, not DRM. It does not prevent screen recording,
+copying after legitimate playback starts, or redistribution once bytes reach the device. No DRM
+(MediaCage Basic/Enterprise, Widevine, FairPlay, or a license exchange) is enabled or claimed by this
+slice; DRM remains explicitly future, provider-specific work. Video bytes still never flow through
+NestJS — the only supported path is Bunny CDN -> student client — and no manifest rewriting or
+segment proxying was introduced; the path-style token is Bunny's own documented mechanism, applied
+directly at the CDN edge.
 
 ## Bunny Stream Webhooks
 
@@ -386,10 +526,12 @@ deferred.
 
 ## DRM-Ready Boundary
 
-Edvora remains DRM-ready, not DRM-implemented. This slice does not claim DRM, simulate DRM, or
-implement Bunny Stream. DRM enforcement remains a future provider-specific integration layer. Media
-Slice C preserves the same separation: Edvora's own authorization decision is distinct from any
-future provider-issued playback capability, which is itself distinct from any future DRM/license
-enforcement layered on top of it. No custom encryption, homemade DRM, or fake DRM token is
-implemented anywhere in this codebase, and no claim is made that screen recording can be fully
-prevented.
+Edvora remains DRM-ready, not DRM-implemented. Media Slice G implements real, signed, short-lived
+Bunny playback capability issuance — this is authorization, not DRM, and is not claimed to be. Media
+Slices C and G preserve the same separation: Edvora's own authorization decision
+(`assertAccessibleVideoLesson`) is distinct from the provider-issued playback capability
+(`BunnyStreamVideoProvider.createPlaybackCapability`), which is itself distinct from any future
+DRM/license enforcement layered on top of it (Bunny MediaCage Basic/Enterprise, Widevine, FairPlay).
+No custom encryption, homemade DRM, or fake DRM token is implemented anywhere in this codebase, and no
+claim is made that this prevents screen recording, copying after legitimate playback, or
+redistribution.

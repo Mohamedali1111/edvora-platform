@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import { InvalidVideoProviderWebhookError } from '../errors/media.errors';
+import { InvalidVideoProviderWebhookError, VideoPlaybackSigningFailedError } from '../errors/media.errors';
 import type { MediaRuntimeConfig } from '../media.config';
 import { BunnyStreamVideoProvider } from './bunny-stream-video.provider';
 
@@ -21,6 +21,8 @@ const config: MediaRuntimeConfig = {
       webhookSigningSecret: 'test-bunny-webhook-secret',
       tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
       tusAuthorizationTtlSeconds: 21_600,
+      cdnHostname: 'vz-example-123.b-cdn.net',
+      tokenAuthenticationKey: 'test-bunny-token-authentication-key',
     },
   },
 };
@@ -105,6 +107,159 @@ describe('BunnyStreamVideoProvider', () => {
           rawBody: input.rawBody,
         }),
       ).toThrow(InvalidVideoProviderWebhookError);
+    }
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // createPlaybackCapability — Bunny CDN Pull Zone "directory" (path-style) token authentication.
+  // This is deliberately NOT the embed/iframe view-token formula
+  // (SHA256_HEX(key + videoId + expires)); it is the mechanism that protects the actual HLS
+  // playlist.m3u8 and every segment file under a video's own storage path. The construction below is
+  // independently reproduced from Bunny's own official reference implementation
+  // (github.com/BunnyWay/BunnyCDN.TokenAuthentication) so this test proves the provider matches
+  // Bunny's real algorithm, not just some internally-consistent formula.
+  // -----------------------------------------------------------------------------------------------
+
+  // This test is anchored to Bunny's OWN literal, externally-published test vector — not a value
+  // re-derived from our own formula description, and not produced by calling this provider's own
+  // code — copied verbatim from `nodejs/token.test.js` in Bunny's official
+  // github.com/BunnyWay/BunnyCDN.TokenAuthentication repository:
+  //   signUrl('https://token-tester.b-cdn.net/abc/', 'SecurityKey', 86400, '', /*isDirectory*/ true,
+  //           /*pathAllowed*/ '/abc', '', '', false, /*expiresAt*/ 1598024587)
+  //   => 'https://token-tester.b-cdn.net/bcdn_token=HS256-uVZvT3SbEoVKYJyDJgbcsDmSFf73cv-uNUVaJiKWpbQ' +
+  //      '&token_path=%2Fabc&expires=1598024587/abc/'
+  // If Bunny ever changes their accepted algorithm, this hardcoded string (not just our own
+  // restated formula) is what would catch the drift.
+  it('matches Bunny’s own published official test vector for the directory-token algorithm, verbatim', () => {
+    const officialSecurityKey = 'SecurityKey';
+    const officialExpiresUnixSeconds = 1598024587;
+    const officialTokenPath = '/abc';
+    const officialExpectedToken = 'HS256-uVZvT3SbEoVKYJyDJgbcsDmSFf73cv-uNUVaJiKWpbQ';
+
+    // A standalone, minimal re-implementation of exactly Bunny's documented formula — kept
+    // deliberately separate from `expectedDirectoryToken` below and from the provider's own code, so
+    // a bug shared between the provider and a spec helper cannot silently agree with itself.
+    const signingData = `token_path=${officialTokenPath}`;
+    const digest = createHmac('sha256', officialSecurityKey)
+      .update(officialTokenPath)
+      .update(String(officialExpiresUnixSeconds))
+      .update(signingData)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    expect(`HS256-${digest}`).toBe(officialExpectedToken);
+  });
+
+  function expectedDirectoryToken(videoId: string, expiresUnixSeconds: number, securityKey: string): string {
+    const tokenPath = `/${videoId}/`;
+    const signingData = `token_path=${tokenPath}`;
+    const digest = createHmac('sha256', securityKey)
+      .update(tokenPath)
+      .update(String(expiresUnixSeconds))
+      .update(signingData)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    return `HS256-${digest}`;
+  }
+
+  function expectedPlaybackUrl(
+    cdnHostname: string,
+    videoId: string,
+    expiresUnixSeconds: number,
+    securityKey: string,
+  ): string {
+    const tokenPath = `/${videoId}/`;
+    const token = expectedDirectoryToken(videoId, expiresUnixSeconds, securityKey);
+    return (
+      `https://${cdnHostname}/bcdn_token=${token}` +
+      `&token_path=${encodeURIComponent(tokenPath)}&expires=${expiresUnixSeconds}${tokenPath}playlist.m3u8`
+    );
+  }
+
+  const validVideoId = 'a1b2c3d4-e5f6-47a8-89ab-cdef01234567';
+
+  it('signs a directory-scoped HLS playback URL matching Bunny’s documented token construction exactly', () => {
+    const provider = new BunnyStreamVideoProvider(config);
+    const now = new Date('2026-06-15T12:00:00.000Z');
+
+    const capability = provider.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+    const expiresUnixSeconds = Math.floor(now.getTime() / 1000) + 300;
+
+    expect(capability.expiresAt).toEqual(new Date(expiresUnixSeconds * 1000));
+    expect(capability.playbackUrl).toBe(
+      expectedPlaybackUrl(config.video.bunnyStream.cdnHostname, validVideoId, expiresUnixSeconds, config.video.bunnyStream.tokenAuthenticationKey),
+    );
+  });
+
+  it('uses Bunny’s path-style directory token (/bcdn_token=...), never a query-string token on the manifest', () => {
+    const provider = new BunnyStreamVideoProvider(config);
+    const now = new Date('2026-06-15T12:00:00.000Z');
+
+    const { playbackUrl } = provider.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+
+    // The token must be embedded as a path segment before the video's own /{videoId}/ prefix, not
+    // as a `?token=` query parameter — a native HLS player resolves segment URIs relative to
+    // everything before the manifest's last `/`, so only the path-embedded form is carried forward
+    // automatically into every segment request.
+    expect(playbackUrl).toMatch(new RegExp(`^https://${config.video.bunnyStream.cdnHostname}/bcdn_token=HS256-`));
+    expect(playbackUrl).toContain(`/${validVideoId}/playlist.m3u8`);
+    expect(playbackUrl).not.toMatch(/\?token=/);
+    expect(playbackUrl).toContain(`token_path=${encodeURIComponent(`/${validVideoId}/`)}`);
+  });
+
+  it('changes the token when the video ID changes', () => {
+    const provider = new BunnyStreamVideoProvider(config);
+    const now = new Date('2026-06-15T12:00:00.000Z');
+    const otherVideoId = 'ffffffff-1111-2222-3333-444444444444';
+
+    const a = provider.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+    const b = provider.createPlaybackCapability({ videoId: otherVideoId, expiresInSeconds: 300, now });
+
+    expect(a.playbackUrl).not.toBe(b.playbackUrl);
+  });
+
+  it('changes the token when the expiry changes', () => {
+    const provider = new BunnyStreamVideoProvider(config);
+    const now = new Date('2026-06-15T12:00:00.000Z');
+
+    const a = provider.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+    const b = provider.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 900, now });
+
+    expect(a.playbackUrl).not.toBe(b.playbackUrl);
+    expect(a.expiresAt.getTime()).not.toBe(b.expiresAt.getTime());
+  });
+
+  it('changes the token when the configured security key differs, and never leaks the key into the URL', () => {
+    const now = new Date('2026-06-15T12:00:00.000Z');
+    const providerA = new BunnyStreamVideoProvider(config);
+    const providerB = new BunnyStreamVideoProvider({
+      ...config,
+      video: {
+        ...config.video,
+        bunnyStream: { ...config.video.bunnyStream, tokenAuthenticationKey: 'a-completely-different-key' },
+      },
+    });
+
+    const a = providerA.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+    const b = providerB.createPlaybackCapability({ videoId: validVideoId, expiresInSeconds: 300, now });
+
+    expect(a.playbackUrl).not.toBe(b.playbackUrl);
+    expect(a.playbackUrl).not.toContain(config.video.bunnyStream.tokenAuthenticationKey);
+    expect(a.playbackUrl).not.toContain('a-completely-different-key');
+  });
+
+  it('rejects a malformed/non-GUID videoId rather than signing an arbitrary path', () => {
+    const provider = new BunnyStreamVideoProvider(config);
+    const now = new Date('2026-06-15T12:00:00.000Z');
+
+    for (const malformed of ['not-a-guid', '', '../../../etc/passwd', 'a1b2c3d4-e5f6-47a8-89ab', '12345']) {
+      expect(() => provider.createPlaybackCapability({ videoId: malformed, expiresInSeconds: 300, now })).toThrow(
+        VideoPlaybackSigningFailedError,
+      );
     }
   });
 });

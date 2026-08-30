@@ -50,8 +50,10 @@ import type {
   BunnyStreamWebhookEvent,
   ProviderVideoResource,
   TusUploadCapability,
+  VideoPlaybackCapability,
   VideoProvider,
 } from './video/video.provider';
+import { VideoPlaybackSigningFailedError } from './errors/media.errors';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
@@ -74,6 +76,8 @@ const testMediaConfig: MediaRuntimeConfig = {
       webhookSigningSecret: 'test-bunny-webhook-secret',
       tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
       tusAuthorizationTtlSeconds: 21_600,
+      cdnHostname: 'vz-test-123.b-cdn.net',
+      tokenAuthenticationKey: 'test-bunny-token-authentication-key',
     },
   },
 };
@@ -235,23 +239,41 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
   // Happy path
   // ---------------------------------------------------------------------------------------------
 
-  it('authorizes an entitled student for a READY VIDEO lesson and returns only safe metadata', async () => {
+  it('authorizes an entitled student for a READY VIDEO lesson and returns a real Bunny playback capability', async () => {
     const setup = await setUpAccessibleVideoLesson('happy-path', { durationSeconds: 900 });
+    const externalAssetRef = await loadVideoAssetExternalRef(setup.videoAssetId);
 
     const response = await getAccess(setup).expect(HttpStatus.OK);
-    const body = responseBody<Record<string, unknown>>(response);
+    const body = responseBody<{ lessonId: string; durationSeconds: number; playbackUrl: string; expiresAt: string }>(
+      response,
+    );
 
-    expect(body).toMatchObject({ lessonId: setup.lessonId, ready: true, durationSeconds: 900 });
-    expect(typeof body.authorizedAt).toBe('string');
-    expect(Object.keys(body).sort()).toEqual(['authorizedAt', 'durationSeconds', 'lessonId', 'ready'].sort());
+    expect(Object.keys(body).sort()).toEqual(['durationSeconds', 'expiresAt', 'lessonId', 'playbackUrl'].sort());
+    expect(body.lessonId).toBe(setup.lessonId);
+    expect(body.durationSeconds).toBe(900);
+    expect(typeof body.expiresAt).toBe('string');
 
-    // No internal/provider identifiers of any kind leak into the response, including the
-    // videoAssetId itself and the tenant ID — neither is needed by the client and neither is
-    // exposed by the existing student Course structure endpoint's raw JSON either.
+    // The signed playback URL is real, targets the exact authorized video's HLS manifest through
+    // the fake provider, and TTL is bounded/computed from the video's own known duration
+    // (900 + 900s buffer = 1800s, within [300, 14400]).
+    expect(body.playbackUrl).toContain(`/${externalAssetRef}/playlist.m3u8`);
+    const expectedExpiresAt = new Date(NOW.getTime() + 1800 * 1000);
+    expect(new Date(body.expiresAt)).toEqual(expectedExpiresAt);
+    expect(videoProvider.recordedPlaybackRequests).toEqual([
+      { videoId: externalAssetRef, expiresInSeconds: 1800, now: NOW },
+    ]);
+
+    // No internal/provider identifiers or credentials of any kind leak into the response as
+    // separate fields, including the videoAssetId itself, the tenant ID, providerKey, or the raw
+    // Bunny token authentication key — the only place the video GUID may legitimately appear is
+    // embedded inside the short-lived signed playbackUrl itself.
     const raw = JSON.stringify(body);
-    expect(raw).not.toMatch(/externalAssetRef|providerKey|videoAssetId|tenantId|processingStatus|url|token|secret|signed|playback|hls|dash|drm|license/i);
+    expect(raw).not.toMatch(/videoAssetId|tenantId|providerKey|processingStatus|externalAssetRef/i);
     expect(raw).not.toContain(setup.videoAssetId);
     expect(raw).not.toContain(setup.tenantId);
+    expect(raw).not.toContain(testMediaConfig.video.bunnyStream.tokenAuthenticationKey);
+    expect(raw).not.toContain(testMediaConfig.video.bunnyStream.apiKey);
+    expect(raw).not.toContain(testMediaConfig.video.bunnyStream.webhookSigningSecret);
   });
 
   it('keeps student denied until Bunny reports fully finished status 3 for an upload-intent asset', async () => {
@@ -311,8 +333,11 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
     }).expect(HttpStatus.OK);
 
     const access = await getAccess(setup).expect(HttpStatus.OK);
-    expect(access.body).toMatchObject({ lessonId, ready: true, durationSeconds: 70 });
-    expect(JSON.stringify(access.body)).not.toMatch(/url|token|playback|hls|dash|drm|license|externalAssetRef|providerKey/i);
+    const accessBody = responseBody<{ lessonId: string; durationSeconds: number; playbackUrl: string }>(access);
+    expect(accessBody).toMatchObject({ lessonId, durationSeconds: 70 });
+    expect(typeof accessBody.playbackUrl).toBe('string');
+    expect(accessBody.playbackUrl).toContain(`/${uploadBody.provider.bunnyStream.videoId}/playlist.m3u8`);
+    expect(JSON.stringify(accessBody)).not.toMatch(/externalAssetRef|providerKey|tenantId/i);
     await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
     await expect(prisma.client.quizAttempt.count()).resolves.toBe(0);
   });
@@ -328,6 +353,101 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
     await expect(prisma.client.enrollment.count()).resolves.toBe(1);
     const enrollment = await prisma.client.enrollment.findUniqueOrThrow({ where: { id: setup.enrollmentId } });
     expect(enrollment.status).toBe(EnrollmentStatus.ACTIVE);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Playback capability specifics: repeated issuance, TTL bounds, provider-identity safety
+  // ---------------------------------------------------------------------------------------------
+
+  it('safely issues a fresh capability on repeated authorized calls, with no persistence of the signed URL', async () => {
+    const setup = await setUpAccessibleVideoLesson('repeat-access', { durationSeconds: 120 });
+
+    await getAccess(setup).expect(HttpStatus.OK);
+    await getAccess(setup).expect(HttpStatus.OK);
+
+    // Both calls succeeded and each issued its own capability through the provider (no caching, no
+    // reuse of a persisted prior signature) — no watch/playback-session row exists in this schema to
+    // begin with, and this test also confirms no DB row of any kind was created by either call.
+    expect(videoProvider.recordedPlaybackRequests).toHaveLength(2);
+    await expect(prisma.client.videoAsset.count()).resolves.toBe(1);
+    const asset = await prisma.client.videoAsset.findUniqueOrThrow({ where: { id: setup.videoAssetId } });
+    expect(asset.processingStatus).toBe(AssetProcessingStatus.READY);
+  });
+
+  it('computes a TTL bounded to [5 minutes, 4 hours] from the video’s own duration, with a fallback when duration is unknown', async () => {
+    // Short video: duration + 15-minute buffer stays above the 5-minute floor.
+    const short = await setUpAccessibleVideoLesson('ttl-short', { durationSeconds: 30 });
+    await getAccess(short).expect(HttpStatus.OK);
+    expect(videoProvider.recordedPlaybackRequests.at(-1)?.expiresInSeconds).toBe(30 + 900);
+
+    // Very long video: clamped at the 4-hour ceiling rather than duration + buffer.
+    const long = await setUpAccessibleVideoLesson('ttl-long', { durationSeconds: 20 * 60 * 60 });
+    await getAccess(long).expect(HttpStatus.OK);
+    expect(videoProvider.recordedPlaybackRequests.at(-1)?.expiresInSeconds).toBe(4 * 60 * 60);
+
+    // Unknown duration: a bounded fallback, not the maximum and not a bare 5-minute default.
+    const unknown = await setUpAccessibleVideoLesson('ttl-unknown');
+    await getAccess(unknown).expect(HttpStatus.OK);
+    expect(videoProvider.recordedPlaybackRequests.at(-1)?.expiresInSeconds).toBe(2 * 60 * 60);
+  });
+
+  it('rejects issuance when the READY VideoAsset’s persisted providerKey does not match the configured Bunny library', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('library-mismatch');
+    const studentId = await createStudent('library-mismatch-student');
+    const installationId = installation();
+    await createTenantStudent(tenantId, studentId, TenantStudentStatus.ACTIVE);
+    const courseId = await createCourseDirect(tenantId, instructorId, 'Course', CourseStatus.PUBLISHED);
+    await createEnrollmentDirect(tenantId, studentId, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    // Simulates an asset whose persisted library does not match the currently configured provider
+    // (e.g. created against a different Bunny Stream library) — must be rejected, never signed.
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId, AssetProcessingStatus.READY, 60, {
+      providerKey: 'a-different-library-id',
+    });
+    const lessonId = await createLessonDirect(tenantId, courseId, sectionId, {
+      title: 'Video lesson',
+      position: 1,
+      status: LessonStatus.PUBLISHED,
+      videoAssetId,
+    });
+    await createActiveDevice(studentId, installationId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+
+    const response = await request(server)
+      .get(accessPath(courseId, lessonId))
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.BAD_GATEWAY);
+    expect(response.body).toMatchObject({ error: { code: 'VIDEO_ASSET_PROVIDER_INVARIANT_VIOLATION' } });
+    expect(videoProvider.recordedPlaybackRequests).toHaveLength(0);
+
+    // The asset itself is untouched — a rejected signing attempt never mutates VideoAsset state.
+    const asset = await prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } });
+    expect(asset.processingStatus).toBe(AssetProcessingStatus.READY);
+  });
+
+  it('leaves VideoAsset/Enrollment/progress state unchanged when provider playback signing fails', async () => {
+    const setup = await setUpAccessibleVideoLesson('signing-failure', { durationSeconds: 60 });
+    videoProvider.simulatePlaybackSigningFailure = true;
+
+    await request(server)
+      .get(accessPath(setup.courseId, setup.lessonId))
+      .set('Authorization', `Bearer ${setup.token}`)
+      .set(INSTALLATION_ID_HEADER, setup.installationId)
+      .expect(HttpStatus.BAD_GATEWAY)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'VIDEO_PLAYBACK_SIGNING_FAILED' } }));
+
+    const asset = await prisma.client.videoAsset.findUniqueOrThrow({ where: { id: setup.videoAssetId } });
+    expect(asset.processingStatus).toBe(AssetProcessingStatus.READY);
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+    await expect(prisma.client.quizAttempt.count()).resolves.toBe(0);
+    const enrollment = await prisma.client.enrollment.findUniqueOrThrow({ where: { id: setup.enrollmentId } });
+    expect(enrollment.status).toBe(EnrollmentStatus.ACTIVE);
+
+    // A subsequent authorized call, once the provider recovers, succeeds normally — a transient
+    // signing failure never poisons the durable VideoAsset state.
+    videoProvider.simulatePlaybackSigningFailure = false;
+    await getAccess(setup).expect(HttpStatus.OK);
   });
 
   it('leaves the existing generic VIDEO manual-completion endpoint unaffected by playback authorization', async () => {
@@ -877,11 +997,27 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
     return id;
   }
 
+  async function loadVideoAssetExternalRef(videoAssetId: string): Promise<string> {
+    const asset = await prisma.client.videoAsset.findUniqueOrThrow({
+      where: { id: videoAssetId },
+      select: { externalAssetRef: true },
+    });
+    return asset.externalAssetRef;
+  }
+
+  let fakeVideoGuidCounter = 0;
+
+  function fakeBunnyVideoGuid(): string {
+    fakeVideoGuidCounter += 1;
+    return `bbbbbbbb-cccc-4ddd-8eee-${String(fakeVideoGuidCounter).padStart(12, '0')}`;
+  }
+
   async function createVideoAssetDirect(
     tenantId: string,
     uploadedByUserId: string,
     processingStatus: AssetProcessingStatus,
     durationSeconds?: number,
+    options: { providerKey?: string | null; externalAssetRef?: string } = {},
   ): Promise<string> {
     const id = uuid.create();
     await prisma.client.videoAsset.create({
@@ -889,7 +1025,8 @@ maybeDescribe('student video access HTTP PostgreSQL integration', () => {
         id,
         tenantId,
         uploadedByUserId,
-        externalAssetRef: `test-provider/video/${id}`,
+        externalAssetRef: options.externalAssetRef ?? fakeBunnyVideoGuid(),
+        providerKey: options.providerKey === undefined ? '123456' : options.providerKey,
         processingStatus,
         durationSeconds: durationSeconds ?? null,
       },
@@ -994,14 +1131,34 @@ class UnusedDocumentStorageProvider implements DocumentStorageProvider {
   }
 }
 
+type RecordedPlaybackRequest = { videoId: string; expiresInSeconds: number; now: Date };
+
 class FakeVideoProvider implements VideoProvider {
   readonly providerKey = '123456';
   private nextVideoNumber = 1;
+  readonly recordedPlaybackRequests: RecordedPlaybackRequest[] = [];
+  simulatePlaybackSigningFailure = false;
 
   createVideoResource(): Promise<ProviderVideoResource> {
-    const videoId = `fake-bunny-video-${this.nextVideoNumber}`;
+    // Bunny GUIDs are real UUIDs; the fake mints a UUID-shaped ID so it satisfies the provider's own
+    // GUID-shape validation exactly like a real Bunny video ID would.
+    const videoId = `aaaaaaaa-bbbb-4ccc-8ddd-${String(this.nextVideoNumber).padStart(12, '0')}`;
     this.nextVideoNumber += 1;
     return Promise.resolve({ videoId });
+  }
+
+  createPlaybackCapability(input: RecordedPlaybackRequest): VideoPlaybackCapability {
+    this.recordedPlaybackRequests.push(input);
+
+    if (this.simulatePlaybackSigningFailure) {
+      throw new VideoPlaybackSigningFailedError();
+    }
+
+    const expiresUnixSeconds = Math.floor(input.now.getTime() / 1000) + input.expiresInSeconds;
+    return {
+      playbackUrl: `https://vz-test-123.b-cdn.net/bcdn_token=fake-token&expires=${expiresUnixSeconds}/${input.videoId}/playlist.m3u8`,
+      expiresAt: new Date(expiresUnixSeconds * 1000),
+    };
   }
 
   createTusUploadCapability(input: {

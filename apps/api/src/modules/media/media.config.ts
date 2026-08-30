@@ -26,6 +26,8 @@ export type MediaRuntimeConfig = {
       webhookSigningSecret: string;
       tusUploadUrl: string;
       tusAuthorizationTtlSeconds: number;
+      cdnHostname: string;
+      tokenAuthenticationKey: string;
     };
   };
 };
@@ -77,6 +79,11 @@ export function createMediaRuntimeConfig(env: NodeJS.ProcessEnv = process.env): 
           DEFAULT_VIDEO_TUS_AUTH_TTL_SECONDS,
           MIN_VIDEO_TUS_AUTH_TTL_SECONDS,
           MAX_VIDEO_TUS_AUTH_TTL_SECONDS,
+        ),
+        cdnHostname: readBunnyCdnHostname(env.MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME),
+        tokenAuthenticationKey: readSecretValue(
+          env.MEDIA_VIDEO_BUNNY_STREAM_TOKEN_AUTHENTICATION_KEY,
+          'MEDIA_VIDEO_BUNNY_STREAM_TOKEN_AUTHENTICATION_KEY',
         ),
       },
     },
@@ -146,6 +153,16 @@ function readBunnyLibraryId(value: string | undefined): string {
   }
 
   return libraryId;
+}
+
+function readBunnyCdnHostname(value: string | undefined): string {
+  const hostname = readRequiredValue(value, 'MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME');
+
+  if (!/^[a-zA-Z0-9.-]+$/.test(hostname) || hostname.includes('..') || hostname.includes('/')) {
+    throw new Error('MEDIA_VIDEO_BUNNY_STREAM_CDN_HOSTNAME must be a bare hostname, with no protocol, path, or query.');
+  }
+
+  return hostname;
 }
 
 function readBoundedTtlSeconds(

@@ -4,6 +4,7 @@ import { MEDIA_RUNTIME_CONFIG } from '../media.constants';
 import type { MediaRuntimeConfig } from '../media.config';
 import {
   InvalidVideoProviderWebhookError,
+  VideoPlaybackSigningFailedError,
   VideoProviderCreateFailedError,
 } from '../errors/media.errors';
 import type {
@@ -11,6 +12,7 @@ import type {
   BunnyStreamWebhookStatus,
   ProviderVideoResource,
   TusUploadCapability,
+  VideoPlaybackCapability,
   VideoProvider,
 } from './video.provider';
 
@@ -18,18 +20,27 @@ type BunnyCreateVideoResponse = {
   guid?: unknown;
 };
 
+// Bunny Stream video GUIDs are standard GUIDs (see Bunny's Create Video response). This is
+// deliberately checked before a `videoId` is ever embedded into a signed CDN path — a malformed
+// value is refused rather than signed, matching `docs/MEDIA.md`'s READY/provider-identity invariant.
+const BUNNY_VIDEO_GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class BunnyStreamVideoProvider implements VideoProvider {
   private readonly libraryId: string;
   private readonly apiKey: string;
   private readonly webhookSigningSecret: string;
   private readonly tusUploadUrl: string;
+  private readonly cdnHostname: string;
+  private readonly tokenAuthenticationKey: string;
 
   constructor(@Inject(MEDIA_RUNTIME_CONFIG) config: MediaRuntimeConfig) {
     this.libraryId = config.video.bunnyStream.libraryId;
     this.apiKey = config.video.bunnyStream.apiKey;
     this.webhookSigningSecret = config.video.bunnyStream.webhookSigningSecret;
     this.tusUploadUrl = config.video.bunnyStream.tusUploadUrl;
+    this.cdnHostname = config.video.bunnyStream.cdnHostname;
+    this.tokenAuthenticationKey = config.video.bunnyStream.tokenAuthenticationKey;
   }
 
   get providerKey(): string {
@@ -76,6 +87,68 @@ export class BunnyStreamVideoProvider implements VideoProvider {
         VideoId: input.videoId,
         LibraryId: this.libraryId,
       },
+    };
+  }
+
+  /**
+   * Signs a short-lived, path-scoped direct HLS playback URL using Bunny's CDN Pull Zone "advanced"
+   * (directory) token authentication — the mechanism `bunny.net/docs/stream/security` documents as
+   * protecting "MP4 fallbacks, HLS playlists and segments, thumbnails, and previews" at the Pull
+   * Zone level. This is deliberately NOT the separate embed/iframe view-token mechanism
+   * (`SHA256_HEX(key + videoId + expires)` on `/embed/{libraryId}/{videoId}`), which only gates
+   * Bunny's own iframe player page and does nothing to protect the underlying HLS files a native
+   * player (AVPlayer/ExoPlayer) actually fetches.
+   *
+   * All of a video's files (`playlist.m3u8`, per-resolution sub-playlists, and every segment) live
+   * under one Bunny-managed prefix, `/{videoId}/` (see Bunny's "Video storage structure" docs), so
+   * signing a directory token scoped to exactly that prefix (`token_path=/{videoId}/`,
+   * `isDirectory: true`) authorizes the manifest and every segment/quality file a player resolves
+   * relative to it — never a manifest-only token that leaves segment requests unprotected — while
+   * staying scoped to this one video only.
+   *
+   * The token is embedded as a URL path segment (`/bcdn_token=...&token_path=...&expires=.../{videoId}/playlist.m3u8`),
+   * not a query string appended to the manifest URL. This is Bunny's documented "directory token"
+   * pattern, and it is the one that works with native players: because HLS clients resolve relative
+   * segment URIs against everything before the last `/` of the manifest URL they fetched, the
+   * `/bcdn_token=...&expires=.../{videoId}/` prefix is carried forward into every segment request
+   * automatically. A query-string token (`?token=...`) would NOT do this — the player would have to
+   * re-append it to each derived segment URL itself, which is exactly the documented iOS/native HLS
+   * limitation this design avoids (see `docs/MEDIA.md`).
+   *
+   * No `user_ip` is folded into the signature for V1 — see the IP-binding decision in
+   * `docs/MEDIA.md`. This is a synchronous, local HMAC computation; it makes no network call, so
+   * there is no transient-failure mode beyond the `videoId` shape check below.
+   */
+  createPlaybackCapability(input: { videoId: string; expiresInSeconds: number; now: Date }): VideoPlaybackCapability {
+    if (!BUNNY_VIDEO_GUID_PATTERN.test(input.videoId)) {
+      throw new VideoPlaybackSigningFailedError();
+    }
+
+    const expiresUnixSeconds = Math.floor(input.now.getTime() / 1000) + input.expiresInSeconds;
+    const expires = String(expiresUnixSeconds);
+    const tokenPath = `/${input.videoId}/`;
+    const urlEncodedTokenPath = encodeURIComponent(tokenPath);
+    // Bunny's directory-token signature folds the (path, expires, signing-data) tuple, where
+    // `signing_data` here is exactly the one extra `token_path` parameter we set, as
+    // `key=value` — unencoded in the signature, URL-encoded in the resulting query string.
+    const signingData = `token_path=${tokenPath}`;
+
+    const digest = createHmac('sha256', this.tokenAuthenticationKey)
+      .update(tokenPath)
+      .update(expires)
+      .update(signingData)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const playbackUrl =
+      `https://${this.cdnHostname}/bcdn_token=HS256-${digest}` +
+      `&token_path=${urlEncodedTokenPath}&expires=${expires}${tokenPath}playlist.m3u8`;
+
+    return {
+      playbackUrl,
+      expiresAt: new Date(expiresUnixSeconds * 1000),
     };
   }
 

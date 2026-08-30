@@ -310,7 +310,10 @@ export class StudentCourseAccessService {
   /**
    * Proves the authenticated student is entitled to playback authorization for the video linked
    * to a specific, currently-accessible VIDEO Lesson within an entitled Course, and returns the
-   * exact (tenantId, videoAssetId, enrollmentId, durationSeconds) tuple that proof resolved to.
+   * exact (tenantId, videoAssetId, enrollmentId, durationSeconds, providerKey, externalAssetRef)
+   * tuple that proof resolved to. `providerKey`/`externalAssetRef` are the proven READY asset's own
+   * provider identity, returned so a caller (`StudentVideoAccessService`) can issue a real provider
+   * playback capability without ever re-querying or trusting a client-supplied identifier.
    * This is a thin, lesson-shaped extension of `assertStudentCourseAccess` — the one canonical
    * entitlement chain — never a parallel authorization path duplicated inside the Media module,
    * mirroring exactly how `assertAccessibleDocumentLesson` extends the same chain for DOCUMENT
@@ -334,7 +337,14 @@ export class StudentCourseAccessService {
     principal: AuthenticatedPrincipal,
     courseId: string,
     lessonId: string,
-  ): Promise<{ tenantId: string; videoAssetId: string; enrollmentId: string; durationSeconds: number | null }> {
+  ): Promise<{
+    tenantId: string;
+    videoAssetId: string;
+    enrollmentId: string;
+    durationSeconds: number | null;
+    providerKey: string | null;
+    externalAssetRef: string;
+  }> {
     const { tenantId, enrollmentId } = await this.assertStudentCourseAccess(principal, courseId);
 
     const now = this.clock.now();
@@ -353,7 +363,12 @@ export class StudentCourseAccessService {
       },
       select: {
         videoLesson: {
-          select: { videoAssetId: true, videoAsset: { select: { processingStatus: true, durationSeconds: true } } },
+          select: {
+            videoAssetId: true,
+            videoAsset: {
+              select: { processingStatus: true, durationSeconds: true, providerKey: true, externalAssetRef: true },
+            },
+          },
         },
       },
     });
@@ -367,6 +382,8 @@ export class StudentCourseAccessService {
       videoAssetId: lesson.videoLesson.videoAssetId,
       enrollmentId,
       durationSeconds: lesson.videoLesson.videoAsset.durationSeconds,
+      providerKey: lesson.videoLesson.videoAsset.providerKey,
+      externalAssetRef: lesson.videoLesson.videoAsset.externalAssetRef,
     };
   }
 

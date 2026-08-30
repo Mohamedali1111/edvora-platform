@@ -7,7 +7,9 @@ export type MediaErrorCode =
   | 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION'
   | 'VIDEO_UPLOAD_SIGNING_FAILED'
   | 'VIDEO_PROVIDER_CREATE_FAILED'
-  | 'INVALID_VIDEO_PROVIDER_WEBHOOK';
+  | 'INVALID_VIDEO_PROVIDER_WEBHOOK'
+  | 'VIDEO_ASSET_PROVIDER_INVARIANT_VIOLATION'
+  | 'VIDEO_PLAYBACK_SIGNING_FAILED';
 
 export class MediaError extends Error {
   constructor(
@@ -70,5 +72,23 @@ export class VideoProviderCreateFailedError extends MediaError {
 export class InvalidVideoProviderWebhookError extends MediaError {
   constructor() {
     super('INVALID_VIDEO_PROVIDER_WEBHOOK', 'Video provider webhook signature is invalid.');
+  }
+}
+
+/**
+ * A READY `VideoAsset`'s persisted provider identity (`providerKey`/`externalAssetRef`) does not
+ * match what the currently configured video provider expects — e.g. the asset was created against a
+ * different Bunny Stream library than the one this API instance is configured for. Rejecting safely
+ * here (rather than signing an arbitrary/foreign path) is deliberate: see `docs/MEDIA.md`.
+ */
+export class VideoAssetProviderInvariantViolationError extends MediaError {
+  constructor() {
+    super('VIDEO_ASSET_PROVIDER_INVARIANT_VIOLATION', 'Video asset provider identity is invalid.');
+  }
+}
+
+export class VideoPlaybackSigningFailedError extends MediaError {
+  constructor() {
+    super('VIDEO_PLAYBACK_SIGNING_FAILED', 'Video playback authorization could not be created.');
   }
 }

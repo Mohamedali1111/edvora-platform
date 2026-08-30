@@ -64,6 +64,8 @@ const testMediaConfig: MediaRuntimeConfig = {
       webhookSigningSecret: 'test-bunny-webhook-secret',
       tusUploadUrl: 'https://video.bunnycdn.com/tusupload',
       tusAuthorizationTtlSeconds: 21_600,
+      cdnHostname: 'vz-test-123.b-cdn.net',
+      tokenAuthenticationKey: 'test-bunny-token-authentication-key',
     },
   },
 };
@@ -1136,6 +1138,10 @@ class FakeVideoProvider implements VideoProvider {
         LibraryId: this.providerKey,
       },
     };
+  }
+
+  createPlaybackCapability(): never {
+    throw new Error('not used by instructor media tests');
   }
 
   verifyAndParseWebhook(input: {
