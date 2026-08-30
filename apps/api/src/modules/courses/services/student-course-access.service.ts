@@ -199,6 +199,57 @@ export class StudentCourseAccessService {
   }
 
   /**
+   * Proves the authenticated student is entitled to read the Quiz linked to a specific,
+   * currently-accessible QUIZ Lesson within an entitled Course, and returns the exact
+   * (tenantId, quizId) pair that proof resolved to. This is a thin, lesson-shaped extension of
+   * `assertStudentCourseAccess` — the one canonical entitlement chain — never a parallel
+   * authorization path duplicated inside the Quiz module. A lesson that would not appear in the
+   * student's course structure (foreign course, DRAFT/ARCHIVED, unpublished section, outside its
+   * availability window, or not type QUIZ) cannot be resolved here either, and collapses to the
+   * same `LessonNotFoundError` the read/completion paths already use — no new "not found"
+   * taxonomy, no existence leakage between "does not exist" and "not currently available to
+   * you." The linked Quiz itself must also be in the student-visible `PUBLISHED` state; an
+   * otherwise-reachable QUIZ Lesson pointing at a DRAFT/ARCHIVED Quiz is treated exactly like an
+   * unavailable lesson, never served as content.
+   */
+  async assertAccessibleQuizLesson(
+    principal: AuthenticatedPrincipal,
+    courseId: string,
+    lessonId: string,
+  ): Promise<{ tenantId: string; quizId: string }> {
+    const { tenantId } = await this.assertStudentCourseAccess(principal, courseId);
+
+    const now = this.clock.now();
+    const lesson = await this.prismaService.client.lesson.findFirst({
+      where: {
+        id: lessonId,
+        tenantId,
+        courseId,
+        type: LessonType.QUIZ,
+        status: LessonStatus.PUBLISHED,
+        section: { status: SectionStatus.PUBLISHED },
+        AND: [
+          { OR: [{ availableFrom: null }, { availableFrom: { lte: now } }] },
+          { OR: [{ availableUntil: null }, { availableUntil: { gt: now } }] },
+        ],
+      },
+      select: {
+        quizLesson: { select: { quizId: true, quiz: { select: { status: true } } } },
+      },
+    });
+
+    // `quizLesson.quiz` is reached through the schema's own `(quizId, tenantId) ->
+    // Quiz(id, tenantId)` composite foreign key, so a resolved `quizId` is already proven to
+    // belong to this exact tenant — no separate tenant-match query is needed or possible to
+    // bypass.
+    if (!lesson?.quizLesson || lesson.quizLesson.quiz.status !== QuizStatus.PUBLISHED) {
+      throw new LessonNotFoundError();
+    }
+
+    return { tenantId, quizId: lesson.quizLesson.quizId };
+  }
+
+  /**
    * Proves the authenticated student is currently entitled to read/act on the given course, and
    * returns the exact (tenantId, enrollmentId) pair that proof resolved to, so callers never
    * re-derive or accept these as separate client-supplied inputs. See the entitlement predicate
