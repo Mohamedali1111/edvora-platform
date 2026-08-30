@@ -1,6 +1,9 @@
 const DEFAULT_DOCUMENT_UPLOAD_TTL_SECONDS = 10 * 60;
+const DEFAULT_DOCUMENT_DOWNLOAD_TTL_SECONDS = 5 * 60;
 const MIN_DOCUMENT_UPLOAD_TTL_SECONDS = 60;
 const MAX_DOCUMENT_UPLOAD_TTL_SECONDS = 30 * 60;
+const MIN_DOCUMENT_DOWNLOAD_TTL_SECONDS = 60;
+const MAX_DOCUMENT_DOWNLOAD_TTL_SECONDS = 15 * 60;
 
 export type MediaRuntimeConfig = {
   documents: {
@@ -10,6 +13,7 @@ export type MediaRuntimeConfig = {
       secretAccessKey: string;
       bucketName: string;
       uploadUrlTtlSeconds: number;
+      downloadUrlTtlSeconds: number;
     };
   };
 };
@@ -30,6 +34,16 @@ export function createMediaRuntimeConfig(env: NodeJS.ProcessEnv = process.env): 
         uploadUrlTtlSeconds: readBoundedTtlSeconds(
           env.MEDIA_DOCUMENTS_R2_UPLOAD_URL_TTL_SECONDS,
           'MEDIA_DOCUMENTS_R2_UPLOAD_URL_TTL_SECONDS',
+          DEFAULT_DOCUMENT_UPLOAD_TTL_SECONDS,
+          MIN_DOCUMENT_UPLOAD_TTL_SECONDS,
+          MAX_DOCUMENT_UPLOAD_TTL_SECONDS,
+        ),
+        downloadUrlTtlSeconds: readBoundedTtlSeconds(
+          env.MEDIA_DOCUMENTS_R2_DOWNLOAD_URL_TTL_SECONDS,
+          'MEDIA_DOCUMENTS_R2_DOWNLOAD_URL_TTL_SECONDS',
+          DEFAULT_DOCUMENT_DOWNLOAD_TTL_SECONDS,
+          MIN_DOCUMENT_DOWNLOAD_TTL_SECONDS,
+          MAX_DOCUMENT_DOWNLOAD_TTL_SECONDS,
         ),
       },
     },
@@ -91,21 +105,27 @@ function readSecretValue(value: string | undefined, name: string): string {
   return secret;
 }
 
-function readBoundedTtlSeconds(value: string | undefined, name: string): number {
+function readBoundedTtlSeconds(
+  value: string | undefined,
+  name: string,
+  defaultValue: number,
+  minValue: number,
+  maxValue: number,
+): number {
   const trimmed = value?.trim();
 
   if (!trimmed) {
-    return DEFAULT_DOCUMENT_UPLOAD_TTL_SECONDS;
+    return defaultValue;
   }
 
   const parsed = Number(trimmed);
 
   if (
     !Number.isSafeInteger(parsed) ||
-    parsed < MIN_DOCUMENT_UPLOAD_TTL_SECONDS ||
-    parsed > MAX_DOCUMENT_UPLOAD_TTL_SECONDS
+    parsed < minValue ||
+    parsed > maxValue
   ) {
-    throw new Error(`${name} must be an integer number of seconds between 60 and 1800.`);
+    throw new Error(`${name} must be an integer number of seconds between ${minValue} and ${maxValue}.`);
   }
 
   return parsed;

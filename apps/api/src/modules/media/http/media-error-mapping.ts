@@ -7,6 +7,7 @@ const ERROR_STATUS: Record<MediaErrorCode, HttpStatus> = {
   UNSUPPORTED_DOCUMENT_MIME_TYPE: HttpStatus.BAD_REQUEST,
   DOCUMENT_UPLOAD_NOT_FOUND: HttpStatus.CONFLICT,
   DOCUMENT_UPLOAD_VERIFICATION_FAILED: HttpStatus.BAD_GATEWAY,
+  DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION: HttpStatus.BAD_GATEWAY,
 };
 
 const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
@@ -15,6 +16,7 @@ const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
   UNSUPPORTED_DOCUMENT_MIME_TYPE: 'Document MIME type is not supported.',
   DOCUMENT_UPLOAD_NOT_FOUND: 'Document upload was not found.',
   DOCUMENT_UPLOAD_VERIFICATION_FAILED: 'Document upload verification failed.',
+  DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION: 'Document asset storage state is invalid.',
 };
 
 type ErrorResponseBody = {

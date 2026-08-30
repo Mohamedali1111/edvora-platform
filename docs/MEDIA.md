@@ -151,9 +151,8 @@ bytes. Media Slice C adds the runtime authorization boundary for VIDEO Lessons, 
 student may play a specific video now without moving any video bytes or issuing any real playback
 capability.
 
-Media Slice B implements the runtime authorization boundary for student DOCUMENT Lesson access:
-proving who may access which document and when, without yet issuing a student download capability.
-It composes exactly:
+Student DOCUMENT Lesson access now extends the Media Slice B authorization boundary with real
+short-lived Cloudflare R2 download capability issuance. It still composes exactly:
 
 ```text
 AccessTokenGuard
@@ -170,16 +169,16 @@ AccessTokenGuard
 This is the exact same canonical chain `StudentCourseAccessService.assertStudentCourseAccess`
 already enforces for Course/Quiz reads, extended by one focused method,
 `assertAccessibleDocumentLesson`, mirroring how `assertAccessibleQuizLesson` extends it for QUIZ
-lessons. Media Slice B does not duplicate the entitlement predicate; it calls this one method from
-`StudentDocumentAccessService` in the Media module.
+lessons. Student download issuance does not duplicate the entitlement predicate; it calls this one
+method from `StudentDocumentAccessService` in the Media module.
 
 `GET /student/courses/:courseId/lessons/:lessonId/document/access` is the only student-facing route.
 It is structurally bound to the Course/Lesson path; there is no `/student/documents/:documentAssetId`
 route, so a document can never be reached by guessing or supplying a bare `documentAssetId`. The
 client supplies no `tenantId`, `studentUserId`, `enrollmentId`, or `documentAssetId`; all four are
-derived entirely server-side from the authorized Lesson. GET, not POST, because this is a pure
-authorization read, not an action that generates anything. It creates no `LessonProgress` row,
-mutates no `Enrollment`, and writes no access-history row.
+derived entirely server-side from the authorized Lesson. GET creates a short-lived bearer capability,
+but it remains a pure authorization/capability issuance read: it creates no `LessonProgress` row,
+mutates no `Enrollment`, writes no access-history row, and does not persist the signed URL.
 
 ### Readiness Requirement
 
@@ -193,23 +192,41 @@ case. No existence is leaked, and no new error taxonomy was introduced for this.
 
 ### What The Endpoint Returns, And What It Deliberately Does Not
 
-Student document download capability issuance remains deferred even though document upload now uses
-R2. This endpoint does not fabricate a signed URL, download token, provider credential, or any other
-ephemeral access capability. Once authorization succeeds, the response carries only the same class
-of safe, already-established display metadata the student Course structure endpoint exposes for a
-DOCUMENT lesson (`fileName`, `mimeType`, `fileSizeBytes`), plus `ready: true` and an `authorizedAt`
-timestamp proving a real, just-performed authorization decision. It never includes `documentAssetId`,
-`externalAssetRef`, `providerKey`, `processingStatus`, or any other instructor-authoring/
-provider-internal field.
+Once authorization succeeds, the endpoint issues a presigned R2/S3 `GET` capability for the
+already-finalized `DocumentAsset.externalAssetRef`. That persisted key must exactly match:
 
-`StudentDocumentAccessService.getDocumentAccess` is the exact point in code where a future presigned
-R2 download capability belongs: right after `assertAccessibleDocumentLesson` resolves a proven
-`(tenantId, documentAssetId)` pair, and before the response is returned. The implemented document
-storage port currently supports upload signing and object inspection for Slice D; download signing
-is intentionally left for the student-access slice that actually needs it.
+```text
+tenants/{tenantId}/documents/{documentAssetId}
+```
 
-Permanent raw/public media URLs must never become the authorization model. Signed/ephemeral download
-issuance itself remains deferred.
+The download capability must never target the temporary upload namespace:
+
+```text
+tenants/{tenantId}/document-uploads/{documentAssetId}
+```
+
+`StudentDocumentAccessService` validates that READY storage invariant before signing. If the database
+somehow contains a READY document whose `externalAssetRef` still points at a temporary upload key,
+the request fails instead of issuing a capability for mutable upload storage.
+
+The response carries only `lessonId`, `fileName`, `mimeType`, `fileSizeBytes`, `downloadUrl`, and
+`expiresAt`. It never includes `documentAssetId`, `tenantId`, `externalAssetRef`, R2 bucket/account
+configuration, credentials, or permanent/public provider URLs. The presigned `downloadUrl` is
+intentionally returned and must be treated as a sensitive short-lived bearer capability. The default
+download TTL is 5 minutes (`MEDIA_DOCUMENTS_R2_DOWNLOAD_URL_TTL_SECONDS=300`), validated between 60
+and 900 seconds.
+
+NestJS never streams, proxies, buffers, or parses document bytes. The only supported student document
+bytes path is:
+
+```text
+Cloudflare R2 -> student client
+```
+
+No `Content-Disposition` override is signed in this slice. The persisted display `fileName` is
+returned separately, avoiding filename-to-header construction risk while leaving a future provider-
+supported download-header refinement possible. A presigned URL is not DRM and does not prevent
+copying, redistribution, screenshots, or piracy; those remain separate future controls.
 
 ## Video Playback Authorization (Media Slice C)
 

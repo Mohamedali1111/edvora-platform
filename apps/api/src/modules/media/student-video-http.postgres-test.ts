@@ -38,7 +38,12 @@ import { TenancyModule } from '../tenancy/tenancy.module';
 import type { MediaRuntimeConfig } from './media.config';
 import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { MediaModule } from './media.module';
-import type { DocumentObjectMetadata, DocumentStorageProvider, PresignedUploadCapability } from './storage/document-storage.provider';
+import type {
+  DocumentObjectMetadata,
+  DocumentStorageProvider,
+  PresignedDownloadCapability,
+  PresignedUploadCapability,
+} from './storage/document-storage.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
@@ -51,6 +56,7 @@ const testMediaConfig: MediaRuntimeConfig = {
       secretAccessKey: 'test-secret-key',
       bucketName: 'test-documents',
       uploadUrlTtlSeconds: 600,
+      downloadUrlTtlSeconds: 300,
     },
   },
 };
@@ -878,6 +884,10 @@ class UnusedDocumentStorageProvider implements DocumentStorageProvider {
   }
 
   deleteObject(): Promise<void> {
+    return Promise.reject(new Error('not used by student video access tests'));
+  }
+
+  createPresignedDownload(): Promise<PresignedDownloadCapability> {
     return Promise.reject(new Error('not used by student video access tests'));
   }
 }

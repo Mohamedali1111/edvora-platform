@@ -38,7 +38,12 @@ import { TenancyModule } from '../tenancy/tenancy.module';
 import type { MediaRuntimeConfig } from './media.config';
 import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG } from './media.constants';
 import { MediaModule } from './media.module';
-import type { DocumentObjectMetadata, DocumentStorageProvider, PresignedUploadCapability } from './storage/document-storage.provider';
+import type {
+  DocumentObjectMetadata,
+  DocumentStorageProvider,
+  PresignedDownloadCapability,
+  PresignedUploadCapability,
+} from './storage/document-storage.provider';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const maybeDescribe = testDatabaseUrl ? describe : describe.skip;
@@ -51,6 +56,7 @@ const testMediaConfig: MediaRuntimeConfig = {
       secretAccessKey: 'test-secret-key',
       bucketName: 'test-documents',
       uploadUrlTtlSeconds: 600,
+      downloadUrlTtlSeconds: 300,
     },
   },
 };
@@ -205,7 +211,7 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
   // Happy path
   // ---------------------------------------------------------------------------------------------
 
-  it('authorizes an entitled student for a READY DOCUMENT lesson and returns only safe metadata', async () => {
+  it('authorizes an entitled student for a READY DOCUMENT lesson and returns only safe metadata plus a short-lived download capability', async () => {
     const setup = await setUpAccessibleDocumentLesson('happy-path');
 
     const response = await getAccess(setup).expect(HttpStatus.OK);
@@ -216,20 +222,31 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
       fileName: 'notes.pdf',
       mimeType: 'application/pdf',
       fileSizeBytes: '1024',
-      ready: true,
     });
-    expect(typeof body.authorizedAt).toBe('string');
+    expect(typeof body.downloadUrl).toBe('string');
+    expect(typeof body.expiresAt).toBe('string');
     expect(Object.keys(body).sort()).toEqual(
-      ['authorizedAt', 'fileName', 'fileSizeBytes', 'lessonId', 'mimeType', 'ready'].sort(),
+      ['downloadUrl', 'expiresAt', 'fileName', 'fileSizeBytes', 'lessonId', 'mimeType'].sort(),
     );
+    expect(documentStorage.downloadRequests).toEqual([
+      {
+        objectKey: `tenants/${setup.tenantId}/documents/${setup.documentAssetId}`,
+        expiresInSeconds: 300,
+      },
+    ]);
+    expect(String(body.downloadUrl)).not.toContain('/document-uploads/');
 
     // No internal/provider identifiers of any kind leak into the response, including the
     // documentAssetId itself and the tenant ID — neither is needed by the client and neither is
     // exposed by the existing student Course structure endpoint either.
     const raw = JSON.stringify(body);
-    expect(raw).not.toMatch(/externalAssetRef|providerKey|documentAssetId|tenantId|processingStatus|url|token|secret|signed/i);
+    expect(raw).not.toMatch(
+      /externalAssetRef|providerKey|documentAssetId|tenantId|processingStatus|accessKey|secret|bucket|account|r2\.cloudflarestorage|public/i,
+    );
     expect(raw).not.toContain(setup.documentAssetId);
     expect(raw).not.toContain(setup.tenantId);
+    expect(raw).not.toContain(`tenants/${setup.tenantId}/documents/${setup.documentAssetId}`);
+    expect(raw).not.toContain(`tenants/${setup.tenantId}/document-uploads/${setup.documentAssetId}`);
   });
 
   it('creates no LessonProgress, QuizAttempt, or other side-effect row on authorization', async () => {
@@ -243,6 +260,48 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
     await expect(prisma.client.enrollment.count()).resolves.toBe(1);
     const enrollment = await prisma.client.enrollment.findUniqueOrThrow({ where: { id: setup.enrollmentId } });
     expect(enrollment.status).toBe(EnrollmentStatus.ACTIVE);
+  });
+
+  it('issues separate ephemeral capabilities for repeated access without mutating state', async () => {
+    const setup = await setUpAccessibleDocumentLesson('repeated-access');
+
+    const first = responseBody<Record<string, unknown>>(await getAccess(setup).expect(HttpStatus.OK));
+    const second = responseBody<Record<string, unknown>>(await getAccess(setup).expect(HttpStatus.OK));
+
+    expect(first.downloadUrl).not.toBe(second.downloadUrl);
+    expect(documentStorage.downloadRequests).toEqual([
+      {
+        objectKey: `tenants/${setup.tenantId}/documents/${setup.documentAssetId}`,
+        expiresInSeconds: 300,
+      },
+      {
+        objectKey: `tenants/${setup.tenantId}/documents/${setup.documentAssetId}`,
+        expiresInSeconds: 300,
+      },
+    ]);
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+    await expect(prisma.client.quizAttempt.count()).resolves.toBe(0);
+  });
+
+  it('does not mutate asset, enrollment, or progress when download capability signing fails', async () => {
+    const setup = await setUpAccessibleDocumentLesson('download-signing-failure');
+    documentStorage.failDownloadSigning = true;
+
+    const response = await getAccess(setup).expect(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(response.body).toMatchObject({ error: { code: 'INTERNAL_SERVER_ERROR' } });
+
+    await expect(prisma.client.documentAsset.findUniqueOrThrow({ where: { id: setup.documentAssetId } })).resolves.toMatchObject(
+      {
+        externalAssetRef: `tenants/${setup.tenantId}/documents/${setup.documentAssetId}`,
+        processingStatus: AssetProcessingStatus.READY,
+      },
+    );
+    await expect(prisma.client.enrollment.findUniqueOrThrow({ where: { id: setup.enrollmentId } })).resolves.toMatchObject({
+      status: EnrollmentStatus.ACTIVE,
+    });
+    await expect(prisma.client.lessonProgress.count()).resolves.toBe(0);
+    await expect(prisma.client.quizAttempt.count()).resolves.toBe(0);
+    expect(documentStorage.downloadRequests).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------------------------
@@ -596,10 +655,25 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
 
     await prisma.client.documentAsset.update({
       where: { id: setup.documentAssetId },
-      data: { processingStatus: AssetProcessingStatus.READY },
+      data: {
+        externalAssetRef: `tenants/${setup.tenantId}/documents/${setup.documentAssetId}`,
+        processingStatus: AssetProcessingStatus.READY,
+      },
     });
 
     await getAccess(setup).expect(HttpStatus.OK);
+  });
+
+  it('refuses a READY DocumentAsset whose external reference still points at the temporary upload namespace', async () => {
+    const setup = await setUpAccessibleDocumentLesson('ready-temp-invariant');
+    await prisma.client.documentAsset.update({
+      where: { id: setup.documentAssetId },
+      data: { externalAssetRef: `tenants/${setup.tenantId}/document-uploads/${setup.documentAssetId}` },
+    });
+
+    const response = await getAccess(setup).expect(HttpStatus.BAD_GATEWAY);
+    expect(response.body).toMatchObject({ error: { code: 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION' } });
+    expect(documentStorage.downloadRequests).toEqual([]);
   });
 
   it('denies an UPLOADING asset until instructor R2 confirmation verifies it and makes Student Slice B authorization succeed', async () => {
@@ -663,9 +737,12 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
           fileName: 'bridge.pdf',
           mimeType: 'application/pdf',
           fileSizeBytes: '2048',
-          ready: true,
         }),
       );
+    expect(documentStorage.downloadRequests.at(-1)).toEqual({
+      objectKey: `tenants/${tenantId}/documents/${documentAssetId}`,
+      expiresInSeconds: 300,
+    });
   });
 
   // ---------------------------------------------------------------------------------------------
@@ -849,12 +926,16 @@ maybeDescribe('student document access HTTP PostgreSQL integration', () => {
     processingStatus: AssetProcessingStatus,
   ): Promise<string> {
     const id = uuid.create();
+    const externalAssetRef =
+      processingStatus === AssetProcessingStatus.READY
+        ? `tenants/${tenantId}/documents/${id}`
+        : `tenants/${tenantId}/document-uploads/${id}`;
     await prisma.client.documentAsset.create({
       data: {
         id,
         tenantId,
         uploadedByUserId,
-        externalAssetRef: `test-provider/document/${id}`,
+        externalAssetRef,
         fileName: 'notes.pdf',
         mimeType: 'application/pdf',
         fileSizeBytes: BigInt(1024),
@@ -907,6 +988,9 @@ function responseBody<T>(response: request.Response): T {
 
 class TestDocumentStorageProvider implements DocumentStorageProvider {
   readonly objects = new Map<string, DocumentObjectMetadata>();
+  readonly downloadRequests: Array<{ objectKey: string; expiresInSeconds: number }> = [];
+  private downloadCounter = 0;
+  failDownloadSigning = false;
 
   createPresignedUpload(input: {
     objectKey: string;
@@ -938,5 +1022,22 @@ class TestDocumentStorageProvider implements DocumentStorageProvider {
   deleteObject(objectKey: string): Promise<void> {
     this.objects.delete(objectKey);
     return Promise.resolve();
+  }
+
+  createPresignedDownload(input: {
+    objectKey: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedDownloadCapability> {
+    if (this.failDownloadSigning) {
+      return Promise.reject(new Error('test download signing failure'));
+    }
+
+    this.downloadRequests.push({ objectKey: input.objectKey, expiresInSeconds: input.expiresInSeconds });
+    this.downloadCounter += 1;
+    return Promise.resolve({
+      downloadUrl: `https://download.example/capability-${this.downloadCounter}?signature=redacted`,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+    });
   }
 }

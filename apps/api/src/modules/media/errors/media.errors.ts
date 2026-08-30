@@ -3,7 +3,8 @@ export type MediaErrorCode =
   | 'DOCUMENT_ASSET_NOT_FOUND'
   | 'UNSUPPORTED_DOCUMENT_MIME_TYPE'
   | 'DOCUMENT_UPLOAD_NOT_FOUND'
-  | 'DOCUMENT_UPLOAD_VERIFICATION_FAILED';
+  | 'DOCUMENT_UPLOAD_VERIFICATION_FAILED'
+  | 'DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION';
 
 export class MediaError extends Error {
   constructor(
@@ -42,5 +43,11 @@ export class DocumentUploadNotFoundError extends MediaError {
 export class DocumentUploadVerificationFailedError extends MediaError {
   constructor() {
     super('DOCUMENT_UPLOAD_VERIFICATION_FAILED', 'Document upload verification failed.');
+  }
+}
+
+export class DocumentAssetStorageInvariantViolationError extends MediaError {
+  constructor() {
+    super('DOCUMENT_ASSET_STORAGE_INVARIANT_VIOLATION', 'Document asset storage state is invalid.');
   }
 }

@@ -4,6 +4,11 @@ export type PresignedUploadCapability = {
   headers: Record<string, string>;
 };
 
+export type PresignedDownloadCapability = {
+  downloadUrl: string;
+  expiresAt: Date;
+};
+
 export type DocumentObjectMetadata = {
   exists: boolean;
   contentLengthBytes?: bigint;
@@ -17,6 +22,12 @@ export interface DocumentStorageProvider {
     expiresInSeconds: number;
     now: Date;
   }): Promise<PresignedUploadCapability>;
+
+  createPresignedDownload(input: {
+    objectKey: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedDownloadCapability>;
 
   headObject(objectKey: string): Promise<DocumentObjectMetadata>;
 

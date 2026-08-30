@@ -31,6 +31,7 @@ import { MediaModule } from './media.module';
 import type {
   DocumentObjectMetadata,
   DocumentStorageProvider,
+  PresignedDownloadCapability,
   PresignedUploadCapability,
 } from './storage/document-storage.provider';
 
@@ -45,6 +46,7 @@ const testMediaConfig: MediaRuntimeConfig = {
       secretAccessKey: 'test-secret-key',
       bucketName: 'test-documents',
       uploadUrlTtlSeconds: 600,
+      downloadUrlTtlSeconds: 300,
     },
   },
 };
@@ -863,6 +865,17 @@ class FakeDocumentStorageProvider implements DocumentStorageProvider {
   deleteObject(objectKey: string): Promise<void> {
     this.objects.delete(objectKey);
     return Promise.resolve();
+  }
+
+  createPresignedDownload(input: {
+    objectKey: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedDownloadCapability> {
+    return Promise.resolve({
+      downloadUrl: `https://download.example/${input.objectKey}?signature=redacted`,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
+    });
   }
 }
 

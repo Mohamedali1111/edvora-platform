@@ -3,6 +3,7 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  GetObjectCommand,
   NoSuchKey,
   NotFound,
   PutObjectCommand,
@@ -11,7 +12,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { MEDIA_RUNTIME_CONFIG } from '../media.constants';
 import type { MediaRuntimeConfig } from '../media.config';
-import type { DocumentObjectMetadata, DocumentStorageProvider, PresignedUploadCapability } from './document-storage.provider';
+import type {
+  DocumentObjectMetadata,
+  DocumentStorageProvider,
+  PresignedDownloadCapability,
+  PresignedUploadCapability,
+} from './document-storage.provider';
 
 @Injectable()
 export class R2DocumentStorageProvider implements DocumentStorageProvider {
@@ -50,6 +56,24 @@ export class R2DocumentStorageProvider implements DocumentStorageProvider {
       headers: {
         'Content-Type': input.contentType,
       },
+    };
+  }
+
+  async createPresignedDownload(input: {
+    objectKey: string;
+    expiresInSeconds: number;
+    now: Date;
+  }): Promise<PresignedDownloadCapability> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: input.objectKey,
+    });
+
+    const downloadUrl = await getSignedUrl(this.client, command, { expiresIn: input.expiresInSeconds });
+
+    return {
+      downloadUrl,
+      expiresAt: new Date(input.now.getTime() + input.expiresInSeconds * 1000),
     };
   }
 
