@@ -251,6 +251,63 @@ export class StudentCourseAccessService {
   }
 
   /**
+   * Proves the authenticated student is entitled to access the document linked to a specific,
+   * currently-accessible DOCUMENT Lesson within an entitled Course, and returns the exact
+   * (tenantId, documentAssetId, enrollmentId) triple that proof resolved to. This is a thin,
+   * lesson-shaped extension of `assertStudentCourseAccess` — the one canonical entitlement chain
+   * — never a parallel authorization path duplicated inside the Media module, mirroring exactly
+   * how `assertAccessibleQuizLesson` extends the same chain for QUIZ lessons. A lesson that would
+   * not appear in the student's course structure (foreign course, DRAFT/ARCHIVED, unpublished
+   * section, outside its availability window, or not type DOCUMENT) cannot be resolved here
+   * either, and collapses to the same `LessonNotFoundError` the read/completion/quiz paths
+   * already use — no new "not found" taxonomy, no existence leakage between "does not exist" and
+   * "not currently available to you." `documentLesson.documentAsset` is reached through the
+   * schema's own `(documentAssetId, tenantId) -> DocumentAsset(id, tenantId)` composite foreign
+   * key, so a resolved `documentAssetId` is already proven to belong to this exact tenant — no
+   * separate tenant-match query is needed or possible to bypass. The linked DocumentAsset must
+   * also be `READY`: a document referenced by a Lesson while still `UPLOADING`/`PROCESSING`, or
+   * that ended up `FAILED`/`ARCHIVED`, is treated exactly like an unavailable lesson and never
+   * granted runtime access — instructor authoring may reference an asset before it is ready (see
+   * Media Slice A), but that is a distinct, deliberately looser authoring-time check; this
+   * runtime student-access check is stricter by design.
+   */
+  async assertAccessibleDocumentLesson(
+    principal: AuthenticatedPrincipal,
+    courseId: string,
+    lessonId: string,
+  ): Promise<{ tenantId: string; documentAssetId: string; enrollmentId: string }> {
+    const { tenantId, enrollmentId } = await this.assertStudentCourseAccess(principal, courseId);
+
+    const now = this.clock.now();
+    const lesson = await this.prismaService.client.lesson.findFirst({
+      where: {
+        id: lessonId,
+        tenantId,
+        courseId,
+        type: LessonType.DOCUMENT,
+        status: LessonStatus.PUBLISHED,
+        section: { status: SectionStatus.PUBLISHED },
+        AND: [
+          { OR: [{ availableFrom: null }, { availableFrom: { lte: now } }] },
+          { OR: [{ availableUntil: null }, { availableUntil: { gt: now } }] },
+        ],
+      },
+      select: {
+        documentLesson: { select: { documentAssetId: true, documentAsset: { select: { processingStatus: true } } } },
+      },
+    });
+
+    if (
+      !lesson?.documentLesson ||
+      lesson.documentLesson.documentAsset.processingStatus !== AssetProcessingStatus.READY
+    ) {
+      throw new LessonNotFoundError();
+    }
+
+    return { tenantId, documentAssetId: lesson.documentLesson.documentAssetId, enrollmentId };
+  }
+
+  /**
    * Proves the authenticated student is currently entitled to read/act on the given course, and
    * returns the exact (tenantId, enrollmentId) pair that proof resolved to, so callers never
    * re-derive or accept these as separate client-supplied inputs. See the entitlement predicate
