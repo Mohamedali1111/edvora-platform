@@ -201,7 +201,10 @@ export class StudentCourseAccessService {
   /**
    * Proves the authenticated student is entitled to read the Quiz linked to a specific,
    * currently-accessible QUIZ Lesson within an entitled Course, and returns the exact
-   * (tenantId, quizId) pair that proof resolved to. This is a thin, lesson-shaped extension of
+   * (tenantId, quizId, enrollmentId) triple that proof resolved to — `enrollmentId` is included
+   * because Quiz Attempt creation (Slice C) needs it and must derive it the same server-side way
+   * every other entitled-student write in this codebase does, never as a client-supplied value.
+   * This is a thin, lesson-shaped extension of
    * `assertStudentCourseAccess` — the one canonical entitlement chain — never a parallel
    * authorization path duplicated inside the Quiz module. A lesson that would not appear in the
    * student's course structure (foreign course, DRAFT/ARCHIVED, unpublished section, outside its
@@ -216,8 +219,8 @@ export class StudentCourseAccessService {
     principal: AuthenticatedPrincipal,
     courseId: string,
     lessonId: string,
-  ): Promise<{ tenantId: string; quizId: string }> {
-    const { tenantId } = await this.assertStudentCourseAccess(principal, courseId);
+  ): Promise<{ tenantId: string; quizId: string; enrollmentId: string }> {
+    const { tenantId, enrollmentId } = await this.assertStudentCourseAccess(principal, courseId);
 
     const now = this.clock.now();
     const lesson = await this.prismaService.client.lesson.findFirst({
@@ -246,7 +249,7 @@ export class StudentCourseAccessService {
       throw new LessonNotFoundError();
     }
 
-    return { tenantId, quizId: lesson.quizLesson.quizId };
+    return { tenantId, quizId: lesson.quizLesson.quizId, enrollmentId };
   }
 
   /**

@@ -745,23 +745,28 @@ model QuestionOption {
 }
 
 model QuizAttempt {
-  id                  String            @id @db.Uuid
-  tenantId            String            @map("tenant_id") @db.Uuid
-  quizId              String            @map("quiz_id") @db.Uuid
-  lessonId            String            @map("lesson_id") @db.Uuid
-  studentUserId       String            @map("student_user_id") @db.Uuid
-  enrollmentId        String            @map("enrollment_id") @db.Uuid
-  status              QuizAttemptStatus @default(IN_PROGRESS)
-  attemptNumber       Int               @map("attempt_number")
-  clientSubmissionKey String?           @map("client_submission_key") @db.VarChar(120)
-  startedAt           DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
-  submittedAt         DateTime?         @map("submitted_at") @db.Timestamptz(6)
-  gradedAt            DateTime?         @map("graded_at") @db.Timestamptz(6)
-  scorePoints         Decimal?          @map("score_points") @db.Decimal(10, 2)
-  maxPoints           Decimal?          @map("max_points") @db.Decimal(10, 2)
-  passed              Boolean?
-  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                          String            @id @db.Uuid
+  tenantId                    String            @map("tenant_id") @db.Uuid
+  quizId                      String            @map("quiz_id") @db.Uuid
+  lessonId                    String            @map("lesson_id") @db.Uuid
+  studentUserId               String            @map("student_user_id") @db.Uuid
+  enrollmentId                String            @map("enrollment_id") @db.Uuid
+  status                      QuizAttemptStatus @default(IN_PROGRESS)
+  attemptNumber               Int               @map("attempt_number")
+  clientSubmissionKey         String?           @map("client_submission_key") @db.VarChar(120)
+  startedAt                   DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  // Immutable copy of the Quiz's `passingScorePercent` at the instant this attempt was created —
+  // mirrors that field's datatype/nullability exactly. Grading must use this, never the live
+  // `Quiz` row, so a later instructor threshold change cannot alter an already-started attempt's
+  // pass/fail meaning. See docs/QUIZ-ATTEMPTS.md ("Passing-threshold snapshot").
+  passingScorePercentSnapshot Decimal?          @map("passing_score_percent_snapshot") @db.Decimal(5, 2)
+  submittedAt                 DateTime?         @map("submitted_at") @db.Timestamptz(6)
+  gradedAt                    DateTime?         @map("graded_at") @db.Timestamptz(6)
+  scorePoints                 Decimal?          @map("score_points") @db.Decimal(10, 2)
+  maxPoints                   Decimal?          @map("max_points") @db.Decimal(10, 2)
+  passed                      Boolean?
+  createdAt                   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   quiz       Quiz                @relation(fields: [quizId, tenantId], references: [id, tenantId], onDelete: Restrict)
   lesson     Lesson              @relation(fields: [lessonId, tenantId], references: [id, tenantId], onDelete: Restrict)

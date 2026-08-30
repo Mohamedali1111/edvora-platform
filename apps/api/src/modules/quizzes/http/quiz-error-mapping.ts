@@ -11,6 +11,10 @@ const ERROR_STATUS: Record<QuizErrorCode, HttpStatus> = {
   INVALID_QUESTION_OPTION_REORDER: HttpStatus.BAD_REQUEST,
   QUESTION_OPTION_LIMIT_EXCEEDED: HttpStatus.BAD_REQUEST,
   MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED: HttpStatus.BAD_REQUEST,
+  QUIZ_ATTEMPT_NOT_FOUND: HttpStatus.NOT_FOUND,
+  QUIZ_ATTEMPT_NOT_OPEN: HttpStatus.CONFLICT,
+  QUIZ_HAS_NO_ACTIVE_QUESTIONS: HttpStatus.CONFLICT,
+  QUIZ_ATTEMPT_LIMIT_REACHED: HttpStatus.CONFLICT,
 };
 
 const ERROR_MESSAGES: Record<QuizErrorCode, string> = {
@@ -23,6 +27,10 @@ const ERROR_MESSAGES: Record<QuizErrorCode, string> = {
   INVALID_QUESTION_OPTION_REORDER: 'Reorder payload must contain exactly the current options for this question.',
   QUESTION_OPTION_LIMIT_EXCEEDED: 'This question type does not allow additional options.',
   MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED: 'Only one option may be marked correct for this question.',
+  QUIZ_ATTEMPT_NOT_FOUND: 'Quiz attempt was not found.',
+  QUIZ_ATTEMPT_NOT_OPEN: 'This quiz attempt is already finalized and can no longer be modified.',
+  QUIZ_HAS_NO_ACTIVE_QUESTIONS: 'This quiz currently has no active questions to attempt.',
+  QUIZ_ATTEMPT_LIMIT_REACHED: 'The maximum number of attempts for this quiz has already been used.',
 };
 
 type ErrorResponseBody = {

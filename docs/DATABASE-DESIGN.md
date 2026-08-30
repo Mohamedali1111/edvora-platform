@@ -382,6 +382,7 @@ Fields:
 - `attemptNumber`
 - `clientSubmissionKey` nullable
 - `startedAt`, `submittedAt`, `gradedAt`
+- `passingScorePercentSnapshot` nullable — the Quiz's `passingScorePercent` frozen at the instant this attempt was created (same datatype/nullability as `Quiz.passingScorePercent`); grading uses this value exclusively, never the live `Quiz` row, so a later instructor threshold change cannot alter an already-started attempt's `passed` outcome
 - `scorePoints`
 - `maxPoints`
 - `passed`

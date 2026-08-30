@@ -7,7 +7,11 @@ export type QuizErrorCode =
   | 'INVALID_QUESTION_REORDER'
   | 'INVALID_QUESTION_OPTION_REORDER'
   | 'QUESTION_OPTION_LIMIT_EXCEEDED'
-  | 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED';
+  | 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED'
+  | 'QUIZ_ATTEMPT_NOT_FOUND'
+  | 'QUIZ_ATTEMPT_NOT_OPEN'
+  | 'QUIZ_HAS_NO_ACTIVE_QUESTIONS'
+  | 'QUIZ_ATTEMPT_LIMIT_REACHED';
 
 export class QuizError extends Error {
   constructor(
@@ -76,5 +80,35 @@ export class QuestionOptionLimitExceededError extends QuizError {
 export class MultipleCorrectOptionsNotAllowedError extends QuizError {
   constructor() {
     super('MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED', 'Only one option may be marked correct for this question.');
+  }
+}
+
+// A foreign/random Attempt ID, an Attempt belonging to another student, and an Attempt for a
+// different Quiz Lesson all collapse to this same error — no existence leakage between "does not
+// exist" and "exists but is not yours," matching the IDOR-avoidance convention already
+// established for Course/Lesson errors.
+export class QuizAttemptNotFoundError extends QuizError {
+  constructor() {
+    super('QUIZ_ATTEMPT_NOT_FOUND', 'Quiz attempt was not found.');
+  }
+}
+
+export class QuizAttemptNotOpenError extends QuizError {
+  constructor() {
+    super('QUIZ_ATTEMPT_NOT_OPEN', 'This quiz attempt is already finalized and can no longer be modified.');
+  }
+}
+
+export class QuizHasNoActiveQuestionsError extends QuizError {
+  constructor() {
+    super('QUIZ_HAS_NO_ACTIVE_QUESTIONS', 'This quiz currently has no active questions to attempt.');
+  }
+}
+
+// A clean domain error for "you have used up your configured attempts for this Quiz within this
+// Enrollment" — never a raw Prisma/DB unique-constraint failure surfaced to the client.
+export class QuizAttemptLimitReachedError extends QuizError {
+  constructor() {
+    super('QUIZ_ATTEMPT_LIMIT_REACHED', 'The maximum number of attempts for this quiz has already been used.');
   }
 }
