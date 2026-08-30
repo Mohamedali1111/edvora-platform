@@ -2,18 +2,22 @@ import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
 import { AuthModule } from '../auth/auth.module';
+import { DeviceModule } from '../devices/device.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { InstructorCourseController } from './http/instructor-course.controller';
 import { InstructorLessonController } from './http/instructor-lesson.controller';
 import { InstructorSectionController } from './http/instructor-section.controller';
+import { StudentCourseController } from './http/student-course.controller';
 import { CourseSectionService } from './services/course-section.service';
 import { CourseService } from './services/course.service';
 import { LessonService } from './services/lesson.service';
+import { StudentCourseAccessService } from './services/student-course-access.service';
 
 @Module({
   imports: [
     AuthModule,
     DatabaseModule,
+    DeviceModule,
     TenancyModule,
     ThrottlerModule.forRoot([
       {
@@ -23,8 +27,13 @@ import { LessonService } from './services/lesson.service';
       },
     ]),
   ],
-  controllers: [InstructorCourseController, InstructorSectionController, InstructorLessonController],
-  providers: [CourseService, CourseSectionService, LessonService],
-  exports: [CourseService, CourseSectionService, LessonService],
+  controllers: [
+    InstructorCourseController,
+    InstructorSectionController,
+    InstructorLessonController,
+    StudentCourseController,
+  ],
+  providers: [CourseService, CourseSectionService, LessonService, StudentCourseAccessService],
+  exports: [CourseService, CourseSectionService, LessonService, StudentCourseAccessService],
 })
 export class CoursesModule {}

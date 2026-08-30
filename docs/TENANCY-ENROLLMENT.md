@@ -11,11 +11,13 @@ Implemented:
 - Instructor tenant-scoped student association.
 - Instructor tenant-scoped enrollment creation and revocation.
 - Student enrollment listing behind authentication and student-device authorization.
+- Student course entitlement and read access (own entitled course list, entitled course structure) behind authentication, student-device authorization, and the full course-content entitlement chain. Course, section, and lesson *authoring* APIs are documented separately (see `docs/STATUS.md`'s Course Slice A/B entries).
 
 Not implemented:
 
-- Course, section, lesson, video, document, or quiz authoring APIs.
-- Protected content delivery.
+- Video, document, or quiz authoring/upload APIs.
+- Protected content delivery (playback authorization, document access, quiz execution).
+- Lesson progress.
 - Student/instructor frontend or mobile UI.
 - Email delivery for activation links.
 - Payments, MFA, Redis, push notifications, or distributed rate limiting.
@@ -116,6 +118,30 @@ AccessTokenGuard
 
 The response includes minimal enrollment/course metadata: enrollment ID, tenant ID, course ID/title/status, enrollment status, date fields, and timestamps. It does not include lesson/content/video/document data or another student's enrollment information.
 
+## Student Course Entitlement (Course Milestone Slice C)
+
+`GET /student/courses` and `GET /student/courses/:courseId` are the first endpoints that authorize access to course *content*, not just enrollment records. Both require:
+
+```text
+AccessTokenGuard
+-> StudentDeviceGuard
+-> current DB ACTIVE STUDENT
+-> currently entitled ACTIVE Enrollment (status, and startsAt/endsAt evaluated against ClockService.now())
+-> ACTIVE TenantStudent for the course's own tenant
+-> Course PUBLISHED in an ACTIVE tenant
+-> (detail only) ordered PUBLISHED Sections/Lessons belonging to that Course, each Lesson additionally filtered by its own availableFrom/availableUntil window
+```
+
+Implemented by one focused, reusable `StudentCourseAccessService` (`apps/api/src/modules/courses/services/student-course-access.service.ts`) rather than scattering these checks across controllers. Key contract points:
+
+- **The tenant is never client-supplied.** Both routes take only `courseId` — no `tenantId` path segment exists. The tenant is always derived from the course/enrollment relationship itself, consistent with a student being associated with more than one tenant over time.
+- **A database row may remain `ACTIVE` after `endsAt`.** The entitlement check evaluates `status === ACTIVE AND (startsAt IS NULL OR startsAt <= now) AND (endsAt IS NULL OR endsAt > now)` on every read; it never treats a stale-but-still-`ACTIVE` row as entitled, and it never mutates/expires that row as a side effect of a read. Expiring stale rows remains an instructor-mutation-time concern (see `createEnrollment` above), not a read-time one.
+- **`Course.status` must be `PUBLISHED`.** A valid Enrollment never makes a `DRAFT` or `ARCHIVED` course accessible. `CourseVisibility` (`PRIVATE`/`ENROLLED_ONLY`) carries no additional access-control meaning in V1 — Enrollment remains required for all student course access regardless of its value.
+- **No existence leakage.** Every rejection reason — course does not exist, belongs to a tenant the student has no association with, is not `PUBLISHED`, has no entitled Enrollment, or the Enrollment's time window does not currently cover `now` — throws the same `CourseNotFoundError` (404). A cross-tenant or otherwise-foreign course ID is indistinguishable from a nonexistent one.
+- **Nested ownership is proved by construction.** The course detail response is built from one `course.findUnique` nested `include` scoped to the already-authorized `courseId`; a section or lesson belonging to a different course can never appear in it, by Prisma relational traversal, not by an application-level filter that could be gotten wrong.
+- **Unavailable lessons are omitted, not exposed as locked metadata.** A lesson outside its `availableFrom`/`availableUntil` window (or not `PUBLISHED`) is simply absent from the response — this is the conservative choice where neither `docs/PRODUCT.md` nor `docs/BACKEND-DOMAIN.md` specify one, since omission leaks no title, type, or existence of content the student cannot yet reach, whereas a "locked" placeholder would.
+- **Responses are student-safe by construction.** New `Student*` response types (distinct from the instructor-facing `CourseSummary`/`CourseSectionSummary`/`LessonSummary` family) never include ownership/authoring fields, and for typed lessons expose only: VIDEO — processing status and duration; DOCUMENT — file name, MIME type, size; QUIZ — title and status. Provider keys, external asset references, internal asset/quiz IDs, playback/download URLs, and quiz questions/options/answers are never included. Protected playback authorization, document access, and quiz execution remain separate, later endpoints.
+
 ## Concurrency And Integrity
 
 The implementation relies on existing PostgreSQL uniqueness and foreign-key constraints plus transactions:
@@ -143,8 +169,9 @@ Events contain stable IDs and state metadata only. They must not contain raw act
 ## Deferred
 
 - Instructor/student UI.
-- Course/content authoring and delivery.
-- Enrollment entitlement guard for protected course content.
+- LessonProgress reads/writes and completion tracking.
+- Protected video playback authorization, document access, and quiz authoring/execution.
+- Uploads/provider integration for video and document assets.
 - Student removal/reactivation endpoints.
 - Activation-token delivery by email or another provider.
 - Distributed rate limiting before horizontal production scaling.

@@ -15,3 +15,10 @@ export class LessonIdParamDto extends SectionIdParamDto {
   @Matches(UUID_PARAM_PATTERN)
   lessonId!: string;
 }
+
+// Student course routes intentionally have no tenantId path segment — the tenant is always
+// derived server-side from the course/enrollment relationship, never accepted from the client.
+export class StudentCourseIdParamDto {
+  @Matches(UUID_PARAM_PATTERN)
+  courseId!: string;
+}
