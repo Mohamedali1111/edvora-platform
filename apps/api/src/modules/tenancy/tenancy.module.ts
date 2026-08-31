@@ -3,6 +3,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { DeviceModule } from '../devices/device.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { AdminInstructorController } from './http/admin-instructor.controller';
 import { InstructorEnrollmentController } from './http/instructor-enrollment.controller';
 import { InstructorStudentController } from './http/instructor-student.controller';
@@ -19,6 +20,7 @@ import { TenantAuthorizationService } from './services/tenant-authorization.serv
     AuthModule,
     DatabaseModule,
     DeviceModule,
+    NotificationsModule,
     ThrottlerModule.forRoot([
       {
         name: 'tenancy',

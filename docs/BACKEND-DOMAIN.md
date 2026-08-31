@@ -193,6 +193,13 @@ Notifications remain provider-independent in V1.
 
 The backend should model in-app notification records with recipient, type/category, title/body or localization key payload, read timestamp, created timestamp, and optional domain reference. Do not choose push, email, SMS, or WhatsApp providers yet.
 
+The implemented V1 notification boundary is a self-inbox model: students and instructors read only
+notifications whose `recipientUserId` matches the authenticated principal. Student notification
+routes compose access-token authentication with the same student device authorization guard used by
+protected student app surfaces. Tenant-scoped notifications may carry `tenantId`; platform-level
+notifications are represented by `tenantId = null` when explicitly created by a trusted internal
+producer. See `docs/NOTIFICATIONS.md`.
+
 ## Security Events / Audit Trail
 
 Security events are distinct from ordinary analytics.

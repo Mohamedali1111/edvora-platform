@@ -12,6 +12,7 @@ import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-princ
 import { ClockService } from '../../auth/services/clock.service';
 import { SecurityEventService } from '../../auth/services/security-event.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
+import { NotificationService } from '../../notifications/services/notification.service';
 import {
   CourseNotFoundError,
   EnrollmentAlreadyActiveError,
@@ -38,6 +39,7 @@ export class EnrollmentService {
     private readonly prismaService: PrismaService,
     private readonly authorization: TenantAuthorizationService,
     private readonly securityEvents: SecurityEventService,
+    private readonly notifications: NotificationService,
     private readonly clock: ClockService,
     private readonly uuid: UuidV7Service,
   ) {}
@@ -132,6 +134,15 @@ export class EnrollmentService {
             enrollmentId: enrollment.id,
             courseId: input.courseId,
           },
+        });
+
+        await this.notifications.createEnrollmentCreatedNotification(tx, {
+          tenantId: input.tenantId,
+          courseId: input.courseId,
+          courseTitle: enrollment.course.title,
+          enrollmentId: enrollment.id,
+          studentUserId: input.studentUserId,
+          now,
         });
 
         return toEnrollmentSummary(enrollment);

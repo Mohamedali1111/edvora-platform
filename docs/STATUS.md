@@ -603,6 +603,46 @@ Media Slice G (protected Bunny video playback capability) validation passed:
 - Verified directly: the raw JSON response never contains `videoAssetId`, `tenantId`, `providerKey`, `externalAssetRef`, or any Bunny credential value (API key, webhook signing secret, token authentication key); `playbackUrl` targets the exact authorized video's `/{videoId}/playlist.m3u8` path; TTL is computed as `clamp(duration + 900, 300, 14400)` with a 7200s fallback for unknown duration; and no `LessonProgress`/`QuizAttempt`/`SecurityEvent` row is created by any playback-authorization call, including a failed one.
 - No migration was required or added. No mobile UI was implemented — this slice is API-only, and the response (`playbackUrl` consumable directly by a native HLS player, no per-segment backend calls) is designed to be ready for that future integration.
 
+Notification foundation validation passed:
+
+- Confirmed repository started clean at `76b508c chore(media): harden lifecycle and close milestone`
+  with a clean working tree. The Media milestone was treated as closed and no Media files were
+  modified.
+- Read the notification-relevant product/backend/database/decision/status documentation, the actual
+  `Notification` Prisma model, auth principal/role checks, tenancy/enrollment services, student
+  device guard, course access patterns, pagination DTOs, and HTTP error mapping before
+  implementation.
+- Confirmed no migration was required or added. The existing schema has one `Notification` model
+  with `tenantId` nullable for platform-level records, `recipientUserId`, `type`, `category`,
+  `title`, `body`, nullable domain reference fields, nullable `readAt`, `createdAt`,
+  `recipientUserId/readAt/createdAt` and `tenantId/createdAt` indexes, and no separate recipient
+  model.
+- Implemented a production-quality in-app notification domain only: `NotificationService`,
+  student/instructor self-inbox controllers, notification error mapping, safe recipient DTOs,
+  bounded offset pagination, unread count via DB count, idempotent mark-read preserving existing
+  `readAt`, and read-all through one scoped database update.
+- Student notification routes use `AccessTokenGuard` plus `StudentDeviceGuard`; instructor
+  notification routes derive the recipient from the authenticated instructor principal. Clients do
+  not provide authoritative `userId`, `recipientId`, or `tenantId` for self-inbox reads/mutations.
+  Foreign and random notification IDs collapse to the same non-leaking `NOTIFICATION_NOT_FOUND`.
+- Wired exactly one producer: successful new ACTIVE enrollment creation now creates one
+  `COURSE_ENROLLMENT_CREATED` in-app notification for the enrolled student in the same transaction
+  as the enrollment and security event. The producer validates tenant-scoped recipient relationship,
+  uses a transaction-scoped PostgreSQL advisory lock plus persisted domain reference lookup for
+  retry/concurrency idempotency, and rejected cross-tenant enrollment attempts create no
+  notification.
+- Added `docs/NOTIFICATIONS.md`, updated `docs/BACKEND-DOMAIN.md`, `docs/DECISIONS.md`, and this
+  status log. Email, SMS, APNs/Firebase/Expo push, workers, queues, schedules, campaigns,
+  marketing notifications, chat, preferences, quiet hours, templates/CMS, and realtime delivery all
+  remain explicitly deferred.
+- New PostgreSQL HTTP coverage in `notification-http.postgres-test.ts` passed against a fresh
+  disposable PostgreSQL 16 container with all four existing migrations applied: 8 tests covering
+  self-ownership isolation, foreign-recipient non-leakage, bounded/deterministic pagination,
+  unread count before/after read, mark-read idempotency and `readAt` preservation, random and
+  foreign ID non-leakage, approved-device allow / missing-device deny / inactive-student deny /
+  instructor-on-student-route deny, instructor self-inbox ownership, enrollment producer creation,
+  correct student ownership, cross-tenant rejection, and retry/race duplicate prevention.
+
 Media Slice H (backend Media milestone audit, hardening, and final gate) validation passed — **Media
 milestone: APPROVED / CLOSED**:
 

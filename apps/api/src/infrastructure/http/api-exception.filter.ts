@@ -16,6 +16,8 @@ import { DeviceError } from '../../modules/devices/errors/device.errors';
 import { mapDeviceErrorToHttp } from '../../modules/devices/http/device-error-mapping';
 import { MediaError } from '../../modules/media/errors/media.errors';
 import { mapMediaErrorToHttp } from '../../modules/media/http/media-error-mapping';
+import { NotificationError } from '../../modules/notifications/errors/notification.errors';
+import { mapNotificationErrorToHttp } from '../../modules/notifications/http/notification-error-mapping';
 import { QuizError } from '../../modules/quizzes/errors/quiz.errors';
 import { mapQuizErrorToHttp } from '../../modules/quizzes/http/quiz-error-mapping';
 import { TenancyError } from '../../modules/tenancy/errors/tenancy.errors';
@@ -57,6 +59,10 @@ function mapException(exception: unknown): { status: number; body: ErrorResponse
 
   if (exception instanceof MediaError) {
     return mapMediaErrorToHttp(exception);
+  }
+
+  if (exception instanceof NotificationError) {
+    return mapNotificationErrorToHttp(exception);
   }
 
   if (exception instanceof TenancyError) {

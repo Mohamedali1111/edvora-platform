@@ -369,3 +369,11 @@ This log records durable product and architecture decisions. Dates use ISO forma
 - Decision: Platform Admin instructor onboarding, instructor tenant/student/enrollment APIs, and student enrollment reads use database-fresh authorization checks rather than trusting JWT tenant or role claims alone.
 - Reasoning: Tenant boundaries and enrollment grants are security-sensitive SaaS controls. Platform Admin operations must verify current platform role/status; instructor operations must verify current instructor role/status and active tenant membership; student enrollment reads must compose authenticated identity with approved student-device authorization.
 - Implications: `TenantStudent` remains the learner association, `Enrollment` remains course entitlement, activation-token delivery is still deferred, and course/content authorization must build on this boundary rather than embedding tenant, course, enrollment, or device state into JWTs.
+
+## DEC-0047: In-App Notification Foundation
+
+- Date: 2026-08-31
+- Status: Accepted
+- Decision: V1 notifications are provider-independent in-app records addressed to `User` through `Notification.recipientUserId`, with optional `tenantId` for tenant-scoped notifications and `readAt` as the per-recipient read state.
+- Reasoning: A principal-derived self-inbox gives students and instructors useful product notifications without committing to email, SMS, push providers, workers, campaigns, or realtime infrastructure.
+- Implications: Student notification reads must use both access-token and student-device guards. Clients never provide authoritative recipient or tenant identifiers for their own inbox. Trusted internal producers create notifications through `NotificationService`; arbitrary instructor-sent announcements and delivery-channel integrations remain deferred.

@@ -406,6 +406,7 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
   });
 
   async function clearTenancyData(): Promise<void> {
+    await prisma.client.notification.deleteMany();
     await prisma.client.securityEvent.deleteMany();
     await prisma.client.enrollment.deleteMany();
     await prisma.client.course.deleteMany();
