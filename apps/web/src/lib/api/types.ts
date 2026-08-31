@@ -292,7 +292,7 @@ export type VideoUploadIntent = {
 export type QuizStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export type QuizRevealAnswersPolicy = "NEVER" | "AFTER_SUBMISSION" | "AFTER_PASSING";
 
-/** GET /instructor/tenants/:tenantId/quizzes - a real, already-existing quiz list; Quiz authoring itself remains deferred to a future slice. */
+/** GET /instructor/tenants/:tenantId/quizzes and GET /instructor/tenants/:tenantId/quizzes/:quizId. */
 export type QuizSummary = {
   quizId: string;
   tenantId: string;
@@ -305,6 +305,99 @@ export type QuizSummary = {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Body for POST /instructor/tenants/:tenantId/quizzes. `status` is always server-derived (DRAFT). */
+export type CreateQuizRequest = {
+  title: string;
+  description?: string | null;
+  passingScorePercent?: number | null;
+  attemptLimit?: number | null;
+  revealAnswersPolicy?: QuizRevealAnswersPolicy;
+};
+
+/** Body for PATCH /instructor/tenants/:tenantId/quizzes/:quizId. Metadata only; lifecycle uses publish/archive endpoints. */
+export type UpdateQuizRequest = {
+  title?: string;
+  description?: string | null;
+  passingScorePercent?: number | null;
+  attemptLimit?: number | null;
+  revealAnswersPolicy?: QuizRevealAnswersPolicy;
+};
+
+export type QuestionType = "MULTIPLE_CHOICE" | "TRUE_FALSE";
+export type QuestionStatus = "ACTIVE" | "ARCHIVED";
+
+export type QuestionSummary = {
+  questionId: string;
+  quizId: string;
+  type: QuestionType;
+  prompt: string;
+  position: number;
+  points: string;
+  status: QuestionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type QuestionListResponse = {
+  items: QuestionSummary[];
+};
+
+/** Body for POST /instructor/tenants/:tenantId/quizzes/:quizId/questions. `position` is server-computed. */
+export type CreateQuestionRequest = {
+  type: QuestionType;
+  prompt: string;
+  points: number;
+};
+
+/** Body for PATCH .../questions/:questionId. Supported metadata only. */
+export type UpdateQuestionRequest = {
+  prompt?: string;
+  points?: number;
+};
+
+/** Body for POST .../questions/reorder. Must contain exactly the current active question IDs in final order. */
+export type ReorderQuestionsRequest = {
+  questionIds: string[];
+};
+
+export type QuestionOptionSummary = {
+  optionId: string;
+  questionId: string;
+  label: string | null;
+  text: string;
+  position: number;
+  isCorrect: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type QuestionOptionListResponse = {
+  items: QuestionOptionSummary[];
+};
+
+/** Body for POST .../questions/:questionId/options. `position` is server-computed. */
+export type CreateQuestionOptionRequest = {
+  label?: string | null;
+  text: string;
+  isCorrect?: boolean;
+};
+
+/**
+ * Body for PATCH .../options/:optionId. `isCorrect: true` is the frozen
+ * one-request radio-selection operation: the backend atomically clears sibling
+ * correctness and makes this option the sole correct answer for the question.
+ */
+export type UpdateQuestionOptionRequest = {
+  label?: string | null;
+  text?: string;
+  isCorrect?: boolean;
+};
+
+/** Body for POST .../options/reorder. Must contain exactly every current option ID for the question in final order. */
+export type ReorderQuestionOptionsRequest = {
+  optionIds: string[];
 };
 
 export type TenantStudentStatus = "ACTIVE" | "INACTIVE" | "REMOVED";

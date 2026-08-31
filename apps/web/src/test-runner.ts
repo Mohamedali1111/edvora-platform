@@ -28,3 +28,8 @@ import "./features/instructor/media/document-upload.test";
 import "./features/instructor/media/video-tus.test";
 import "./features/instructor/media/polling.test";
 import "./features/instructor/media/media-service.test";
+import "./features/instructor/quizzes/lifecycle.test";
+import "./features/instructor/quizzes/ordering.test";
+import "./features/instructor/quizzes/validation.test";
+import "./features/instructor/quizzes/error-mapping.test";
+import "./features/instructor/quizzes/quizzes-service.test";

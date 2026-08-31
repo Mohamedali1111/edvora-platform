@@ -1,5 +1,5 @@
-import { Placeholder } from "@/features/instructor/placeholder";
+import { QuizzesList } from "@/features/instructor/quizzes/quizzes-list";
 
 export default function QuizzesPage() {
-  return <Placeholder />;
+  return <QuizzesList />;
 }
