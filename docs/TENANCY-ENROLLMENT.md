@@ -177,6 +177,73 @@ Built directly on the Slice C entitlement chain — no new controller-level auth
 - **Idempotency**: completion attempts a `create` first (the common case). On the `(studentUserId, lessonId, enrollmentId)` unique-constraint conflict, it falls back to an `updateMany` guarded by `status: { not: COMPLETED }` — this is what makes a stale NOT_STARTED/STARTED row transition exactly once, an already-COMPLETED row return unchanged without re-stamping `completedAt`, and any number of concurrent duplicate requests converge to exactly one row, all without an explicit lock.
 - **Deliberately not implemented**: video watch-time/resume-position writes, quiz-derived completion, and persisted aggregate course-percentage fields — all explicitly out of this milestone's scope.
 
+## Instructor Course Progress Reporting (Backend V1 Completion)
+
+`GET /instructor/tenants/:tenantId/courses/:courseId/progress` closes the V1 promise of instructor
+progress visibility within their own tenant: one row per Enrollment for the Course, with a derived
+completion count/percentage and a last-activity timestamp. Read/reporting only — no new
+persistence, no BI infrastructure, no materialized aggregate. `progressPercent` is never persisted;
+it is computed at read time on every request from the same `LessonProgress` truth the student-facing
+read already uses.
+
+**Denominator (`totalLessons`).** Exactly the Lessons currently visible to a student — the identical
+predicate `StudentCourseAccessService` already applies for course-structure reads and manual
+completion (`Lesson.status === PUBLISHED`, its Section `PUBLISHED`, and within its
+`availableFrom`/`availableUntil` window as of now) — never a count of every historical Lesson row. A
+DRAFT/ARCHIVED Lesson, or one under an unpublished Section, was never something any student could
+complete, so it does not count against them; a not-yet-available or no-longer-available Lesson is
+excluded the same way it is excluded from what a student can currently see. This denominator is
+computed once per request from the Course's current Lesson set and shared by every row on that page
+— it therefore moves over time as Lessons publish/unpublish or enter/leave their availability
+window, a deliberate trade-off of matching live student-access semantics over a frozen historical
+count.
+
+**Numerator (`completedLessons`).** Existing `LessonProgress` truth only — a count of that
+Enrollment's `COMPLETED` rows whose Lesson is in the denominator's current Lesson set, so
+`completedLessons` can never exceed `totalLessons`. Never inferred from `QuizAttempt` existence,
+document access, or video playback.
+
+**Zero-denominator behavior.** When a Course currently has no visible Lessons, every row reads
+`completedLessons: 0`, `totalLessons: 0`, `progressPercent: 0` — never a division by zero, `NaN`, or
+`null`.
+
+**Historical Enrollment handling.** Reuses the same policy as Instructor Enrollment Visibility
+above rather than inventing a conflicting one: persisted Enrollment rows are listed as-is,
+`REVOKED`/`EXPIRED` included by default, with an optional `status` filter to narrow. Each row also
+carries the same `currentlyEffective` boolean (the Enrollment-row entitlement predicate only, not
+full student entitlement — see Instructor Enrollment Visibility above).
+
+**`lastActivityAt`.** The later of (a) the Enrollment's latest `LessonProgress.completedAt` across
+*all* of its progress rows — not scoped to the current Lesson set, so a completion on a Lesson that
+has since become unavailable/archived still counts as real past activity, even in the rare case
+where `totalLessons` has since dropped to 0 — and (b) the Enrollment's latest `QuizAttempt.updatedAt`
+(`QuizAttempt` rows are only ever touched at start and at submit/grade, so `updatedAt` is a real,
+already-persisted "last touched" signal covering both an attempt still in progress and one already
+graded). No `startedAt`/`lastAccessedAt`/watch-time field is used: those `LessonProgress` columns
+exist in the schema for a future slice but nothing in this codebase writes them today, so reading
+them would always yield `null`. No new tracking field was added.
+
+**Response shape.** `enrollmentId`, `status`, `currentlyEffective`, `startsAt`/`endsAt`/`createdAt`,
+a nested `student` contact object (`studentUserId`, `email`, `displayName`, `accountStatus` — the
+exact same boundary already approved for Enrollment Visibility, never broadened),
+`completedLessons`, `totalLessons`, `progressPercent`, `lastActivityAt`.
+
+**Authorization / tenant safety.** `assertInstructorTenantAccess`, then a tenant-scoped Course
+existence check (`COURSE_NOT_FOUND` otherwise, non-leaking). The Enrollment query's own `WHERE`
+always includes `tenantId` and `courseId`; the Lesson-set query is scoped the same way. No
+cross-tenant or cross-course aggregation is possible.
+
+**Query strategy (bounded, no N+1).** Tenant authorization, one Course existence check, one query
+for the Course's current Lesson-ID set, one paginated Enrollment query for the page, then — only
+when the page is non-empty — one grouped `LessonProgress` count aggregate scoped to the current
+Lesson set (skipped entirely when `totalLessons` is 0), one grouped `LessonProgress` max-`completedAt`
+aggregate, and one grouped `QuizAttempt` max-`updatedAt` aggregate. Every aggregate is a single
+`groupBy` keyed on the page's bounded `enrollmentId` list — none scale per student or per Lesson.
+
+**Pagination/ordering.** The existing bounded `limit`/`offset` contract, `createdAt` descending /
+`id` ascending — newest Enrollment first, stable tie-break, matching every other instructor list
+route. No `hasMore` change here, reserved for a future API-readiness slice.
+
 ## Concurrency And Integrity
 
 The implementation relies on existing PostgreSQL uniqueness and foreign-key constraints plus transactions:

@@ -317,3 +317,48 @@ Course/Lesson chain — never accepted as client-supplied values. A foreign/rand
 another student's real Attempt both collapse to the same `QuizAttemptNotFoundError` (404),
 matching this codebase's established IDOR-avoidance convention (no existence leakage between
 "does not exist" and "exists but is not yours").
+
+## Instructor Attempt Results Reporting (Backend V1 Completion)
+
+`GET /instructor/tenants/:tenantId/quizzes/:quizId/attempts` is the instructor-facing counterpart
+to the student attempt flow above: a paginated, aggregate-only results report for a Quiz, not a new
+grading or authoring surface. Every Attempt for the Quiz is listed, `IN_PROGRESS` included — an
+instructor genuinely benefits from seeing an attempt underway, not only finished ones.
+`status` is read straight from the persisted `QuizAttemptStatus` column
+(`IN_PROGRESS`/`SUBMITTED`/`GRADED`/`ABANDONED`); nothing is fabricated. `scorePoints`, `maxPoints`,
+`percentage`, and `passed` are simply `null` on the response for any Attempt the grading step in
+`submitAttempt` has not yet populated.
+
+**Historical grading integrity.** Every score/max/percentage/passed value is read directly off the
+persisted `QuizAttempt` row — the exact snapshot `submitAttempt` computed and stored at that
+Attempt's own grading time from that Attempt's own frozen `QuizAttemptAnswer` snapshots (see
+"Snapshot behavior" and "Scoring" above). This reporting read never re-grades and never re-joins the
+live `Question`/`QuestionOption` state: a later instructor edit to a PUBLISHED Quiz's Questions or
+Options — including one the published-Quiz mutation-safety invariant allows — has no way to reach or
+alter an already-persisted Attempt row. `percentage` is derived at read time from `scorePoints`/
+`maxPoints` only (never persisted, so it can never drift), `null` whenever either is `null` or
+`maxPoints` is zero — the identical rule the student-facing `StudentQuizAttemptResult` already uses.
+
+**Scope.** Aggregate reporting only for this slice. The response never includes
+`QuizAttemptAnswer`/per-question detail, the answer-key (`correctAnswerSnapshot`), or scoring
+internals (`pointsAwarded`/`pointsPossible`) — those remain backend/student-attempt-owner-only per
+DEC-0025. Per-question instructor detail can be added later if Instructor Web genuinely needs it;
+this slice does not build it speculatively.
+
+**Response shape.** `attemptId`, `quizId`, `enrollmentId`, a nested `student` contact object
+(`studentUserId`, `email`, `displayName`, `accountStatus` — the same boundary already approved for
+Enrollment Visibility), `status`, `attemptNumber`, `scorePoints`, `maxPoints`, `percentage`,
+`passed`, `startedAt`, `submittedAt`.
+
+**Filters.** Optional `studentUserId` and `passed` — both plain relational `WHERE` clauses, not
+validated against a separate existence check; an unmatched filter value safely yields an empty page
+(no existence-leakage risk, since it reveals nothing beyond "zero Attempts").
+
+**Authorization / tenant safety.** `assertInstructorTenantAccess`, then a tenant-scoped Quiz
+existence check (`QUIZ_NOT_FOUND` otherwise, non-leaking — a random UUID and a real Quiz belonging
+to a different tenant both collapse to the same error). The Attempt query's own `WHERE` always
+includes both `tenantId` and `quizId`.
+
+**Pagination/ordering.** The existing bounded `limit`/`offset` contract, `createdAt` descending /
+`id` ascending — newest Attempt first, stable tie-break. One `select`-projected, bounded query for
+the page itself; no N+1.

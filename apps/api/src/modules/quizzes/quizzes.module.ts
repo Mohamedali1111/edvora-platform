@@ -13,6 +13,7 @@ import { InstructorQuestionOptionController } from './http/instructor-question-o
 import { InstructorQuizController } from './http/instructor-quiz.controller';
 import { StudentQuizAttemptController } from './http/student-quiz-attempt.controller';
 import { StudentQuizController } from './http/student-quiz.controller';
+import { InstructorQuizAttemptService } from './services/instructor-quiz-attempt.service';
 import { QuestionOptionService } from './services/question-option.service';
 import { QuestionService } from './services/question.service';
 import { QuizService } from './services/quiz.service';
@@ -41,7 +42,14 @@ import { StudentQuizService } from './services/student-quiz.service';
     StudentQuizController,
     StudentQuizAttemptController,
   ],
-  providers: [QuizService, QuestionService, QuestionOptionService, StudentQuizService, StudentQuizAttemptService],
+  providers: [
+    QuizService,
+    QuestionService,
+    QuestionOptionService,
+    StudentQuizService,
+    StudentQuizAttemptService,
+    InstructorQuizAttemptService,
+  ],
   exports: [QuizService, QuestionService, QuestionOptionService],
 })
 export class QuizzesModule {}

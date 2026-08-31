@@ -5,13 +5,22 @@ import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-princ
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
+import { ListQuizAttemptsQueryDto } from '../dto/list-quiz-attempts-query.dto';
 import { CreateQuizDto, UpdateQuizMetadataDto } from '../dto/quiz.dto';
 import { QuizIdParamDto } from '../dto/quiz-params.dto';
+import { InstructorQuizAttemptService } from '../services/instructor-quiz-attempt.service';
 import { QuizService } from '../services/quiz.service';
+import type { InstructorQuizAttemptSummary } from '../types/instructor-quiz-attempt.types';
 import type { QuizSummary } from '../types/quiz.types';
 
 type QuizListResponse = {
   items: QuizSummary[];
+  limit: number;
+  offset: number;
+};
+
+type InstructorQuizAttemptListResponse = {
+  items: InstructorQuizAttemptSummary[];
   limit: number;
   offset: number;
 };
@@ -27,7 +36,10 @@ const QUIZ_THROTTLE = {
 @UseGuards(ThrottlerGuard, AccessTokenGuard)
 @Throttle(QUIZ_THROTTLE)
 export class InstructorQuizController {
-  constructor(private readonly quizzes: QuizService) {}
+  constructor(
+    private readonly quizzes: QuizService,
+    private readonly attempts: InstructorQuizAttemptService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -107,5 +119,29 @@ export class InstructorQuizController {
     @Param() params: QuizIdParamDto,
   ): Promise<QuizSummary> {
     return this.quizzes.archiveQuiz(principal, params.tenantId, params.quizId);
+  }
+
+  @Get(':quizId/attempts')
+  @HttpCode(HttpStatus.OK)
+  async attemptsReport(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: QuizIdParamDto,
+    @Query() query: ListQuizAttemptsQueryDto,
+  ): Promise<InstructorQuizAttemptListResponse> {
+    const limit = query.limit ?? 25;
+    const offset = query.offset ?? 0;
+    return {
+      items: await this.attempts.listAttempts({
+        principal,
+        tenantId: params.tenantId,
+        quizId: params.quizId,
+        studentUserId: query.studentUserId,
+        passed: query.passed,
+        limit,
+        offset,
+      }),
+      limit,
+      offset,
+    };
   }
 }

@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate), explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson, and Quiz — including the concurrency-safe invariant that a `PUBLISHED` Quiz's aggregate publishability is re-validated, transactionally and behind a Quiz-level advisory lock, after every subsequent authoring mutation capable of affecting it — and the Backend V1 Completion Enrollment Visibility Slice (instructor course-roster and student-enrollment-history reads) are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration is not implemented yet.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate), explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson, and Quiz — including the concurrency-safe invariant that a `PUBLISHED` Quiz's aggregate publishability is re-validated, transactionally and behind a Quiz-level advisory lock, after every subsequent authoring mutation capable of affecting it — the Backend V1 Completion Enrollment Visibility Slice (instructor course-roster and student-enrollment-history reads), and the Backend V1 Completion Instructor Progress & Quiz Results Reporting Slice (derived, read-only instructor course-progress and Quiz attempt-results reports) are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration is not implemented yet.
 
 Current media update: Media Slice D is completed, and the student DOCUMENT Lesson access route issues
 a short-lived Cloudflare R2/S3 presigned GET for the finalized READY object. Documents are locked to
@@ -870,6 +870,97 @@ Backend V1 Completion — Enrollment Visibility Slice validation passed:
 - No migration was required, requested, or added.
 - Disposable PostgreSQL 16 containers were created and removed for validation; the unrelated
   `mini-inventory-system-db-1` container was not touched.
+
+Backend V1 Completion — Instructor Progress & Quiz Results Reporting validation passed:
+
+- Confirmed repository started clean at `707f793 feat(tenancy): add instructor enrollment
+  visibility`.
+- Closed the remaining explicit V1 promise (instructor progress visibility within their tenant
+  boundary) as a read/reporting layer only, on top of already-implemented persistence
+  (`Enrollment`, `LessonProgress`, `QuizAttempt`) — no new persistence, BI infrastructure,
+  materialized aggregate, or queue.
+- Added `GET /instructor/tenants/:tenantId/courses/:courseId/progress`
+  (`CoursesModule`/`CourseProgressService`): one row per Enrollment for the Course, with
+  `completedLessons`/`totalLessons`/`progressPercent` derived at read time (never persisted).
+  `totalLessons` is exactly the Lesson set currently visible to a student — the same
+  `StudentCourseAccessService` predicate (`PUBLISHED` Lesson, `PUBLISHED` Section, within its
+  availability window) already used for course-structure reads and manual completion — never
+  every historical Lesson row, so DRAFT/ARCHIVED Lessons and ones outside their availability
+  window are correctly excluded rather than silently counted as student failures.
+  `completedLessons` counts only existing `COMPLETED` `LessonProgress` rows scoped to that same
+  Lesson set (never inferred from QuizAttempt existence, document access, or video playback).
+  Zero-Lesson Courses deterministically read `0`/`0`/`0` for every row — never a division by
+  zero, `NaN`, or `null`. Enrollment history (`REVOKED`/`EXPIRED` included by default, `status`
+  filter to narrow) reuses the Enrollment Visibility Slice's exact policy rather than a new one.
+  `lastActivityAt` is the later of the Enrollment's latest `LessonProgress.completedAt` (all
+  rows, not Lesson-set-scoped, so a completion on a now-archived Lesson still counts) and its
+  latest `QuizAttempt.updatedAt` (touched only at start and submit/grade) — no new tracking
+  field; the schema's unused `startedAt`/`lastAccessedAt`/watch-time `LessonProgress` columns
+  were confirmed never written anywhere in this codebase and were deliberately not read.
+- Added `GET /instructor/tenants/:tenantId/quizzes/:quizId/attempts`
+  (`QuizzesModule`/`InstructorQuizAttemptService`): every Attempt for the Quiz, `IN_PROGRESS`
+  included, `status` read straight from the persisted `QuizAttemptStatus` column (nothing
+  fabricated). Every `scorePoints`/`maxPoints`/`percentage`/`passed` value is read directly off
+  the persisted `QuizAttempt` row — the exact historical snapshot `submitAttempt` computed and
+  stored at that Attempt's own grading time — confirmed by a dedicated test that edits the live
+  Question's points after grading and re-reads the report: the historical result is unchanged.
+  `percentage` is derived at read time (never persisted), `null` whenever ungraded or `maxPoints`
+  is zero, mirroring `StudentQuizAttemptResult`'s identical rule. `QuizAttemptAnswer`/per-question
+  detail and the answer-key are never included — confirmed by a test asserting the raw HTTP
+  response body contains none of `correctAnswerSnapshot`/`questionSnapshot`/`optionsSnapshot`/
+  `pointsAwarded`/`pointsPossible`. Optional `studentUserId`/`passed` filters were added as plain
+  relational `WHERE` clauses (an unmatched value safely yields an empty page).
+- Both routes reuse the exact `StudentContactSummary` instructor/student-management PII boundary
+  already approved for Enrollment Visibility (`studentUserId`, `email`, `displayName`,
+  `accountStatus` only) and the existing bounded `limit`/`offset` pagination contract with
+  deterministic `createdAt` descending / `id` ascending ordering — no `hasMore` change, reserved
+  for a future API-readiness slice. Neither route exposes auth/session/device data, SecurityEvent
+  internals, media/provider information, or raw Prisma relations.
+- Both endpoints reuse `TenantAuthorizationService.assertInstructorTenantAccess` plus a
+  tenant-scoped Course/Quiz existence check (`COURSE_NOT_FOUND`/`QUIZ_NOT_FOUND`, non-leaking —
+  a random UUID and a real foreign-tenant Course/Quiz both collapse to the same error); every
+  list query's own `WHERE` always includes `tenantId` (plus `courseId`/`quizId`), so no
+  cross-tenant or cross-course/cross-quiz aggregation is possible.
+- Query efficiency: no per-student or per-lesson queries. Course progress uses a bounded, fixed
+  number of queries per page — tenant auth, one Course check, one Lesson-set query, one paginated
+  Enrollment query, then (only when the page is non-empty) three grouped `groupBy` aggregates
+  keyed on the page's bounded `enrollmentId` list. Quiz attempts reporting uses one `select`-
+  projected, bounded query for the page. Index assessment: existing indexes
+  (`lessons_course_id_status_idx`, `lesson_progress_enrollment_id_status_idx`,
+  `quiz_attempts_enrollment_id_created_at_idx`, and the `quiz_attempts_quiz_id_student_user_id_
+  attempt_number_key` unique index's usable `quizId`-leading prefix) are sufficient for V1 scale;
+  a dedicated `(tenantId, quizId, createdAt)` index would only help at materially larger
+  per-Quiz attempt volumes and is documented as a P1 future improvement, not a current blocker —
+  no migration was added.
+- Did not modify `LessonProgress` write semantics, Student Course progress behavior, QuizAttempt
+  start/save/submit/grading behavior, attempt snapshots, Enrollment Visibility, or Course/Quiz
+  lifecycle — confirmed by running their existing PostgreSQL suites unmodified alongside the two
+  new ones.
+- Added `course-progress-http.postgres-test.ts` (6 tests: denominator/numerator/percentage
+  correctness including DRAFT/ARCHIVED/unpublished-section/availability-window exclusion and
+  `lastActivityAt` from both completions and quiz activity; zero-denominator determinism; no
+  cross-student/cross-enrollment/cross-course/cross-tenant contamination; REVOKED/EXPIRED history
+  with a status filter; deterministic ordering and pagination; foreign/random Course and foreign
+  instructor non-leaking denial) and `instructor-quiz-attempts-http.postgres-test.ts` (5 tests:
+  tenant/Quiz scoping with correct student summary and IN_PROGRESS inclusion; historical scoring
+  integrity against a later live Question edit; answer-key/snapshot absence from the raw HTTP
+  response; pagination/ordering/`studentUserId`/`passed` filters; foreign/random Quiz and foreign
+  instructor non-leaking denial).
+- The complete PostgreSQL backend suite — 18 suites, 262 tests, spanning auth/device/tenancy/
+  course/quiz/media/notifications — was run twice against a fresh disposable PostgreSQL 16
+  database (all four existing migrations applied from empty) for determinism, since these are
+  aggregation/reporting reads: 262/262 both runs.
+- API lint, typecheck, and unit tests (93/93) passed. API build, root `corepack pnpm check`
+  (install, prisma generate, lint, typecheck, test, API build, web build), and `git diff --check`
+  all passed.
+- No migration was required, requested, or added.
+- Disposable PostgreSQL 16 containers were created and removed for validation; the unrelated
+  `mini-inventory-system-db-1` container was not touched.
+- Carried forward, not fixed (explicitly out of this slice's scope per instruction): the
+  pre-existing `tenancy-http.postgres-test.ts` `clearTenancyData()` gap where two tests' hardcoded
+  literal tenant slugs (`new-academy`, `race-academy`) do not match the cleanup's `tenancy-test-`
+  prefix filter, so they leak across repeated runs against a non-fresh database. Still tracked for
+  the Backend Final Gate/test-hygiene pass.
 
 ## Exact Recommended Next Step
 

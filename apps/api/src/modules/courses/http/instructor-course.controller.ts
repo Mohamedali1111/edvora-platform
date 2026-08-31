@@ -5,13 +5,22 @@ import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-princ
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
+import { CourseProgressQueryDto } from '../dto/course-progress-query.dto';
 import { CourseIdParamDto } from '../dto/course-params.dto';
 import { CreateCourseDto, UpdateCourseMetadataDto } from '../dto/course.dto';
+import { CourseProgressService } from '../services/course-progress.service';
 import { CourseService } from '../services/course.service';
+import type { CourseProgressRow } from '../types/course-progress.types';
 import type { CourseSummary } from '../types/course.types';
 
 type CourseListResponse = {
   items: CourseSummary[];
+  limit: number;
+  offset: number;
+};
+
+type CourseProgressListResponse = {
+  items: CourseProgressRow[];
   limit: number;
   offset: number;
 };
@@ -27,7 +36,10 @@ const COURSE_THROTTLE = {
 @UseGuards(ThrottlerGuard, AccessTokenGuard)
 @Throttle(COURSE_THROTTLE)
 export class InstructorCourseController {
-  constructor(private readonly courses: CourseService) {}
+  constructor(
+    private readonly courses: CourseService,
+    private readonly progress: CourseProgressService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -105,5 +117,28 @@ export class InstructorCourseController {
     @Param() params: CourseIdParamDto,
   ): Promise<CourseSummary> {
     return this.courses.archiveCourse(principal, params.tenantId, params.courseId);
+  }
+
+  @Get(':courseId/progress')
+  @HttpCode(HttpStatus.OK)
+  async progressReport(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+    @Query() query: CourseProgressQueryDto,
+  ): Promise<CourseProgressListResponse> {
+    const limit = query.limit ?? 25;
+    const offset = query.offset ?? 0;
+    return {
+      items: await this.progress.listCourseProgress({
+        principal,
+        tenantId: params.tenantId,
+        courseId: params.courseId,
+        status: query.status,
+        limit,
+        offset,
+      }),
+      limit,
+      offset,
+    };
   }
 }
