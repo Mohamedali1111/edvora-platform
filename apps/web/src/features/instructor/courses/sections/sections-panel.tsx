@@ -12,6 +12,7 @@ import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { CreateSectionDialog } from "./create-section-dialog";
 import { EditSectionDialog } from "./edit-section-dialog";
 import { SectionLifecycleConfirmDialog } from "./section-lifecycle-confirm-dialog";
+import { LessonsPanel } from "./lessons/lessons-panel";
 
 const SECTION_STATUS_KEY: Record<SectionStatus, TranslationKey> = {
   DRAFT: "sections.statusDraft",
@@ -37,6 +38,7 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
   const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
   const [reordering, setReordering] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
 
   async function handleMove(section: CourseSectionSummary, direction: "earlier" | "later") {
     if (reordering || state.status !== "ready") {
@@ -109,67 +111,86 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
             const canMoveEarlier = canReorderSection(section.status) && moveEarlier(order, section.sectionId) !== null;
             const canMoveLater = canReorderSection(section.status) && moveLater(order, section.sectionId) !== null;
 
+            const isExpanded = expandedSectionId === section.sectionId;
+
             return (
-              <li className="section-row" key={section.sectionId}>
-                <div className="section-row-main">
-                  <strong>{section.title}</strong>
-                  {section.description ? <span className="table-secondary-text">{section.description}</span> : null}
+              <li className="section-row-group" key={section.sectionId}>
+                <div className="section-row">
+                  <div className="section-row-main">
+                    <strong>{section.title}</strong>
+                    {section.description ? <span className="table-secondary-text">{section.description}</span> : null}
+                  </div>
+
+                  <span className={`status-badge status-badge-${section.status.toLowerCase()}`}>
+                    {t(SECTION_STATUS_KEY[section.status])}
+                  </span>
+
+                  <div className="section-row-actions">
+                    {canReorderSection(section.status) ? (
+                      <>
+                        <button
+                          className="ghost-button compact"
+                          type="button"
+                          onClick={() => handleMove(section, "earlier")}
+                          disabled={reordering || !canMoveEarlier}
+                          aria-label={`${t("sections.moveEarlierAction")}: ${section.title}`}
+                        >
+                          {t("sections.moveEarlierAction")}
+                        </button>
+                        <button
+                          className="ghost-button compact"
+                          type="button"
+                          onClick={() => handleMove(section, "later")}
+                          disabled={reordering || !canMoveLater}
+                          aria-label={`${t("sections.moveLaterAction")}: ${section.title}`}
+                        >
+                          {t("sections.moveLaterAction")}
+                        </button>
+                      </>
+                    ) : null}
+
+                    {canEditSectionMetadata(section.status) ? (
+                      <button className="ghost-button compact" type="button" onClick={() => setEditingSection(section)}>
+                        {t("sections.editAction")}
+                      </button>
+                    ) : null}
+
+                    {canPublishSection(section.status) ? (
+                      <button
+                        className="secondary-button compact"
+                        type="button"
+                        onClick={() => setLifecycleTarget({ action: "publish", section })}
+                      >
+                        {t("courses.publishAction")}
+                      </button>
+                    ) : null}
+
+                    {canArchiveSection(section.status) ? (
+                      <button
+                        className="secondary-button compact"
+                        type="button"
+                        onClick={() => setLifecycleTarget({ action: "archive", section })}
+                      >
+                        {t("courses.archiveAction")}
+                      </button>
+                    ) : null}
+
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      onClick={() => setExpandedSectionId(isExpanded ? null : section.sectionId)}
+                      aria-expanded={isExpanded}
+                    >
+                      {isExpanded ? t("sections.hideLessonsAction") : t("sections.showLessonsAction")}
+                    </button>
+                  </div>
                 </div>
 
-                <span className={`status-badge status-badge-${section.status.toLowerCase()}`}>
-                  {t(SECTION_STATUS_KEY[section.status])}
-                </span>
-
-                <div className="section-row-actions">
-                  {canReorderSection(section.status) ? (
-                    <>
-                      <button
-                        className="ghost-button compact"
-                        type="button"
-                        onClick={() => handleMove(section, "earlier")}
-                        disabled={reordering || !canMoveEarlier}
-                        aria-label={`${t("sections.moveEarlierAction")}: ${section.title}`}
-                      >
-                        {t("sections.moveEarlierAction")}
-                      </button>
-                      <button
-                        className="ghost-button compact"
-                        type="button"
-                        onClick={() => handleMove(section, "later")}
-                        disabled={reordering || !canMoveLater}
-                        aria-label={`${t("sections.moveLaterAction")}: ${section.title}`}
-                      >
-                        {t("sections.moveLaterAction")}
-                      </button>
-                    </>
-                  ) : null}
-
-                  {canEditSectionMetadata(section.status) ? (
-                    <button className="ghost-button compact" type="button" onClick={() => setEditingSection(section)}>
-                      {t("sections.editAction")}
-                    </button>
-                  ) : null}
-
-                  {canPublishSection(section.status) ? (
-                    <button
-                      className="secondary-button compact"
-                      type="button"
-                      onClick={() => setLifecycleTarget({ action: "publish", section })}
-                    >
-                      {t("courses.publishAction")}
-                    </button>
-                  ) : null}
-
-                  {canArchiveSection(section.status) ? (
-                    <button
-                      className="secondary-button compact"
-                      type="button"
-                      onClick={() => setLifecycleTarget({ action: "archive", section })}
-                    >
-                      {t("courses.archiveAction")}
-                    </button>
-                  ) : null}
-                </div>
+                {isExpanded ? (
+                  <div className="section-lessons-area">
+                    <LessonsPanel tenantId={tenantId} courseId={courseId} sectionId={section.sectionId} />
+                  </div>
+                ) : null}
               </li>
             );
           })}

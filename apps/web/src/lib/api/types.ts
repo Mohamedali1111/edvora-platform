@@ -134,6 +134,110 @@ export type ReorderSectionsRequest = {
   sectionIds: string[];
 };
 
+export type LessonType = "VIDEO" | "DOCUMENT" | "QUIZ";
+export type LessonStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+
+export type LessonSummary = {
+  lessonId: string;
+  tenantId: string;
+  courseId: string;
+  sectionId: string;
+  title: string;
+  description: string | null;
+  type: LessonType;
+  /** Server-authoritative order within the section - see CourseSectionSummary.position for the same gap/retention caveat. */
+  position: number;
+  status: LessonStatus;
+  availableFrom: string | null;
+  availableUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Exactly one of these three is non-null, matching `type`. Never editable after creation - only set at POST time. */
+  videoAssetId: string | null;
+  documentAssetId: string | null;
+  quizId: string | null;
+};
+
+/** Response for GET .../sections/:sectionId/lessons and the reorder endpoint. Unpaginated - every lesson in the section in one response, including ARCHIVED ones. */
+export type LessonListResponse = {
+  items: LessonSummary[];
+};
+
+/**
+ * Body for POST .../sections/:sectionId/lessons. The frozen backend has no
+ * "create a lesson shell, bind content later" workflow: exactly one of
+ * `videoAssetId`/`documentAssetId`/`quizId` must be supplied and must match
+ * `type`, referencing an already-existing tenant asset/quiz. `position` is
+ * always server-computed - never client-supplied.
+ */
+export type CreateLessonRequest = {
+  title: string;
+  description?: string;
+  type: LessonType;
+  videoAssetId?: string;
+  documentAssetId?: string;
+  quizId?: string;
+  availableFrom?: string;
+  availableUntil?: string;
+};
+
+/** Body for PATCH .../lessons/:lessonId. Metadata + availability only - `type` and the content reference are immutable after creation. */
+export type UpdateLessonRequest = {
+  title?: string;
+  description?: string | null;
+  availableFrom?: string | null;
+  availableUntil?: string | null;
+};
+
+/** Body for POST .../sections/:sectionId/lessons/reorder. Scoped to one section - must contain exactly that section's current non-ARCHIVED lesson IDs, in desired order. */
+export type ReorderLessonsRequest = {
+  lessonIds: string[];
+};
+
+export type AssetProcessingStatus = "UPLOADING" | "PROCESSING" | "READY" | "FAILED" | "ARCHIVED";
+
+/** GET /instructor/tenants/:tenantId/media/videos - a real, already-existing asset list; this frontend never uploads or processes video. */
+export type VideoAssetSummary = {
+  videoAssetId: string;
+  tenantId: string;
+  uploadedByUserId: string;
+  processingStatus: AssetProcessingStatus;
+  durationSeconds: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET /instructor/tenants/:tenantId/media/documents - a real, already-existing asset list; this frontend never uploads or processes documents. */
+export type DocumentAssetSummary = {
+  documentAssetId: string;
+  tenantId: string;
+  uploadedByUserId: string;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: string;
+  processingStatus: AssetProcessingStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type QuizStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type QuizRevealAnswersPolicy = "NEVER" | "AFTER_SUBMISSION" | "AFTER_PASSING";
+
+/** GET /instructor/tenants/:tenantId/quizzes - a real, already-existing quiz list; Quiz authoring itself remains deferred to a future slice. */
+export type QuizSummary = {
+  quizId: string;
+  tenantId: string;
+  title: string;
+  description: string | null;
+  status: QuizStatus;
+  passingScorePercent: string | null;
+  attemptLimit: number | null;
+  revealAnswersPolicy: QuizRevealAnswersPolicy;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TenantStudentStatus = "ACTIVE" | "INACTIVE" | "REMOVED";
 
 export type TenantStudentSummary = {
