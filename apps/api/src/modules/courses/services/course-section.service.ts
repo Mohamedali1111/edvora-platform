@@ -8,6 +8,7 @@ import { TenantAuthorizationService } from '../../tenancy/services/tenant-author
 import {
   CourseNotFoundError,
   InvalidSectionReorderError,
+  InvalidSectionLifecycleTransitionError,
   SectionNotFoundError,
   SectionPositionConflictError,
 } from '../errors/course.errors';
@@ -174,12 +175,68 @@ export class CourseSectionService {
         return toSectionSummary(section);
       }
 
-      const archived = await tx.courseSection.update({
-        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+      await tx.courseSection.updateMany({
+        where: {
+          id: sectionId,
+          courseId,
+          tenantId,
+          status: { in: [SectionStatus.DRAFT, SectionStatus.PUBLISHED] },
+        },
         data: { status: SectionStatus.ARCHIVED },
       });
 
+      const archived = await tx.courseSection.findUniqueOrThrow({
+        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+      });
+
       return toSectionSummary(archived);
+    });
+  }
+
+  async publishSection(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    courseId: string,
+    sectionId: string,
+  ): Promise<CourseSectionSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const section = await tx.courseSection.findUnique({
+        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!section) {
+        throw new SectionNotFoundError();
+      }
+
+      if (section.status === SectionStatus.ARCHIVED) {
+        throw new InvalidSectionLifecycleTransitionError();
+      }
+
+      if (section.status === SectionStatus.DRAFT) {
+        const updated = await tx.courseSection.updateMany({
+          where: { id: sectionId, courseId, tenantId, status: SectionStatus.DRAFT },
+          data: { status: SectionStatus.PUBLISHED },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.courseSection.findUniqueOrThrow({
+            where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+            select: { status: true },
+          });
+          if (current.status === SectionStatus.ARCHIVED) {
+            throw new InvalidSectionLifecycleTransitionError();
+          }
+        }
+      }
+
+      const published = await tx.courseSection.findUniqueOrThrow({
+        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+      });
+
+      return toSectionSummary(published);
     });
   }
 

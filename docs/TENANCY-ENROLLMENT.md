@@ -17,7 +17,9 @@ Implemented:
 Not implemented:
 
 - Video, document, or quiz authoring/upload APIs.
-- Protected content delivery (playback authorization, document access, quiz execution).
+- Protected content delivery is implemented for student quiz content/attempts, document download
+  capability issuance, and Bunny video playback capability issuance; further player/frontend
+  integration remains deferred.
 - Video watch-time/resume-position tracking, quiz-derived progress, and persisted aggregate course-percentage fields.
 - Student/instructor frontend or mobile UI.
 - Email delivery for activation links.

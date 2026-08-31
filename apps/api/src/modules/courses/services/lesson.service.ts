@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { LessonStatus, LessonType } from '../../../../.generated/prisma/client';
+import { AssetProcessingStatus, LessonStatus, LessonType, QuizStatus } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -7,7 +7,9 @@ import { isKnownUniqueViolation } from '../../tenancy/services/prisma-error.util
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
 import {
   InvalidLessonReorderError,
+  InvalidLessonLifecycleTransitionError,
   InvalidLessonTypeReferenceError,
+  LessonContentNotReadyError,
   LessonNotFoundError,
   LessonPositionConflictError,
   LessonReferenceNotFoundError,
@@ -268,13 +270,78 @@ export class LessonService {
         return toLessonSummary(lesson);
       }
 
-      const archived = await tx.lesson.update({
-        where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
+      await tx.lesson.updateMany({
+        where: {
+          id: lessonId,
+          sectionId,
+          courseId,
+          tenantId,
+          status: { in: [LessonStatus.DRAFT, LessonStatus.PUBLISHED] },
+        },
         data: { status: LessonStatus.ARCHIVED },
+      });
+
+      const archived = await tx.lesson.findUniqueOrThrow({
+        where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
         include: LESSON_DETAIL_INCLUDE,
       });
 
       return toLessonSummary(archived);
+    });
+  }
+
+  async publishLesson(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+  ): Promise<LessonSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const lesson = await tx.lesson.findFirst({
+        where: { id: lessonId, sectionId, courseId, tenantId },
+        include: {
+          videoLesson: { include: { videoAsset: { select: { processingStatus: true } } } },
+          documentLesson: { include: { documentAsset: { select: { processingStatus: true } } } },
+          quizLesson: { include: { quiz: { select: { status: true } } } },
+        },
+      });
+
+      if (!lesson) {
+        throw new LessonNotFoundError();
+      }
+
+      if (lesson.status === LessonStatus.ARCHIVED) {
+        throw new InvalidLessonLifecycleTransitionError();
+      }
+
+      assertLessonPublishable(lesson);
+
+      if (lesson.status === LessonStatus.DRAFT) {
+        const updated = await tx.lesson.updateMany({
+          where: { id: lessonId, sectionId, courseId, tenantId, status: LessonStatus.DRAFT },
+          data: { status: LessonStatus.PUBLISHED },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.lesson.findUniqueOrThrow({
+            where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
+            select: { status: true },
+          });
+          if (current.status === LessonStatus.ARCHIVED) {
+            throw new InvalidLessonLifecycleTransitionError();
+          }
+        }
+      }
+
+      const published = await tx.lesson.findUniqueOrThrow({
+        where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
+        include: LESSON_DETAIL_INCLUDE,
+      });
+
+      return toLessonSummary(published);
     });
   }
 
@@ -398,6 +465,33 @@ function assertSingleTypeReference(input: {
   if (!referenceMatchesType) {
     throw new InvalidLessonTypeReferenceError();
   }
+}
+
+function assertLessonPublishable(lesson: {
+  type: LessonType;
+  videoLesson: { videoAsset: { processingStatus: AssetProcessingStatus } } | null;
+  documentLesson: { documentAsset: { processingStatus: AssetProcessingStatus } } | null;
+  quizLesson: { quiz: { status: QuizStatus } } | null;
+}): void {
+  if (
+    lesson.type === LessonType.VIDEO &&
+    lesson.videoLesson?.videoAsset.processingStatus === AssetProcessingStatus.READY
+  ) {
+    return;
+  }
+
+  if (
+    lesson.type === LessonType.DOCUMENT &&
+    lesson.documentLesson?.documentAsset.processingStatus === AssetProcessingStatus.READY
+  ) {
+    return;
+  }
+
+  if (lesson.type === LessonType.QUIZ && lesson.quizLesson?.quiz.status === QuizStatus.PUBLISHED) {
+    return;
+  }
+
+  throw new LessonContentNotReadyError();
 }
 
 function toLessonSummary(row: LessonWithDetails): LessonSummary {

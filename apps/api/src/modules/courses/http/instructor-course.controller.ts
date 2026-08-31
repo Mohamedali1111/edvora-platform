@@ -88,4 +88,22 @@ export class InstructorCourseController {
       visibility: body.visibility,
     });
   }
+
+  @Post(':courseId/publish')
+  @HttpCode(HttpStatus.OK)
+  async publish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+  ): Promise<CourseSummary> {
+    return this.courses.publishCourse(principal, params.tenantId, params.courseId);
+  }
+
+  @Post(':courseId/archive')
+  @HttpCode(HttpStatus.OK)
+  async archive(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+  ): Promise<CourseSummary> {
+    return this.courses.archiveCourse(principal, params.tenantId, params.courseId);
+  }
 }

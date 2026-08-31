@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), and Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate) are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration and course lifecycle transitions are not implemented yet.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate), and explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson, and Quiz — including the concurrency-safe invariant that a `PUBLISHED` Quiz's aggregate publishability is re-validated, transactionally and behind a Quiz-level advisory lock, after every subsequent authoring mutation capable of affecting it — are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration is not implemented yet.
 
 Current media update: Media Slice D is completed, and the student DOCUMENT Lesson access route issues
 a short-lived Cloudflare R2/S3 presigned GET for the finalized READY object. Documents are locked to
@@ -93,6 +93,23 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
 - Implemented the backend tenancy/enrollment foundation for Platform Admin instructor creation/list/detail, instructor tenant context, instructor tenant-scoped student association/list/detail, enrollment create/revoke, and student enrollment reads behind device authorization.
 - Documented implemented tenancy/enrollment behavior in `docs/TENANCY-ENROLLMENT.md`.
 - Implemented Instructor Course Core Slice A: create course, paginated tenant-scoped course list, course detail, and safe metadata update for title, description, thumbnail asset reference, and visibility.
+- Implemented explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson,
+  and Quiz. Dedicated publish/archive endpoints preserve the existing tenant authorization boundary
+  and never accept `status` through ordinary metadata DTOs. Supported transitions are
+  `DRAFT -> PUBLISHED`, `DRAFT -> ARCHIVED`, and `PUBLISHED -> ARCHIVED`; publish on
+  `PUBLISHED` and archive on `ARCHIVED` are idempotent, while `ARCHIVED -> PUBLISHED` is rejected
+  without resurrection. Course and Section publication have no child-count prerequisite and do not
+  cascade. Lesson publication requires deliverable content (`READY` VideoAsset/DocumentAsset, or a
+  linked `PUBLISHED` Quiz). Quiz publication validates the current active aggregate and ignores
+  archived questions, matching student delivery/attempt snapshots. A `PUBLISHED` Quiz stays
+  editable, but the same aggregate rule is re-validated, transactionally, after every subsequent
+  Question/Option mutation capable of affecting it, so it can never be edited into an unpublishable
+  state; a `DRAFT` Quiz is exempt and may stay incomplete during authoring, and Question creation is
+  rejected outright on a `PUBLISHED` Quiz because a brand-new Question always starts with zero
+  Options. `publishQuiz()` and these mutations serialize on one Quiz-level PostgreSQL advisory lock
+  (acquired before Option mutations' existing Question-level lock, never after), closing a
+  publish-vs-mutation race that a plain status read cannot catch under READ COMMITTED. No migration
+  was required.
 - Implemented Instructor Course Sections/Lessons/Ordering Slice B: authorized CourseSection create/update-metadata/archive/reorder, generic Lesson create (with exactly one type-matching VideoLesson/DocumentLesson/QuizLesson detail row created atomically, referencing an already-existing tenant-scoped VideoAsset/DocumentAsset/Quiz row) alongside Lesson update-metadata/archive/reorder, all nested-resource ownership proved through Prisma composite keys inherited from the already-authorized parent chain (never a bare-ID lookup followed by trusting a client-supplied parent relationship), and a safe two-phase transactional resequence for whole-list reorder that reassigns the existing active-position value set (not literal `1..N`) to avoid colliding with an archived sibling's retained position under the current non-partial `(courseId, position)` / `(sectionId, position)` unique indexes. Fixed a pre-existing latent bug in the shared `isKnownUniqueViolation` Prisma-error-detection utility (used by both the tenancy and courses modules): under Prisma 7 with `@prisma/adapter-pg`, unique-violation detail is reported under `meta.driverAdapterError.cause`, not the historical `meta.target` shape the utility previously checked; it now checks both. A subsequent focused security/data-integrity review of Slice B found and fixed one further narrow defect: whole-list reorder had no handling for a concurrent same-parent reorder race (e.g. a UI double-submit), unlike create; it now uses the same narrow `isKnownUniqueViolation` catch. The review also ran the existing tenancy PostgreSQL suite (7 tests) to confirm the shared-utility fix caused no regression there.
 - Implemented Student Course Authorization/Read Slice C: a new `StudentCourseAccessService` entitlement primitive proving, from current database state only, ACTIVE STUDENT → a currently entitled ACTIVE Enrollment (status plus `startsAt`/`endsAt` time window evaluated against `ClockService.now()`, never mutated as a side effect of the read) → an ACTIVE `TenantStudent` for the course's own tenant (derived from the course, never a client-supplied tenant field) → Course `PUBLISHED` in an ACTIVE tenant. `GET /student/courses` (paginated, bounded, `principal.userId`-scoped) and `GET /student/courses/:courseId` (ordered `PUBLISHED` sections/lessons only, lessons additionally filtered by their `availableFrom`/`availableUntil` window, currently-unavailable lessons omitted entirely rather than exposed as locked metadata) are the first endpoints in this codebase to enforce course-content entitlement. Every rejection reason collapses to the existing `CourseNotFoundError`, so a wrong, foreign, cross-tenant, DRAFT/ARCHIVED, or currently-unentitled course ID is indistinguishable from one that does not exist. Responses use new student-only types, deliberately excluding every instructor-authoring/provider-internal field (asset IDs, provider keys, external references, playback/download URLs, quiz questions/options/answers) the equivalent instructor-facing types expose. No new error types, DTO param shape reuses no client-supplied tenant/student identifiers, and no shared authorization primitives outside the courses module were modified.
 - Implemented Minimal Lesson Progress Slice D on top of the Slice C entitlement boundary: `StudentCourseAccessService.getCourseStructure` now includes each returned lesson's `progress` (`NOT_STARTED`/`STARTED`/`COMPLETED` plus `completedAt`), read via one additional query scoped to the student's own entitled enrollment and mapped in memory by lesson ID (no N+1, no row ever created merely to serve a read — a missing `LessonProgress` row reads as `NOT_STARTED`). Added `POST /student/courses/:courseId/lessons/:lessonId/complete` to mark a currently-accessible, non-quiz (VIDEO/DOCUMENT) lesson completed, reusing the exact same entitlement chain and the same published-section/published-lesson/availability-window rules the read side applies, so a lesson that would not appear in the student's course structure cannot be completed either. Completion is idempotent and race-safe: it attempts to create a fresh `COMPLETED` row first, and on the unique-constraint conflict (`(studentUserId, lessonId, enrollmentId)`) falls back to an atomic `updateMany` guarded by `status: { not: COMPLETED }`, so a stale NOT_STARTED/STARTED row transitions once, an already-COMPLETED row is returned unchanged without re-stamping `completedAt`, and concurrent duplicate requests converge to exactly one row. A QUIZ lesson cannot be manually completed (new `QuizLessonCompletionNotAllowedError`, 400); every other rejection (foreign/unavailable/DRAFT/ARCHIVED lesson, lesson in an unentitled or different course) reuses the existing `LessonNotFoundError`/`CourseNotFoundError`, so no new "not found" taxonomy was introduced. `studentUserId` and `enrollmentId` are never accepted from the client — both are always derived from the same server-side entitlement proof. No schema/migration change was needed; the existing `LessonProgress` model and its composite FKs to `Lesson`/`Enrollment` already supported this fully.
@@ -693,6 +710,88 @@ milestone: APPROVED / CLOSED**:
   authorization behavior was added or changed — every code change this task made is a narrow
   correctness/consistency/test-coverage fix, confirmed by the fact that all pre-existing Media/Course/
   Quiz/auth/device/tenancy test coverage passed unchanged.
+
+Content Lifecycle Slice (Course/Section/Lesson/Quiz explicit publish/archive) and the published-Quiz
+mutation/concurrency repair validation passed:
+
+- Confirmed repository started clean at `d51e2cc feat(notifications): add secure in-app notification
+  foundation`.
+- Implemented explicit `POST .../publish` and `POST .../archive` instructor endpoints for Course,
+  CourseSection, Lesson, and Quiz, each backed by a dedicated service method (never a generic
+  metadata DTO accepting `status`). Supported transitions are `DRAFT -> PUBLISHED`,
+  `DRAFT -> ARCHIVED`, and `PUBLISHED -> ARCHIVED`; publishing an already-`PUBLISHED` resource and
+  archiving an already-`ARCHIVED` resource are idempotent no-ops returning the current state;
+  `ARCHIVED -> PUBLISHED` is rejected with `INVALID_*_LIFECYCLE_TRANSITION` — `ARCHIVED` is
+  terminal, with no resurrection path. Publish/archive never cascade: each Course, Section, Lesson,
+  and Quiz is published/archived only by its own explicit call, and a parent's status change never
+  mutates any child row.
+- Lesson publication additionally requires deliverable content matching the Lesson's `type`: VIDEO
+  and DOCUMENT lessons require their linked `VideoAsset`/`DocumentAsset` to be `READY`, and QUIZ
+  lessons require their linked Quiz to be `PUBLISHED`; a Lesson failing this is rejected with
+  `LESSON_CONTENT_NOT_READY` and its parent Course/Section (and, for a QUIZ Lesson, the Quiz) is
+  never auto-published as a side effect.
+- Quiz publication validates the current active aggregate via one canonical validator
+  (`assertQuizPublishable` in `quiz-publishability.util.ts`, also used by the post-mutation check
+  below — no duplicated rule logic): at least one `ACTIVE` Question; each `ACTIVE` Question has
+  positive points and exactly one correct Option; `TRUE_FALSE` Questions have exactly two Options,
+  `MULTIPLE_CHOICE` at least two; total active-question points is positive; `passingScorePercent`
+  (if set) is between 0 and 100. `ARCHIVED` Questions are excluded, matching student delivery and
+  attempt-snapshot reads.
+- Repaired a confirmed published-Quiz mutation-safety gap: before this pass, an already-`PUBLISHED`
+  Quiz could be edited by ordinary Question/Option authoring mutations into an aggregate-invalid
+  state (e.g. flipping the only correct Option to `false`, or — in one partially-applied prior
+  attempt — creating a Question that could never itself hold options). The same canonical
+  `assertQuizPublishable` rule is now re-run, in the same database transaction, after every
+  Question/Option mutation capable of affecting a `PUBLISHED` Quiz (Question create/update, Option
+  create/update); a mutation that would leave the aggregate unpublishable is rejected atomically
+  with `QUIZ_NOT_PUBLISHABLE` and the prior valid state is unchanged. A `DRAFT` Quiz is exempt and
+  may remain incomplete indefinitely during authoring — the check only applies once `PUBLISHED`.
+  Creating a new Question is rejected outright while its Quiz is `PUBLISHED`: this authoring API
+  always creates a Question before any Option, so a brand-new Question can never itself satisfy
+  "exactly one correct option," and this is rejected up front rather than allowed to persist
+  incomplete even transiently. Reorder (Question or Option) and Quiz archive were confirmed exempt
+  by design: reordering only ever changes position, never points/correctness/counts, and archiving
+  only ever moves a Quiz out of `PUBLISHED`, so neither can produce a `PUBLISHED` Quiz with an
+  invalid aggregate.
+- Closed a genuine concurrency gap in that same repair: under PostgreSQL READ COMMITTED, a plain
+  `SELECT` of `Quiz.status` never blocks on a concurrent transaction's uncommitted publish, so
+  `publishQuiz()` and a concurrent publishability-affecting mutation could both observe `DRAFT` and
+  both commit, leaving `PUBLISHED` + aggregate-invalid. `publishQuiz()` and every
+  publishability-affecting Question/Option mutation now serialize on one PostgreSQL
+  transaction-scoped advisory lock keyed on the Quiz ID (`lockQuizPublicationBoundary`), acquired
+  as each transaction's first step. Option mutations additionally keep their pre-existing
+  Question-scoped advisory lock for the option-count/correctness invariants, always acquired
+  *after* the Quiz-level lock — one consistent Quiz-level → Question-level ordering everywhere both
+  locks are used, ruling out a lock-order deadlock. Reorder and archive were confirmed not to need
+  either lock, for the same reasons they are exempt from the aggregate re-check above.
+- Attempt-snapshot behavior (`docs/QUIZ-ATTEMPTS.md`) is unaffected and was re-verified unchanged:
+  a `QuizAttempt` and its `QuizAttemptAnswer` rows snapshot the Question/Options/correct-answer/
+  passing-threshold at attempt-start time, so historical grading is immune to any later Quiz/
+  Question/Option authoring change, publish/archive included.
+- Added `apps/api/src/modules/courses/course-lifecycle-http.postgres-test.ts` (7 tests: transition
+  matrix and idempotency, cross-tenant/ownership non-leakage, Section publish/archive, Lesson
+  content-readiness gating including the QUIZ-requires-PUBLISHED-Quiz path, Quiz aggregate
+  publish-time validation and `ARCHIVED`-is-terminal, publish/archive concurrency races, and
+  student-facing access observing the same publish gates through the existing entitlement chain).
+  Added 7 tests to `apps/api/src/modules/quizzes/quiz-http.postgres-test.ts` for the mutation-safety
+  repair: DRAFT incremental authoring remains unrestricted; Question creation, Option creation, and
+  unsetting the only correct Option are each rejected atomically on a `PUBLISHED` Quiz with the
+  prior state proved unchanged; valid edits (metadata, Question points, adding a non-correct
+  Option) keep succeeding on a `PUBLISHED` Quiz; and two genuinely concurrent HTTP-level races
+  (publish vs. incomplete-Question creation, publish vs. unsetting the only correct Option) each
+  assert the final *persisted* state, run 5× per test across 3 full-suite runs (15 trials total)
+  with no flakiness observed.
+- The complete PostgreSQL backend suite — 16 suites, 245 tests, spanning auth/device/tenancy/
+  course/quiz/media/notifications — was run repeatedly against a fresh disposable PostgreSQL 16
+  database (all four existing migrations applied from empty), including 3 consecutive full runs
+  specifically to confirm the new concurrency tests are deterministic, not flaky: 245/245 every run.
+- API lint, typecheck, and unit tests (93/93) passed. API build, root `corepack pnpm check`
+  (install, prisma generate, lint, typecheck, test, API build, web build), and `git diff --check`
+  all passed.
+- No migration was required or added — the entire repair is application-level transactional
+  validation and locking; `schema.prisma` and every migration file are unchanged.
+- Disposable PostgreSQL 16 containers were created and removed for validation; the unrelated
+  `mini-inventory-system-db-1` container was not touched.
 
 ## Exact Recommended Next Step
 

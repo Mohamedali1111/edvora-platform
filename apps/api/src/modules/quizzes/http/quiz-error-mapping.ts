@@ -14,6 +14,8 @@ const ERROR_STATUS: Record<QuizErrorCode, HttpStatus> = {
   QUIZ_ATTEMPT_NOT_FOUND: HttpStatus.NOT_FOUND,
   QUIZ_ATTEMPT_NOT_OPEN: HttpStatus.CONFLICT,
   QUIZ_HAS_NO_ACTIVE_QUESTIONS: HttpStatus.CONFLICT,
+  INVALID_QUIZ_LIFECYCLE_TRANSITION: HttpStatus.CONFLICT,
+  QUIZ_NOT_PUBLISHABLE: HttpStatus.CONFLICT,
   QUIZ_ATTEMPT_LIMIT_REACHED: HttpStatus.CONFLICT,
 };
 
@@ -30,6 +32,8 @@ const ERROR_MESSAGES: Record<QuizErrorCode, string> = {
   QUIZ_ATTEMPT_NOT_FOUND: 'Quiz attempt was not found.',
   QUIZ_ATTEMPT_NOT_OPEN: 'This quiz attempt is already finalized and can no longer be modified.',
   QUIZ_HAS_NO_ACTIVE_QUESTIONS: 'This quiz currently has no active questions to attempt.',
+  INVALID_QUIZ_LIFECYCLE_TRANSITION: 'Quiz lifecycle transition is not allowed.',
+  QUIZ_NOT_PUBLISHABLE: 'Quiz is not complete enough to publish.',
   QUIZ_ATTEMPT_LIMIT_REACHED: 'The maximum number of attempts for this quiz has already been used.',
 };
 

@@ -138,6 +138,43 @@ Tenant
 
 V1 courses should support title, optional description, thumbnail/media reference, lifecycle/status, publication visibility, timestamps, and ordered sections/lessons. Do not add pricing, checkout, marketplace, or store fields.
 
+Course authoring lifecycle transitions are explicit application-service actions, not generic client
+metadata writes. `Course`, `CourseSection`, `Lesson`, and `Quiz` support `DRAFT -> PUBLISHED`,
+`DRAFT -> ARCHIVED`, and `PUBLISHED -> ARCHIVED`; publishing an already-published resource and
+archiving an already-archived resource are idempotent, while `ARCHIVED` is terminal and cannot be
+published/restored. Publishing never cascades to descendants or ancestors: each Course, Section,
+Lesson, and Quiz must be published explicitly. Archiving likewise does not cascade; ancestor status
+already blocks student access while preserving descendant authoring state and historical ordering.
+
+Course and Section publication has no V1 child-count prerequisite. Lesson publication additionally
+requires deliverable type-specific content: VIDEO and DOCUMENT lessons must reference tenant-linked
+`READY` assets, and QUIZ lessons must reference a tenant-linked `PUBLISHED` Quiz. Quiz publication
+validates the current active aggregate: at least one `ACTIVE` question, positive points, valid
+options, and exactly one correct option for each active question; archived questions are ignored,
+matching student delivery and attempt snapshot behavior.
+
+A `PUBLISHED` Quiz stays editable, but the same aggregate rule `publishQuiz()` enforces is
+re-checked, in the same database transaction, after every Question/Option authoring mutation that
+can affect it (Question create/update, Option create/update); a mutation that would leave the
+Quiz's active aggregate unpublishable is rejected atomically and the prior valid state is
+unchanged. A `DRAFT` Quiz is exempt from this check and may stay incomplete indefinitely while an
+instructor builds it — the aggregate rule is enforced only at the DRAFT → PUBLISHED transition and
+on every subsequent mutation while already `PUBLISHED`, never continuously against a DRAFT Quiz.
+Creating a new Question is rejected outright while its Quiz is `PUBLISHED`: this authoring API
+creates a Question first and its Options only through later, separate calls, so a brand-new
+Question always starts with zero Options and can never itself satisfy "exactly one correct
+option" — rather than allow that incomplete state to land, even transiently, Question creation on
+a `PUBLISHED` Quiz fails with the same publishability error `publishQuiz()` would produce. This
+mutation-safety check and `publishQuiz()` itself share one PostgreSQL transaction-scoped advisory
+lock keyed on the Quiz ID, so a concurrent publish and a concurrent publishability-affecting
+mutation on the same Quiz always serialize rather than both observing a stale pre-commit status;
+Option mutations additionally keep their existing Question-scoped advisory lock for the
+option-count/correctness invariants, always acquired after the Quiz-level lock, never before, to
+keep lock ordering consistent and deadlock-free. Reorder operations (Question or Option) and Quiz
+archive do not need either lock: reordering only ever changes position, never points, correctness,
+or counts, and archiving only ever moves a Quiz out of `PUBLISHED`, so neither can produce a
+`PUBLISHED` Quiz with an invalid aggregate.
+
 ## Video and Document Metadata
 
 Video metadata should be provider-independent: external/provider asset reference, upload/processing/playback readiness state, duration where known, failure reason/state, and storage/object reference where appropriate.

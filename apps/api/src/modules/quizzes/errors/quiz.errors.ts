@@ -11,6 +11,8 @@ export type QuizErrorCode =
   | 'QUIZ_ATTEMPT_NOT_FOUND'
   | 'QUIZ_ATTEMPT_NOT_OPEN'
   | 'QUIZ_HAS_NO_ACTIVE_QUESTIONS'
+  | 'INVALID_QUIZ_LIFECYCLE_TRANSITION'
+  | 'QUIZ_NOT_PUBLISHABLE'
   | 'QUIZ_ATTEMPT_LIMIT_REACHED';
 
 export class QuizError extends Error {
@@ -102,6 +104,18 @@ export class QuizAttemptNotOpenError extends QuizError {
 export class QuizHasNoActiveQuestionsError extends QuizError {
   constructor() {
     super('QUIZ_HAS_NO_ACTIVE_QUESTIONS', 'This quiz currently has no active questions to attempt.');
+  }
+}
+
+export class InvalidQuizLifecycleTransitionError extends QuizError {
+  constructor() {
+    super('INVALID_QUIZ_LIFECYCLE_TRANSITION', 'Quiz lifecycle transition is not allowed.');
+  }
+}
+
+export class QuizNotPublishableError extends QuizError {
+  constructor() {
+    super('QUIZ_NOT_PUBLISHABLE', 'Quiz is not complete enough to publish.');
   }
 }
 

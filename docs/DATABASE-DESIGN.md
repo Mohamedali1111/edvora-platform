@@ -229,6 +229,11 @@ Fields:
 
 No pricing, checkout, payment, or marketplace fields.
 
+Course lifecycle is controlled by explicit instructor actions, not by generic metadata updates.
+Supported V1 transitions are `DRAFT -> PUBLISHED`, `DRAFT -> ARCHIVED`, and
+`PUBLISHED -> ARCHIVED`; `ARCHIVED` is terminal. Course publication does not require published
+children and does not publish/archive child sections or lessons as a side effect.
+
 #### CourseSection
 
 Fields:
@@ -241,6 +246,10 @@ Fields:
 - `position`
 - `status`: `DRAFT`, `PUBLISHED`, `ARCHIVED`
 - `createdAt`, `updatedAt`
+
+Section publication and archive use the same explicit lifecycle transition set as Course. Section
+publication does not require its parent Course to be published and does not publish/archive child
+lessons.
 
 #### Lesson
 
@@ -261,6 +270,10 @@ Fields:
 - `createdAt`, `updatedAt`
 
 Each lesson has exactly one type-specific detail row matching `type`.
+
+Lesson publication is explicit and requires deliverable content: VIDEO lessons need a tenant-linked
+`READY` `VideoAsset`, DOCUMENT lessons need a tenant-linked `READY` `DocumentAsset`, and QUIZ
+lessons need a tenant-linked `PUBLISHED` `Quiz`. Lesson archive is non-cascading.
 
 #### VideoAsset
 
@@ -331,6 +344,23 @@ Fields:
 - `attemptLimit` nullable
 - `revealAnswersPolicy`: `NEVER`, `AFTER_SUBMISSION`, `AFTER_PASSING`
 - `createdAt`, `updatedAt`, `publishedAt`
+
+Quiz lifecycle is explicit. Publishing validates the current active aggregate: at least one
+`ACTIVE` question, positive points, valid options, and exactly one correct option per active
+question. `ARCHIVED` questions are ignored, matching student delivery and attempt snapshot reads.
+Archiving a Quiz does not cascade to QuizLesson rows or attempts; student access is blocked by the
+Quiz status gate.
+
+The same aggregate validation is re-run, in the same transaction, after every subsequent Question
+create/update and Option create/update while the Quiz is `PUBLISHED`, so a `PUBLISHED` Quiz cannot
+be edited into an unpublishable state; a `DRAFT` Quiz is exempt and may remain incomplete during
+authoring. Because Question creation always starts a Question with zero Options, creating a new
+Question is rejected while its Quiz is `PUBLISHED` rather than briefly persisting an incomplete
+`ACTIVE` Question. `publishQuiz()` and every publishability-affecting mutation serialize on one
+PostgreSQL transaction-scoped advisory lock keyed on the Quiz ID; Option mutations additionally
+keep their pre-existing Question-scoped advisory lock, always acquired after the Quiz-level lock
+(Quiz-level → Question-level, never the reverse) to keep lock ordering deadlock-free. No schema or
+migration change was required for this.
 
 #### QuizLesson
 

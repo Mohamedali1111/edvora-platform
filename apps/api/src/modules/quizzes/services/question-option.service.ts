@@ -16,6 +16,7 @@ import {
   QuestionOptionPositionConflictError,
 } from '../errors/quiz.errors';
 import type { QuestionOptionSummary } from '../types/quiz.types';
+import { assertPublishedQuizRemainsPublishable, lockQuizPublicationBoundary } from './quiz-publishability.util';
 
 export type CreateQuestionOptionInput = {
   principal: AuthenticatedPrincipal;
@@ -57,6 +58,10 @@ export class QuestionOptionService {
     try {
       return await this.prismaService.client.$transaction(async (tx) => {
         await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
+        // Quiz-level lock strictly before the Question-level lock — see
+        // `lockQuizPublicationBoundary`'s docstring for why this closes the publish-vs-Option
+        // race and for the fixed ordering every caller of both locks must preserve.
+        await lockQuizPublicationBoundary(tx, input.quizId);
         await this.lockQuestionOptionMutations(tx, input.questionId);
 
         const question = await tx.question.findFirst({
@@ -95,6 +100,13 @@ export class QuestionOptionService {
             position: (maxPosition._max.position ?? 0) + 1,
           },
         });
+
+        // If this Quiz is PUBLISHED, a new Option must never leave it aggregate-invalid — e.g. a
+        // TRUE_FALSE question's second option landing at position 1 while a still-`isCorrect:
+        // false` option exists is fine, but nothing about `assertValidOptionConfiguration` above
+        // rules out every path here, so re-run the same canonical check `publishQuiz()` uses,
+        // inside this same transaction/advisory-lock scope, and roll back atomically if it fails.
+        await assertPublishedQuizRemainsPublishable(tx, input.tenantId, input.quizId);
 
         return toQuestionOptionSummary(option);
       });
@@ -137,6 +149,9 @@ export class QuestionOptionService {
   async updateOption(input: UpdateQuestionOptionInput): Promise<QuestionOptionSummary> {
     return this.prismaService.client.$transaction(async (tx) => {
       await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
+      // Quiz-level lock strictly before the Question-level lock — same fixed ordering as
+      // `createOption`; see `lockQuizPublicationBoundary`'s docstring.
+      await lockQuizPublicationBoundary(tx, input.quizId);
       await this.lockQuestionOptionMutations(tx, input.questionId);
 
       const question = await tx.question.findFirst({
@@ -179,6 +194,13 @@ export class QuestionOptionService {
         },
       });
 
+      // `assertValidOptionConfiguration` above only ever rejects *adding* a second correct
+      // option — it has no opinion on `isCorrect: false`, so flipping the only correct option to
+      // false is otherwise silently accepted and would leave an ACTIVE question with zero correct
+      // answers. If this Quiz is PUBLISHED, that violates the same invariant `publishQuiz()`
+      // enforces, so re-check it here, inside the same transaction, and roll back atomically.
+      await assertPublishedQuizRemainsPublishable(tx, input.tenantId, input.quizId);
+
       return toQuestionOptionSummary(updated);
     });
   }
@@ -196,7 +218,10 @@ export class QuestionOptionService {
    * sequential request would get — never a raw Prisma/PostgreSQL error. Scoped to `questionId`,
    * not global, so concurrent authoring on different Questions (or different Quizzes) never
    * blocks on each other. Reordering is deliberately excluded: it only changes `position`, never
-   * `isCorrect` or the option count, so it cannot violate either invariant.
+   * `isCorrect` or the option count, so it cannot violate either invariant — and for the same
+   * reason `reorderOptions` also does not take `lockQuizPublicationBoundary` (see that lock's
+   * docstring): it cannot turn a valid aggregate into an invalid one, so no ordering against a
+   * concurrent `publishQuiz` can produce PUBLISHED + aggregate-invalid.
    */
   private async lockQuestionOptionMutations(tx: PrismaTransactionClient, questionId: string): Promise<void> {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${questionId}, 0::bigint))`;

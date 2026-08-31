@@ -4,6 +4,10 @@ export type CourseErrorCode =
   | 'LESSON_NOT_FOUND'
   | 'SECTION_POSITION_CONFLICT'
   | 'LESSON_POSITION_CONFLICT'
+  | 'INVALID_COURSE_LIFECYCLE_TRANSITION'
+  | 'INVALID_SECTION_LIFECYCLE_TRANSITION'
+  | 'INVALID_LESSON_LIFECYCLE_TRANSITION'
+  | 'LESSON_CONTENT_NOT_READY'
   | 'INVALID_SECTION_REORDER'
   | 'INVALID_LESSON_REORDER'
   | 'INVALID_LESSON_TYPE_REFERENCE'
@@ -47,6 +51,30 @@ export class SectionPositionConflictError extends CourseError {
 export class LessonPositionConflictError extends CourseError {
   constructor() {
     super('LESSON_POSITION_CONFLICT', 'Lesson position conflict; retry the request.');
+  }
+}
+
+export class InvalidCourseLifecycleTransitionError extends CourseError {
+  constructor() {
+    super('INVALID_COURSE_LIFECYCLE_TRANSITION', 'Course lifecycle transition is not allowed.');
+  }
+}
+
+export class InvalidSectionLifecycleTransitionError extends CourseError {
+  constructor() {
+    super('INVALID_SECTION_LIFECYCLE_TRANSITION', 'Course section lifecycle transition is not allowed.');
+  }
+}
+
+export class InvalidLessonLifecycleTransitionError extends CourseError {
+  constructor() {
+    super('INVALID_LESSON_LIFECYCLE_TRANSITION', 'Lesson lifecycle transition is not allowed.');
+  }
+}
+
+export class LessonContentNotReadyError extends CourseError {
+  constructor() {
+    super('LESSON_CONTENT_NOT_READY', 'Lesson content is not ready to publish.');
   }
 }
 

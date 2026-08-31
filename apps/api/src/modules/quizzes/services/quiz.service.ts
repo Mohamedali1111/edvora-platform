@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import type { QuizRevealAnswersPolicy } from '../../../../.generated/prisma/client';
+import {
+  QuizStatus,
+  type QuizRevealAnswersPolicy,
+} from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
+import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
-import { QuizNotFoundError } from '../errors/quiz.errors';
+import { InvalidQuizLifecycleTransitionError, QuizNotFoundError } from '../errors/quiz.errors';
 import type { QuizSummary } from '../types/quiz.types';
+import { assertQuizPublishable, lockQuizPublicationBoundary, quizPublishabilitySelect } from './quiz-publishability.util';
 
 export type CreateQuizInput = {
   principal: AuthenticatedPrincipal;
@@ -34,6 +39,7 @@ export class QuizService {
     private readonly prismaService: PrismaService,
     private readonly authorization: TenantAuthorizationService,
     private readonly uuid: UuidV7Service,
+    private readonly clock: ClockService,
   ) {}
 
   async createQuiz(input: CreateQuizInput): Promise<QuizSummary> {
@@ -86,6 +92,16 @@ export class QuizService {
     return toQuizSummary(quiz);
   }
 
+  // Deliberately not re-running `assertQuizPublishable` here: the only two fields this method
+  // touches that the publishability rules care about — `passingScorePercent` and `attemptLimit`
+  // — are already fully range-constrained at the DTO layer (`UpdateQuizMetadataDto`:
+  // `@Min(0) @Max(100)` on `passingScorePercent`, `@IsInt() @Min(1)` on `attemptLimit`, both
+  // `@IsOptional()` so `null`/omitted are the only other values that reach here — and both
+  // `assertQuizPublishable` and this DTO treat `null` identically, as "no constraint"). No value
+  // this method can ever persist for either field can violate the aggregate invariant, so there
+  // is nothing for a post-mutation check to catch; `title`/`description`/`revealAnswersPolicy`
+  // play no role in publishability at all. If either DTO's range validation is ever loosened,
+  // this method must be revisited alongside it.
   async updateQuizMetadata(input: UpdateQuizMetadataInput): Promise<QuizSummary> {
     await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
 
@@ -110,6 +126,89 @@ export class QuizService {
     });
 
     return toQuizSummary(quiz);
+  }
+
+  async publishQuiz(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    quizId: string,
+  ): Promise<QuizSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+      // Must be acquired before the read below — see `lockQuizPublicationBoundary`'s docstring
+      // for the exact publish-vs-mutation race this closes.
+      await lockQuizPublicationBoundary(tx, quizId);
+
+      const quiz = await tx.quiz.findUnique({
+        where: { id_tenantId: { id: quizId, tenantId } },
+        select: quizPublishabilitySelect,
+      });
+
+      if (!quiz) {
+        throw new QuizNotFoundError();
+      }
+
+      if (quiz.status === QuizStatus.ARCHIVED) {
+        throw new InvalidQuizLifecycleTransitionError();
+      }
+
+      assertQuizPublishable(quiz);
+
+      if (quiz.status === QuizStatus.DRAFT) {
+        const updated = await tx.quiz.updateMany({
+          where: { id: quizId, tenantId, status: QuizStatus.DRAFT },
+          data: { status: QuizStatus.PUBLISHED, publishedAt: this.clock.now() },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.quiz.findUniqueOrThrow({
+            where: { id_tenantId: { id: quizId, tenantId } },
+            select: { status: true },
+          });
+          if (current.status === QuizStatus.ARCHIVED) {
+            throw new InvalidQuizLifecycleTransitionError();
+          }
+        }
+      }
+
+      const published = await tx.quiz.findUniqueOrThrow({
+        where: { id_tenantId: { id: quizId, tenantId } },
+      });
+
+      return toQuizSummary(published);
+    });
+  }
+
+  async archiveQuiz(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    quizId: string,
+  ): Promise<QuizSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const existing = await tx.quiz.findUnique({
+        where: { id_tenantId: { id: quizId, tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new QuizNotFoundError();
+      }
+
+      if (existing.status !== QuizStatus.ARCHIVED) {
+        await tx.quiz.updateMany({
+          where: { id: quizId, tenantId, status: { in: [QuizStatus.DRAFT, QuizStatus.PUBLISHED] } },
+          data: { status: QuizStatus.ARCHIVED },
+        });
+      }
+
+      const quiz = await tx.quiz.findUniqueOrThrow({
+        where: { id_tenantId: { id: quizId, tenantId } },
+      });
+
+      return toQuizSummary(quiz);
+    });
   }
 }
 

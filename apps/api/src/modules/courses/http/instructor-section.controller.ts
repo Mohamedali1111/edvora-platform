@@ -72,6 +72,15 @@ export class InstructorSectionController {
     return this.sections.archiveSection(principal, params.tenantId, params.courseId, params.sectionId);
   }
 
+  @Post(':sectionId/publish')
+  @HttpCode(HttpStatus.OK)
+  async publish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: SectionIdParamDto,
+  ): Promise<CourseSectionSummary> {
+    return this.sections.publishSection(principal, params.tenantId, params.courseId, params.sectionId);
+  }
+
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
   async reorder(

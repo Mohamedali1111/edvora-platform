@@ -7,6 +7,7 @@ import {
   AccountStatus,
   PlatformRole,
   QuestionType,
+  QuizStatus,
   TenantMembershipRole,
   TenantMembershipStatus,
   TenantStatus,
@@ -609,6 +610,276 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       .expect(HttpStatus.FORBIDDEN);
   });
 
+  it('supports incremental DRAFT authoring of an incomplete Question/Option set', async () => {
+    const { token, tenantId } = await createInstructorTenant('draft-authoring');
+    const quizId = await createQuizDirect(tenantId, 'Draft quiz');
+
+    // Creating a Question with zero Options must keep working while the Quiz is DRAFT.
+    const question = await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'MULTIPLE_CHOICE', prompt: 'Incomplete question', points: 5 })
+      .expect(HttpStatus.CREATED);
+    const questionId = responseBody<{ questionId: string }>(question).questionId;
+
+    // A single, not-yet-correct Option — an aggregate-invalid shape — must also keep working
+    // while the Quiz is DRAFT; only PUBLISHED Quizzes enforce the aggregate invariant.
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ text: 'Only option', isCorrect: false })
+      .expect(HttpStatus.CREATED);
+
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.DRAFT,
+    });
+
+    // Publishing this same incomplete state is correctly rejected — DRAFT flexibility never
+    // leaks into the publish gate itself.
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } }));
+  });
+
+  it('rejects creating a new Question on a PUBLISHED Quiz atomically, leaving the prior valid Quiz unchanged', async () => {
+    const { token, tenantId } = await createInstructorTenant('published-question-create');
+    const quizId = await createPublishedQuiz(tenantId, token, 'Published quiz');
+
+    const before = await prisma.client.question.findMany({ where: { quizId } });
+
+    // A brand-new Question always starts with zero Options, which can never satisfy "exactly one
+    // correct Option" — creating one on an already-PUBLISHED Quiz must be rejected outright rather
+    // than briefly persisted incomplete.
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'MULTIPLE_CHOICE', prompt: 'New question', points: 5 })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } }));
+
+    const after = await prisma.client.question.findMany({ where: { quizId } });
+    expect(after).toEqual(before);
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+  });
+
+  it('rejects unsetting the only correct Option on a PUBLISHED Quiz atomically, leaving the prior valid state unchanged', async () => {
+    const { token, tenantId } = await createInstructorTenant('published-zero-correct');
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+    const correctOption = await createQuestionOptionDirect(tenantId, questionId, 'Correct', 1, true);
+    await createQuestionOptionDirect(tenantId, questionId, 'Wrong', 2, false);
+    await publishQuizDirect(token, tenantId, quizId);
+
+    // Flipping the only correct Option to false would leave an ACTIVE Question with zero correct
+    // answers — `assertValidOptionConfiguration` has no opinion on `isCorrect: false`, so only the
+    // aggregate publishability re-check can catch this.
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${correctOption}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ isCorrect: false })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } }));
+
+    await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: correctOption } })).resolves.toMatchObject({
+      isCorrect: true,
+    });
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+  });
+
+  it('rejects a second correct Option and a TRUE_FALSE third Option on a PUBLISHED Quiz, leaving prior state unchanged', async () => {
+    const { token, tenantId } = await createInstructorTenant('published-invalid-shapes');
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const mcQuestion = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+    const optionA = await createQuestionOptionDirect(tenantId, mcQuestion, 'A', 1, true);
+    const optionB = await createQuestionOptionDirect(tenantId, mcQuestion, 'B', 2, false);
+    const tfQuestion = await createQuestionDirect(tenantId, quizId, QuestionType.TRUE_FALSE, 2);
+    await createQuestionOptionDirect(tenantId, tfQuestion, 'True', 1, true);
+    await createQuestionOptionDirect(tenantId, tfQuestion, 'False', 2, false);
+    await publishQuizDirect(token, tenantId, quizId);
+
+    // Multiple correct options: still rejected on a PUBLISHED Quiz by the pre-existing per-Option
+    // check (not the new aggregate check), but must remain rejected here too.
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${mcQuestion}/options/${optionB}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ isCorrect: true })
+      .expect(HttpStatus.BAD_REQUEST)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED' } }));
+    await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionB } })).resolves.toMatchObject({
+      isCorrect: false,
+    });
+    await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionA } })).resolves.toMatchObject({
+      isCorrect: true,
+    });
+
+    // A third Option on a TRUE_FALSE Question would violate "exactly two options" — rejected the
+    // same way, and no row is left behind.
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${tfQuestion}/options`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ text: 'Maybe', isCorrect: false })
+      .expect(HttpStatus.BAD_REQUEST)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUESTION_OPTION_LIMIT_EXCEEDED' } }));
+    await expect(prisma.client.questionOption.count({ where: { questionId: tfQuestion } })).resolves.toBe(2);
+
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+  });
+
+  it('still supports valid edits to a PUBLISHED Quiz: metadata, Question metadata, and adding a non-correct Option', async () => {
+    const { token, tenantId } = await createInstructorTenant('published-valid-edits');
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+    await createQuestionOptionDirect(tenantId, questionId, 'A', 1, true);
+    await createQuestionOptionDirect(tenantId, questionId, 'B', 2, false);
+    await publishQuizDirect(token, tenantId, quizId);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Renamed while published', passingScorePercent: 65 })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ title: 'Renamed while published', passingScorePercent: '65' }));
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ points: 10 })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ points: '10' }));
+
+    // Adding another non-correct Option to an already-valid MULTIPLE_CHOICE Question cannot break
+    // the aggregate invariant and must keep succeeding.
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ text: 'C', isCorrect: false })
+      .expect(HttpStatus.CREATED);
+
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+      title: 'Renamed while published',
+    });
+    await expect(prisma.client.questionOption.count({ where: { questionId } })).resolves.toBe(3);
+  });
+
+  // `lockQuizPublicationBoundary` (apps/api/src/modules/quizzes/services/quiz-publishability.util.ts)
+  // serializes `publishQuiz` against every publishability-affecting Question/Option mutation on
+  // the same Quiz. Without it, a plain `SELECT` of `Quiz.status` under PostgreSQL READ COMMITTED
+  // never blocks on a concurrent transaction's uncommitted publish, so two transactions could
+  // both observe DRAFT, both commit, and leave PUBLISHED + aggregate-invalid. These two tests
+  // fire the real race via genuinely concurrent HTTP requests sharing the connection pool, and
+  // assert the *persisted final state* (not just HTTP status codes) rules that out — repeated
+  // across several fresh Quizzes per test, since which side wins the lock is nondeterministic and
+  // both winning orders must independently be safe.
+  it('races publish against incomplete-Question creation and never ends PUBLISHED with an incomplete active Question', async () => {
+    const { token, tenantId } = await createInstructorTenant('race-publish-question');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const quizId = await createQuizDirect(tenantId, `Race quiz ${attempt}`);
+      const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.TRUE_FALSE, 1);
+      await createQuestionOptionDirect(tenantId, questionId, 'True', 1, true);
+      await createQuestionOptionDirect(tenantId, questionId, 'False', 2, false);
+
+      const [publishResponse, createResponse] = await Promise.all([
+        request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`).set('Authorization', `Bearer ${token}`),
+        request(server)
+          .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ type: 'MULTIPLE_CHOICE', prompt: 'Racing question', points: 5 }),
+      ]);
+
+      // Exactly one side must win: the lock makes the two operations strictly sequential, and
+      // whichever runs second always observes the first's already-committed result. The winner's
+      // own success code differs by endpoint (publish: 200 OK, create: 201 CREATED), so which
+      // pair of statuses is correct depends on who won — asserted per-branch below, not blanket.
+      const okStatus: number = HttpStatus.OK;
+
+      const quiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+      const questions = await prisma.client.question.findMany({ where: { quizId } });
+
+      if (publishResponse.status === okStatus) {
+        // Publish won the race: it validated and committed before the create was ever
+        // considered, so the create must have observed PUBLISHED and been rejected outright —
+        // no new Question row, ever.
+        expect(createResponse.status).toBe(HttpStatus.CONFLICT);
+        expect(createResponse.body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } });
+        expect(quiz.status).toBe(QuizStatus.PUBLISHED);
+        expect(questions).toHaveLength(1);
+      } else {
+        // The create won the race: the Quiz was still DRAFT when it ran, so the incomplete
+        // Question was allowed to persist — but publish must then freshly re-validate the
+        // aggregate (now including that incomplete Question) and correctly fail.
+        expect(createResponse.status).toBe(HttpStatus.CREATED);
+        expect(publishResponse.status).toBe(HttpStatus.CONFLICT);
+        expect(quiz.status).toBe(QuizStatus.DRAFT);
+        expect(questions).toHaveLength(2);
+      }
+
+      // The one outcome that must never happen under any interleaving.
+      const invalidPublishedState = quiz.status === QuizStatus.PUBLISHED && questions.length > 1;
+      expect(invalidPublishedState).toBe(false);
+    }
+  });
+
+  it('races publish against unsetting the only correct Option and never ends PUBLISHED with zero correct options', async () => {
+    const { token, tenantId } = await createInstructorTenant('race-publish-option');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const quizId = await createQuizDirect(tenantId, `Race quiz ${attempt}`);
+      const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+      const correctOption = await createQuestionOptionDirect(tenantId, questionId, 'Correct', 1, true);
+      await createQuestionOptionDirect(tenantId, questionId, 'Wrong', 2, false);
+
+      const [publishResponse, updateResponse] = await Promise.all([
+        request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`).set('Authorization', `Bearer ${token}`),
+        request(server)
+          .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${correctOption}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ isCorrect: false }),
+      ]);
+
+      const okStatus: number = HttpStatus.OK;
+      const conflictStatus: number = HttpStatus.CONFLICT;
+      const outcomes = [publishResponse.status, updateResponse.status].sort((a, b) => a - b);
+      expect(outcomes).toEqual([conflictStatus, okStatus].sort((a, b) => a - b));
+
+      const quiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+      const option = await prisma.client.questionOption.findUniqueOrThrow({ where: { id: correctOption } });
+      const correctCount = await prisma.client.questionOption.count({ where: { questionId, isCorrect: true } });
+
+      if (publishResponse.status === okStatus) {
+        // Publish won: the Option update then observed PUBLISHED and was rejected atomically —
+        // the Option's correctness must be exactly as it was.
+        expect(updateResponse.status).toBe(HttpStatus.CONFLICT);
+        expect(updateResponse.body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } });
+        expect(quiz.status).toBe(QuizStatus.PUBLISHED);
+        expect(option.isCorrect).toBe(true);
+        expect(correctCount).toBe(1);
+      } else {
+        // The update won: the Quiz was still DRAFT, so uncorrecting the only correct Option was
+        // allowed — but publish must then freshly re-validate and correctly fail on zero correct
+        // options.
+        expect(updateResponse.status).toBe(HttpStatus.OK);
+        expect(publishResponse.status).toBe(HttpStatus.CONFLICT);
+        expect(quiz.status).toBe(QuizStatus.DRAFT);
+        expect(option.isCorrect).toBe(false);
+        expect(correctCount).toBe(0);
+      }
+
+      // The one outcome that must never happen under any interleaving.
+      const invalidPublishedState = quiz.status === QuizStatus.PUBLISHED && correctCount !== 1;
+      expect(invalidPublishedState).toBe(false);
+    }
+  });
+
   async function clearQuizData(): Promise<void> {
     await prisma.client.quizAttemptAnswer.deleteMany();
     await prisma.client.quizAttempt.deleteMany();
@@ -697,6 +968,26 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       data: { id, tenantId, quizId, type, prompt: `Prompt ${position}`, position, points: 1 },
     });
     return id;
+  }
+
+  // Publishes an existing Quiz through the real HTTP endpoint (not a direct Prisma write) so
+  // fixture setup exercises `publishQuiz()`'s own validation the same way a real instructor would.
+  async function publishQuizDirect(token: string, tenantId: string, quizId: string): Promise<void> {
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+  }
+
+  // Builds a minimal aggregate-valid Quiz (one TRUE_FALSE Question with exactly one correct
+  // Option) and publishes it, for tests that only care about mutating an already-PUBLISHED Quiz.
+  async function createPublishedQuiz(tenantId: string, token: string, title: string): Promise<string> {
+    const quizId = await createQuizDirect(tenantId, title);
+    const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.TRUE_FALSE, 1);
+    await createQuestionOptionDirect(tenantId, questionId, 'True', 1, true);
+    await createQuestionOptionDirect(tenantId, questionId, 'False', 2, false);
+    await publishQuizDirect(token, tenantId, quizId);
+    return quizId;
   }
 
   async function createQuestionOptionDirect(

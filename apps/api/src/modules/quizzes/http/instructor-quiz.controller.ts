@@ -90,4 +90,22 @@ export class InstructorQuizController {
       revealAnswersPolicy: body.revealAnswersPolicy,
     });
   }
+
+  @Post(':quizId/publish')
+  @HttpCode(HttpStatus.OK)
+  async publish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: QuizIdParamDto,
+  ): Promise<QuizSummary> {
+    return this.quizzes.publishQuiz(principal, params.tenantId, params.quizId);
+  }
+
+  @Post(':quizId/archive')
+  @HttpCode(HttpStatus.OK)
+  async archive(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: QuizIdParamDto,
+  ): Promise<QuizSummary> {
+    return this.quizzes.archiveQuiz(principal, params.tenantId, params.quizId);
+  }
 }

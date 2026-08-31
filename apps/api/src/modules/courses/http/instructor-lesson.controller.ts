@@ -101,6 +101,21 @@ export class InstructorLessonController {
     );
   }
 
+  @Post(':lessonId/publish')
+  @HttpCode(HttpStatus.OK)
+  async publish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: LessonIdParamDto,
+  ): Promise<LessonSummary> {
+    return this.lessons.publishLesson(
+      principal,
+      params.tenantId,
+      params.courseId,
+      params.sectionId,
+      params.lessonId,
+    );
+  }
+
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
   async reorder(
