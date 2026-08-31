@@ -92,31 +92,49 @@ export class CourseService {
     return toCourseSummary(course);
   }
 
+  // DEC-0048: ordinary authoring edits are allowed for non-archived resources only.
+  // Transactional + a conditional `updateMany` (status != ARCHIVED) rather than a
+  // plain read-then-write, so a concurrent archiveCourse() cannot land between the
+  // existence check and the write and leave an ARCHIVED course metadata-mutated.
   async updateCourseMetadata(input: UpdateCourseMetadataInput): Promise<CourseSummary> {
-    await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
 
-    const existing = await this.prismaService.client.course.findUnique({
-      where: { id_tenantId: { id: input.courseId, tenantId: input.tenantId } },
-      select: { id: true },
+      const existing = await tx.course.findUnique({
+        where: { id_tenantId: { id: input.courseId, tenantId: input.tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new CourseNotFoundError();
+      }
+
+      if (existing.status === CourseStatus.ARCHIVED) {
+        throw new InvalidCourseLifecycleTransitionError();
+      }
+
+      const updated = await tx.course.updateMany({
+        where: { id: input.courseId, tenantId: input.tenantId, status: { not: CourseStatus.ARCHIVED } },
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.thumbnailAssetRef !== undefined
+            ? { thumbnailAssetRef: input.thumbnailAssetRef }
+            : {}),
+          ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new InvalidCourseLifecycleTransitionError();
+      }
+
+      const course = await tx.course.findUniqueOrThrow({
+        where: { id_tenantId: { id: input.courseId, tenantId: input.tenantId } },
+      });
+
+      return toCourseSummary(course);
     });
-
-    if (!existing) {
-      throw new CourseNotFoundError();
-    }
-
-    const course = await this.prismaService.client.course.update({
-      where: { id_tenantId: { id: input.courseId, tenantId: input.tenantId } },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.thumbnailAssetRef !== undefined
-          ? { thumbnailAssetRef: input.thumbnailAssetRef }
-          : {}),
-        ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
-      },
-    });
-
-    return toCourseSummary(course);
   }
 
   async publishCourse(

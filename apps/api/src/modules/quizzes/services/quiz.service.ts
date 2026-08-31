@@ -104,30 +104,52 @@ export class QuizService {
   // is nothing for a post-mutation check to catch; `title`/`description`/`revealAnswersPolicy`
   // play no role in publishability at all. If either DTO's range validation is ever loosened,
   // this method must be revisited alongside it.
+  // DEC-0048: ordinary authoring edits are allowed for non-archived resources only.
+  // Transactional + a conditional `updateMany` (status != ARCHIVED) rather than a
+  // plain read-then-write, so a concurrent archiveQuiz() cannot land between the
+  // existence check and the write and leave an ARCHIVED quiz metadata-mutated. This
+  // is a separate concern from `lockQuizPublicationBoundary` (publish-vs-aggregate-
+  // mutation safety, see publishQuiz/quiz-publishability.util): no field this method
+  // can write affects publishability (see the comment above), so no publishability
+  // re-check or advisory lock is needed here - only the ordinary lifecycle guard.
   async updateQuizMetadata(input: UpdateQuizMetadataInput): Promise<QuizSummary> {
-    await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
 
-    const existing = await this.prismaService.client.quiz.findUnique({
-      where: { id_tenantId: { id: input.quizId, tenantId: input.tenantId } },
-      select: { id: true },
+      const existing = await tx.quiz.findUnique({
+        where: { id_tenantId: { id: input.quizId, tenantId: input.tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new QuizNotFoundError();
+      }
+
+      if (existing.status === QuizStatus.ARCHIVED) {
+        throw new InvalidQuizLifecycleTransitionError();
+      }
+
+      const updated = await tx.quiz.updateMany({
+        where: { id: input.quizId, tenantId: input.tenantId, status: { not: QuizStatus.ARCHIVED } },
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.passingScorePercent !== undefined ? { passingScorePercent: input.passingScorePercent } : {}),
+          ...(input.attemptLimit !== undefined ? { attemptLimit: input.attemptLimit } : {}),
+          ...(input.revealAnswersPolicy !== undefined ? { revealAnswersPolicy: input.revealAnswersPolicy } : {}),
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new InvalidQuizLifecycleTransitionError();
+      }
+
+      const quiz = await tx.quiz.findUniqueOrThrow({
+        where: { id_tenantId: { id: input.quizId, tenantId: input.tenantId } },
+      });
+
+      return toQuizSummary(quiz);
     });
-
-    if (!existing) {
-      throw new QuizNotFoundError();
-    }
-
-    const quiz = await this.prismaService.client.quiz.update({
-      where: { id_tenantId: { id: input.quizId, tenantId: input.tenantId } },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.passingScorePercent !== undefined ? { passingScorePercent: input.passingScorePercent } : {}),
-        ...(input.attemptLimit !== undefined ? { attemptLimit: input.attemptLimit } : {}),
-        ...(input.revealAnswersPolicy !== undefined ? { revealAnswersPolicy: input.revealAnswersPolicy } : {}),
-      },
-    });
-
-    return toQuizSummary(quiz);
   }
 
   async publishQuiz(

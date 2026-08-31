@@ -173,6 +173,218 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       );
   });
 
+  it('rejects ordinary metadata edits once Course/Section/Lesson/Quiz is ARCHIVED, while DRAFT and PUBLISHED edits remain allowed (DEC-0048)', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('archived-immutability');
+
+    // Course: DRAFT edit succeeds, PUBLISHED edit succeeds, ARCHIVED edit is rejected and the
+    // last successfully-written value is preserved untouched.
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.DRAFT);
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${courseId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Draft course edit' })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ title: 'Draft course edit' }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${courseId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Published course edit' })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ title: 'Published course edit' }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${courseId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Archived course edit attempt' })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_COURSE_LIFECYCLE_TRANSITION' } }));
+
+    await expect(prisma.client.course.findUniqueOrThrow({ where: { id: courseId } })).resolves.toMatchObject({
+      title: 'Published course edit',
+      status: CourseStatus.ARCHIVED,
+    });
+
+    // Section: identical DRAFT -> PUBLISHED -> ARCHIVED progression through the real endpoints.
+    const sectionCourseId = await createCourse(tenantId, instructorId, CourseStatus.DRAFT);
+    const sectionId = await createSection(tenantId, sectionCourseId, SectionStatus.DRAFT);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${sectionCourseId}/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Draft section edit' })
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${sectionCourseId}/sections/${sectionId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${sectionCourseId}/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Published section edit' })
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${sectionCourseId}/sections/${sectionId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${sectionCourseId}/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Archived section edit attempt' })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_SECTION_LIFECYCLE_TRANSITION' } }));
+
+    await expect(prisma.client.courseSection.findUniqueOrThrow({ where: { id: sectionId } })).resolves.toMatchObject({
+      title: 'Published section edit',
+      status: SectionStatus.ARCHIVED,
+    });
+
+    // Lesson: a real PUBLISHED Quiz-backed lesson so the publish step goes through actual
+    // content-readiness validation, unaffected by this change.
+    const lessonCourseId = await createCourse(tenantId, instructorId, CourseStatus.DRAFT);
+    const lessonSectionId = await createSection(tenantId, lessonCourseId, SectionStatus.DRAFT);
+    const lessonQuizId = await createValidQuiz(tenantId, QuizStatus.PUBLISHED);
+    const lessonId = await createQuizLesson(tenantId, lessonCourseId, lessonSectionId, LessonStatus.DRAFT, lessonQuizId);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${lessonCourseId}/sections/${lessonSectionId}/lessons/${lessonId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Draft lesson edit' })
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${lessonCourseId}/sections/${lessonSectionId}/lessons/${lessonId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${lessonCourseId}/sections/${lessonSectionId}/lessons/${lessonId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Published lesson edit' })
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${lessonCourseId}/sections/${lessonSectionId}/lessons/${lessonId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/courses/${lessonCourseId}/sections/${lessonSectionId}/lessons/${lessonId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Archived lesson edit attempt' })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_LESSON_LIFECYCLE_TRANSITION' } }));
+
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
+      title: 'Published lesson edit',
+      status: LessonStatus.ARCHIVED,
+    });
+
+    // Quiz: PUBLISHED metadata update must still work (title/attemptLimit are not
+    // publishability-affecting fields, so the existing aggregate rule is untouched), then
+    // ARCHIVED must reject.
+    const quizId = await createValidQuiz(tenantId, QuizStatus.DRAFT);
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Draft quiz edit' })
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Published quiz edit', attemptLimit: 3 })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ title: 'Published quiz edit', attemptLimit: 3, status: QuizStatus.PUBLISHED }),
+      );
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Archived quiz edit attempt' })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      title: 'Published quiz edit',
+      attemptLimit: 3,
+      status: QuizStatus.ARCHIVED,
+    });
+  });
+
+  it('an archive/metadata-edit race can never leave an ARCHIVED Course or Quiz with a metadata mutation silently applied after archival', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('archive-edit-race');
+
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.PUBLISHED);
+    const racedCourse = await Promise.all([
+      request(server)
+        .patch(`/instructor/tenants/${tenantId}/courses/${courseId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Raced course edit' }),
+      request(server).post(`/instructor/tenants/${tenantId}/courses/${courseId}/archive`).set('Authorization', `Bearer ${token}`),
+    ]);
+    const [courseEditResponse, courseArchiveResponse] = racedCourse;
+    expect(courseArchiveResponse.status).toBe(HttpStatus.OK);
+    expect([HttpStatus.OK, HttpStatus.CONFLICT]).toContain(courseEditResponse.status);
+
+    const finalCourse = await prisma.client.course.findUniqueOrThrow({ where: { id: courseId } });
+    expect(finalCourse.status).toBe(CourseStatus.ARCHIVED);
+    // The reported HTTP outcome and the persisted row must never disagree: a 409 can never
+    // coexist with the edit having actually landed, and a 200 can never coexist with the old title.
+    const courseEditSucceeded = [HttpStatus.OK].includes(courseEditResponse.status);
+    if (courseEditSucceeded) {
+      expect(finalCourse.title).toBe('Raced course edit');
+    } else {
+      expect(finalCourse.title).not.toBe('Raced course edit');
+    }
+
+    const quizId = await createValidQuiz(tenantId, QuizStatus.PUBLISHED);
+    const racedQuiz = await Promise.all([
+      request(server)
+        .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: 'Raced quiz edit' }),
+      request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`).set('Authorization', `Bearer ${token}`),
+    ]);
+    const [quizEditResponse, quizArchiveResponse] = racedQuiz;
+    expect(quizArchiveResponse.status).toBe(HttpStatus.OK);
+    expect([HttpStatus.OK, HttpStatus.CONFLICT]).toContain(quizEditResponse.status);
+
+    const finalQuiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+    expect(finalQuiz.status).toBe(QuizStatus.ARCHIVED);
+    const quizEditSucceeded = [HttpStatus.OK].includes(quizEditResponse.status);
+    if (quizEditSucceeded) {
+      expect(finalQuiz.title).toBe('Raced quiz edit');
+    } else {
+      expect(finalQuiz.title).not.toBe('Raced quiz edit');
+    }
+  });
+
   it('enforces instructor tenant authorization and non-leaking ownership for lifecycle actions', async () => {
     const { token, tenantId, instructorId } = await createInstructorTenant('scope-a');
     const { token: otherToken, tenantId: otherTenantId, instructorId: otherInstructorId } =

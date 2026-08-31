@@ -216,35 +216,59 @@ export class LessonService {
     return lessons.map(toLessonSummary);
   }
 
+  // DEC-0048: ordinary authoring edits are allowed for non-archived resources only.
+  // Transactional + a conditional `updateMany` (status != ARCHIVED) rather than a
+  // plain read-then-write, so a concurrent archiveLesson() cannot land between the
+  // existence check and the write and leave an ARCHIVED lesson metadata-mutated.
   async updateLessonMetadata(input: UpdateLessonMetadataInput): Promise<LessonSummary> {
-    await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
 
-    const existing = await this.prismaService.client.lesson.findFirst({
-      where: {
-        id: input.lessonId,
-        sectionId: input.sectionId,
-        courseId: input.courseId,
-        tenantId: input.tenantId,
-      },
-      select: { id: true },
+      const existing = await tx.lesson.findFirst({
+        where: {
+          id: input.lessonId,
+          sectionId: input.sectionId,
+          courseId: input.courseId,
+          tenantId: input.tenantId,
+        },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new LessonNotFoundError();
+      }
+
+      if (existing.status === LessonStatus.ARCHIVED) {
+        throw new InvalidLessonLifecycleTransitionError();
+      }
+
+      const updated = await tx.lesson.updateMany({
+        where: {
+          id: input.lessonId,
+          sectionId: input.sectionId,
+          courseId: input.courseId,
+          tenantId: input.tenantId,
+          status: { not: LessonStatus.ARCHIVED },
+        },
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.availableFrom !== undefined ? { availableFrom: input.availableFrom } : {}),
+          ...(input.availableUntil !== undefined ? { availableUntil: input.availableUntil } : {}),
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new InvalidLessonLifecycleTransitionError();
+      }
+
+      const lesson = await tx.lesson.findUniqueOrThrow({
+        where: { id_tenantId_courseId: { id: input.lessonId, tenantId: input.tenantId, courseId: input.courseId } },
+        include: LESSON_DETAIL_INCLUDE,
+      });
+
+      return toLessonSummary(lesson);
     });
-
-    if (!existing) {
-      throw new LessonNotFoundError();
-    }
-
-    const lesson = await this.prismaService.client.lesson.update({
-      where: { id_tenantId_courseId: { id: input.lessonId, tenantId: input.tenantId, courseId: input.courseId } },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.availableFrom !== undefined ? { availableFrom: input.availableFrom } : {}),
-        ...(input.availableUntil !== undefined ? { availableUntil: input.availableUntil } : {}),
-      },
-      include: LESSON_DETAIL_INCLUDE,
-    });
-
-    return toLessonSummary(lesson);
   }
 
   async archiveLesson(

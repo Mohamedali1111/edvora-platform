@@ -119,39 +119,62 @@ export class CourseSectionService {
     return sections.map(toSectionSummary);
   }
 
+  // DEC-0048: ordinary authoring edits are allowed for non-archived resources only.
+  // Transactional + a conditional `updateMany` (status != ARCHIVED) rather than a
+  // plain read-then-write, so a concurrent archiveSection() cannot land between the
+  // existence check and the write and leave an ARCHIVED section metadata-mutated.
   async updateSectionMetadata(input: UpdateSectionMetadataInput): Promise<CourseSectionSummary> {
-    await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
 
-    const existing = await this.prismaService.client.courseSection.findUnique({
-      where: {
-        id_courseId_tenantId: {
+      const existing = await tx.courseSection.findUnique({
+        where: {
+          id_courseId_tenantId: {
+            id: input.sectionId,
+            courseId: input.courseId,
+            tenantId: input.tenantId,
+          },
+        },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new SectionNotFoundError();
+      }
+
+      if (existing.status === SectionStatus.ARCHIVED) {
+        throw new InvalidSectionLifecycleTransitionError();
+      }
+
+      const updated = await tx.courseSection.updateMany({
+        where: {
           id: input.sectionId,
           courseId: input.courseId,
           tenantId: input.tenantId,
+          status: { not: SectionStatus.ARCHIVED },
         },
-      },
-      select: { id: true },
-    });
-
-    if (!existing) {
-      throw new SectionNotFoundError();
-    }
-
-    const section = await this.prismaService.client.courseSection.update({
-      where: {
-        id_courseId_tenantId: {
-          id: input.sectionId,
-          courseId: input.courseId,
-          tenantId: input.tenantId,
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
         },
-      },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-      },
-    });
+      });
 
-    return toSectionSummary(section);
+      if (updated.count !== 1) {
+        throw new InvalidSectionLifecycleTransitionError();
+      }
+
+      const section = await tx.courseSection.findUniqueOrThrow({
+        where: {
+          id_courseId_tenantId: {
+            id: input.sectionId,
+            courseId: input.courseId,
+            tenantId: input.tenantId,
+          },
+        },
+      });
+
+      return toSectionSummary(section);
+    });
   }
 
   async archiveSection(
