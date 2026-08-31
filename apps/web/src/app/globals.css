@@ -45,7 +45,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -152,8 +153,8 @@ button:disabled {
 }
 
 input,
-select {
-  min-height: 46px;
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -162,7 +163,18 @@ select {
   padding: 0.8rem 0.9rem;
 }
 
-input[aria-invalid="true"] {
+input,
+select {
+  min-height: 46px;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
   border-color: var(--danger);
 }
 
@@ -792,9 +804,14 @@ input[aria-invalid="true"] {
 }
 
 .students-page,
+.courses-page,
 .detail-page {
   display: grid;
   gap: 1.25rem;
+}
+
+.course-lifecycle-actions {
+  justify-content: flex-start;
 }
 
 .page-header {
@@ -1079,6 +1096,16 @@ input[aria-invalid="true"] {
   .table-col-secondary {
     display: none;
   }
+}
+
+.archived-banner {
+  border-inline-start: 4px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.6;
+  padding: 1rem;
 }
 
 .activation-token-box {

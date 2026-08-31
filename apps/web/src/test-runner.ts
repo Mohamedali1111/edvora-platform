@@ -8,3 +8,7 @@ import "./features/instructor/students/error-mapping.test";
 import "./features/instructor/students/pagination.test";
 import "./features/instructor/students/students-service.test";
 import "./features/instructor/students/enrollments-service.test";
+import "./features/instructor/courses/lifecycle.test";
+import "./features/instructor/courses/validation.test";
+import "./features/instructor/courses/error-mapping.test";
+import "./features/instructor/courses/courses-service.test";

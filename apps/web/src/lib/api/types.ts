@@ -53,6 +53,7 @@ export type OffsetPage<T> = {
 };
 
 export type CourseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type CourseVisibility = "PRIVATE" | "ENROLLED_ONLY";
 
 export type CourseSummary = {
   courseId: string;
@@ -62,11 +63,27 @@ export type CourseSummary = {
   description: string | null;
   thumbnailAssetRef: string | null;
   status: CourseStatus;
-  visibility: string;
+  visibility: CourseVisibility;
   publishedAt: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Body for POST /instructor/tenants/:tenantId/courses. `status` is always server-derived (DRAFT) - never client-supplied. */
+export type CreateCourseRequest = {
+  title: string;
+  description?: string;
+  thumbnailAssetRef?: string;
+  visibility?: CourseVisibility;
+};
+
+/** Body for PATCH /instructor/tenants/:tenantId/courses/:courseId. Metadata only - lifecycle status changes go through the dedicated publish/archive endpoints. */
+export type UpdateCourseRequest = {
+  title?: string;
+  description?: string | null;
+  thumbnailAssetRef?: string | null;
+  visibility?: CourseVisibility;
 };
 
 export type TenantStudentStatus = "ACTIVE" | "INACTIVE" | "REMOVED";
