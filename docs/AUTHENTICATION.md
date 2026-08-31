@@ -1,6 +1,6 @@
 # Authentication
 
-This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, password-reset-token, authentication use-case orchestration services, and the first public REST authentication boundary are implemented in the API. Mobile storage, email delivery, tenant authorization, course authorization, and device binding are not implemented yet.
+This document defines the V1 authentication and session-security design for Edvora. Internal password, token, refresh-session, account-activation-token, password-reset-token, authentication use-case orchestration services, and the public REST authentication boundary are implemented in the API. Tenant authorization, course authorization, and student device binding are implemented as separate backend domains; mobile secure storage and email delivery are not implemented yet.
 
 ## Scope
 

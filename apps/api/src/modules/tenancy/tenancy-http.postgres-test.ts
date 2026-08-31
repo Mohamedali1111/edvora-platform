@@ -889,34 +889,148 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
   });
 
   async function clearTenancyData(): Promise<void> {
-    await prisma.client.notification.deleteMany();
-    await prisma.client.securityEvent.deleteMany();
-    await prisma.client.enrollment.deleteMany();
-    await prisma.client.course.deleteMany();
-    await prisma.client.deviceChangeRequest.deleteMany();
-    await prisma.client.refreshSession.deleteMany();
-    await prisma.client.accountActivationToken.deleteMany();
-    await prisma.client.passwordResetToken.deleteMany();
-    await prisma.client.authCredential.deleteMany();
-    await prisma.client.tenantStudent.deleteMany();
-    await prisma.client.tenantMembership.deleteMany();
-    await prisma.client.studentDevice.deleteMany();
-    await prisma.client.studentProfile.deleteMany();
-    await prisma.client.instructorProfile.deleteMany();
-    await prisma.client.tenant.deleteMany({
+    const testUsers = await prisma.client.user.findMany({
+      where: { normalizedEmail: { endsWith: '@example.test' } },
+      select: { id: true },
+    });
+    const testUserIds = testUsers.map((user) => user.id);
+
+    const testTenants = await prisma.client.tenant.findMany({
       where: {
-        slug: {
-          startsWith: 'tenancy-test-',
+        OR: [
+          { slug: { startsWith: 'tenancy-test-' } },
+          { memberships: { some: { userId: { in: testUserIds } } } },
+          { tenantStudents: { some: { studentUserId: { in: testUserIds } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    const testTenantIds = testTenants.map((tenant) => tenant.id);
+
+    await prisma.client.notification.deleteMany({
+      where: {
+        OR: [{ recipientUserId: { in: testUserIds } }, { tenantId: { in: testTenantIds } }],
+      },
+    });
+    await prisma.client.securityEvent.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { actorUserId: { in: testUserIds } },
+          { targetUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.lessonProgress.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { studentUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.quizAttemptAnswer.deleteMany({
+      where: {
+        attempt: {
+          OR: [
+            { tenantId: { in: testTenantIds } },
+            { studentUserId: { in: testUserIds } },
+          ],
         },
       },
     });
-    await prisma.client.user.deleteMany({
+    await prisma.client.quizAttempt.deleteMany({
       where: {
-        normalizedEmail: {
-          endsWith: '@example.test',
-        },
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { studentUserId: { in: testUserIds } },
+        ],
       },
     });
+    await prisma.client.enrollment.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { studentUserId: { in: testUserIds } },
+          { grantedByUserId: { in: testUserIds } },
+          { revokedByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.questionOption.deleteMany({
+      where: { question: { tenantId: { in: testTenantIds } } },
+    });
+    await prisma.client.question.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.quizLesson.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.videoLesson.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.documentLesson.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.lesson.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.courseSection.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.quiz.deleteMany({ where: { tenantId: { in: testTenantIds } } });
+    await prisma.client.videoAsset.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { uploadedByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.documentAsset.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { uploadedByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.course.deleteMany({
+      where: {
+        OR: [{ tenantId: { in: testTenantIds } }, { createdByUserId: { in: testUserIds } }],
+      },
+    });
+    await prisma.client.deviceChangeRequest.deleteMany({
+      where: {
+        OR: [
+          { studentUserId: { in: testUserIds } },
+          { reviewedByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.refreshSession.deleteMany({ where: { userId: { in: testUserIds } } });
+    await prisma.client.accountActivationToken.deleteMany({
+      where: {
+        OR: [
+          { userId: { in: testUserIds } },
+          { tenantId: { in: testTenantIds } },
+          { initiatedByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.passwordResetToken.deleteMany({
+      where: {
+        OR: [{ userId: { in: testUserIds } }, { initiatedByUserId: { in: testUserIds } }],
+      },
+    });
+    await prisma.client.authCredential.deleteMany({ where: { userId: { in: testUserIds } } });
+    await prisma.client.tenantStudent.deleteMany({
+      where: {
+        OR: [
+          { tenantId: { in: testTenantIds } },
+          { studentUserId: { in: testUserIds } },
+          { createdByUserId: { in: testUserIds } },
+        ],
+      },
+    });
+    await prisma.client.tenantMembership.deleteMany({
+      where: {
+        OR: [{ tenantId: { in: testTenantIds } }, { userId: { in: testUserIds } }],
+      },
+    });
+    await prisma.client.studentDevice.deleteMany({ where: { studentUserId: { in: testUserIds } } });
+    await prisma.client.studentProfile.deleteMany({ where: { userId: { in: testUserIds } } });
+    await prisma.client.instructorProfile.deleteMany({ where: { userId: { in: testUserIds } } });
+    await prisma.client.tenant.deleteMany({ where: { id: { in: testTenantIds } } });
+    await prisma.client.user.deleteMany({ where: { id: { in: testUserIds } } });
   }
 
   async function createUser(emailPrefix: string, platformRole: PlatformRole): Promise<string> {

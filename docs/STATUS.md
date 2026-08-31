@@ -62,7 +62,9 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
   timestamp/replay expiry, state transitions are monotonic and replay-safe: `READY` cannot regress to
   `PROCESSING`, `UPLOADING`, or `FAILED`; duplicate `READY` is safe; unknown provider videos are
   acknowledged as no-op. Status mapping is documented in `docs/MEDIA.md`, including status `4`
-  staying non-ready and status `3` becoming `READY`. Student playback capability remains deferred.
+  staying non-ready and status `3` becoming `READY`. Student playback capability issuance is
+  implemented through short-lived, path-scoped Bunny HLS URLs after the canonical entitlement and
+  device checks pass.
 
 - Established root documentation for product, architecture, security, UI, release compliance, reliability, decisions, and future handoffs.
 - Established a pnpm workspace monorepo foundation.
@@ -1028,6 +1030,41 @@ Backend V1 Completion — API Readiness Slice validation passed:
   (`new-academy`/`race-academy`) remains carried forward, untouched, for the Backend Final Gate.
 - This is the final implementation slice before the Backend Final Gate. The backend is not marked
   frozen by this entry — that determination belongs to the Final Gate itself.
+
+Backend V1 Final Gate - 2026-08-31:
+
+- **Backend V1 API: FROZEN for frontend/mobile implementation.** Instructor Web, Admin Web, and
+  Student Mobile may now build against the current backend route contracts for authentication,
+  current-user bootstrap, tenant context, instructor onboarding, device authorization and
+  device-change review, tenant-student association, enrollments, courses, sections, lessons,
+  document/video media, quizzes, quiz attempts/results, lesson progress, course-progress reports,
+  quiz-attempt reports, and in-app notifications.
+- The known `tenancy-http.postgres-test.ts` `clearTenancyData()` defect was fixed in the test
+  harness only. Cleanup is now derived from test-owned `@example.test` users and their related
+  test tenants, including tenants created through real admin routes with literal slugs such as
+  `new-academy` and `race-academy`; no production schema or API behavior changed.
+- Migration gate passed on disposable PostgreSQL 16 from zero with the four existing migrations in
+  order: `20260823000000_initial_schema`, `20260823010000_add_auth_security_tokens`,
+  `20260823020000_add_tenant_student_associations`, and
+  `20260830000000_add_quiz_attempt_passing_threshold_snapshot`. Prisma schema validation,
+  generation, and database-to-schema diff passed with no pending migration required.
+- Full backend PostgreSQL suite passed three times from fresh/clean disposable databases:
+  18 suites, 269 tests on each run. Additional concurrency-focused PostgreSQL passes also passed
+  (7 suites/112 tests, then 3 suites/56 tests for the missed attempt/order/lifecycle files).
+- Known P1 pre-production items: forgot-password request/initiation and delivery; health/readiness
+  endpoint; real Cloudflare R2 and Bunny Stream smoke integration in a non-local environment;
+  admin SecurityEvent visibility if operations/support needs it before launch; production
+  key-management, proxy/CORS/origin configuration review, and rate-limit strategy review before
+  multi-replica or public abuse exposure.
+- Known P2 deferred items: DRM/MediaCage or equivalent DRM provider work, media cleanup scheduler
+  for abandoned uploads/orphan provider objects once scheduling infrastructure exists, optional
+  document download-header refinements, PDF magic-byte verification if a lower-trust upload actor
+  is introduced, richer attempt review/reveal-policy behavior, push/email/SMS notification
+  providers, advanced reporting indexes after measured volume, MFA, OAuth/social login, billing,
+  marketplace, live classes, assignments, certificates, and advanced analytics.
+- Backend contracts should not be changed casually during frontend/mobile implementation. Contract
+  changes after this freeze require a concrete blocker, a security correctness issue, or an
+  explicitly approved product decision.
 
 ## Exact Recommended Next Step
 
