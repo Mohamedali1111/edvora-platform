@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "incremental": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src/test-runner.ts", "src/**/*.test.ts", "src/lib/**/*.ts", "src/lib/**/*.tsx", "src/features/auth/**/*.ts"],
+  "exclude": ["node_modules", ".next", ".test-dist"]
+}
