@@ -19,6 +19,13 @@ export const instructorSections: Array<{ id: InstructorSection; labelKey: Transl
   { id: "notifications", labelKey: "nav.notifications", href: "/instructor/notifications" },
 ];
 
-export function toInstructorSection(value: string | undefined): InstructorSection {
-  return instructorSections.some((section) => section.id === value) ? (value as InstructorSection) : "overview";
+/**
+ * Resolves the active instructor section from a pathname alone - pure and
+ * synchronous, with no dependency on auth/session state. Returns null for a
+ * path that doesn't match any known section (e.g. a typo'd URL), which the
+ * shell renders as an in-shell "page not found" state instead of guessing.
+ */
+export function resolveInstructorSection(pathname: string): InstructorSection | null {
+  const match = instructorSections.find((section) => pathname === section.href || pathname.startsWith(`${section.href}/`));
+  return match ? match.id : null;
 }

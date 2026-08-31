@@ -48,6 +48,15 @@ export class AuthService {
       });
   }
 
+  /**
+   * The shared, authenticated ApiClient instance - same token store, same
+   * coalesced-refresh behavior. Feature areas (e.g. the instructor overview
+   * data layer) should reuse this rather than constructing their own client.
+   */
+  getClient(): ApiClient {
+    return this.api;
+  }
+
   async login(email: string, password: string): Promise<SessionSnapshot> {
     const session = await this.api.request<LoginResponse>("/auth/login", {
       method: "POST",

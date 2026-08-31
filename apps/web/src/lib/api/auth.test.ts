@@ -9,6 +9,14 @@ test("validates instructor login input before submitting", () => {
   assert.deepEqual(validateLoginInput("instructor@example.test", "password"), {});
 });
 
+test("bootstrap() takes no arguments, so it can never react to a route/pathname value", () => {
+  // Guards the persistent-shell architecture: the instructor session provider
+  // calls bootstrap() once per authenticated app entry, not once per section
+  // navigation. If bootstrap ever grew a pathname/section parameter, that
+  // guarantee would quietly become callable-but-wrong instead of a type error.
+  assert.equal(AuthService.prototype.bootstrap.length, 0);
+});
+
 test("bootstraps a successful instructor session through auth/me and tenant context", async () => {
   const tokenStore = new AccessTokenStore();
   const calls: string[] = [];
