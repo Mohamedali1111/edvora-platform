@@ -13,6 +13,7 @@ const ERROR_STATUS: Record<TenancyErrorCode, HttpStatus> = {
   TENANT_STUDENT_NOT_FOUND: HttpStatus.NOT_FOUND,
   ENROLLMENT_NOT_FOUND: HttpStatus.NOT_FOUND,
   ENROLLMENT_ALREADY_ACTIVE: HttpStatus.CONFLICT,
+  ENROLLMENT_QUERY_FILTER_REQUIRED: HttpStatus.BAD_REQUEST,
   COURSE_NOT_FOUND: HttpStatus.NOT_FOUND,
 };
 
@@ -28,6 +29,7 @@ const ERROR_MESSAGES: Record<TenancyErrorCode, string> = {
   TENANT_STUDENT_NOT_FOUND: 'Student was not found for this tenant.',
   ENROLLMENT_NOT_FOUND: 'Enrollment was not found.',
   ENROLLMENT_ALREADY_ACTIVE: 'Student already has an active enrollment for this course.',
+  ENROLLMENT_QUERY_FILTER_REQUIRED: 'Provide a courseId or studentUserId filter to list enrollments.',
   COURSE_NOT_FOUND: 'Course was not found.',
 };
 

@@ -17,10 +17,15 @@ import {
   CourseNotFoundError,
   EnrollmentAlreadyActiveError,
   EnrollmentNotFoundError,
+  EnrollmentQueryFilterRequiredError,
   StudentRequiredError,
   TenantStudentNotFoundError,
 } from '../errors/tenancy.errors';
-import type { EnrollmentSummary, StudentEnrollmentSummary } from '../types/tenancy.types';
+import type {
+  EnrollmentSummary,
+  InstructorEnrollmentSummary,
+  StudentEnrollmentSummary,
+} from '../types/tenancy.types';
 import { isKnownUniqueViolation } from './prisma-error.util';
 import { TenantAuthorizationService } from './tenant-authorization.service';
 
@@ -31,6 +36,16 @@ export type CreateEnrollmentInput = {
   courseId: string;
   startsAt?: Date | null;
   endsAt?: Date | null;
+};
+
+export type ListEnrollmentsInput = {
+  principal: AuthenticatedPrincipal;
+  tenantId: string;
+  courseId?: string;
+  studentUserId?: string;
+  status?: EnrollmentStatus;
+  limit: number;
+  offset: number;
 };
 
 @Injectable()
@@ -214,6 +229,87 @@ export class EnrollmentService {
     });
   }
 
+  /**
+   * The one instructor-facing enrollment read: a course roster (`courseId` filter), a student's
+   * enrollment history within this tenant (`studentUserId` filter), or both together (a specific
+   * student's enrollment(s) for a specific course). Deliberately a single flat, filtered `GET` on
+   * the existing `/instructor/tenants/:tenantId/enrollments` path rather than two new nested
+   * route families — see `ListEnrollmentsQueryDto`. At least one filter is required so this never
+   * becomes an unscoped "every enrollment in the tenant" read.
+   *
+   * Lists persisted rows as-is, including `REVOKED`/`EXPIRED` history — an enrollment row is never
+   * deleted or hidden by default (`docs/TENANCY-ENROLLMENT.md`: revoke "preserves historical
+   * rows"), and a student re-enrolled after revocation legitimately has multiple durable rows for
+   * the same (course, student): the partial unique index
+   * (`enrollments_one_active_per_student_course_key`) only forbids two simultaneously `ACTIVE`
+   * rows, not multiple historical ones. An explicit `status` filter narrows this when the caller
+   * wants only current/only-revoked state.
+   *
+   * One query for the list itself (no N+1): tenant/course/student ownership is proved first via
+   * two narrow existence checks (mirroring `createEnrollment`'s and `getStudent`'s own composite-
+   * key lookups), then the list itself filters/orders/paginates entirely at the database level
+   * with a `select` projecting only the fields this response actually needs.
+   */
+  async listEnrollments(input: ListEnrollmentsInput): Promise<InstructorEnrollmentSummary[]> {
+    await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
+
+    if (!input.courseId && !input.studentUserId) {
+      throw new EnrollmentQueryFilterRequiredError();
+    }
+
+    if (input.courseId) {
+      const course = await this.prismaService.client.course.findUnique({
+        where: { id_tenantId: { id: input.courseId, tenantId: input.tenantId } },
+        select: { id: true },
+      });
+
+      if (!course) {
+        throw new CourseNotFoundError();
+      }
+    }
+
+    if (input.studentUserId) {
+      const tenantStudent = await this.prismaService.client.tenantStudent.findUnique({
+        where: {
+          tenantId_studentUserId: { tenantId: input.tenantId, studentUserId: input.studentUserId },
+        },
+        select: { id: true },
+      });
+
+      if (!tenantStudent) {
+        throw new TenantStudentNotFoundError();
+      }
+    }
+
+    const rows = await this.prismaService.client.enrollment.findMany({
+      where: {
+        tenantId: input.tenantId,
+        ...(input.courseId ? { courseId: input.courseId } : {}),
+        ...(input.studentUserId ? { studentUserId: input.studentUserId } : {}),
+        ...(input.status ? { status: input.status } : {}),
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        courseId: true,
+        studentUserId: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        revokedAt: true,
+        createdAt: true,
+        course: { select: { title: true, status: true } },
+        student: { select: { email: true, displayName: true, accountStatus: true } },
+      },
+      take: input.limit,
+      skip: input.offset,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+    });
+
+    const now = this.clock.now();
+    return rows.map((row) => toInstructorEnrollmentSummary(row, now));
+  }
+
   async listStudentEnrollments(
     principal: AuthenticatedPrincipal,
     limit: number,
@@ -276,5 +372,55 @@ function toEnrollmentSummary(row: {
     endsAt: row.endsAt,
     revokedAt: row.revokedAt,
     createdAt: row.createdAt,
+  };
+}
+
+function toInstructorEnrollmentSummary(
+  row: {
+    id: string;
+    tenantId: string;
+    courseId: string;
+    studentUserId: string;
+    status: EnrollmentStatus;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    revokedAt: Date | null;
+    createdAt: Date;
+    course: {
+      title: string;
+      status: CourseStatus;
+    };
+    student: {
+      email: string;
+      displayName: string | null;
+      accountStatus: AccountStatus;
+    };
+  },
+  now: Date,
+): InstructorEnrollmentSummary {
+  return {
+    enrollmentId: row.id,
+    tenantId: row.tenantId,
+    courseId: row.courseId,
+    courseTitle: row.course.title,
+    courseStatus: row.course.status,
+    studentUserId: row.studentUserId,
+    status: row.status,
+    startsAt: row.startsAt,
+    endsAt: row.endsAt,
+    revokedAt: row.revokedAt,
+    createdAt: row.createdAt,
+    student: {
+      studentUserId: row.studentUserId,
+      email: row.student.email,
+      displayName: row.student.displayName,
+      accountStatus: row.student.accountStatus,
+    },
+    // Exactly the canonical Enrollment-row entitlement predicate — see
+    // `InstructorEnrollmentSummary.currentlyEffective`'s doc comment for scope/rationale.
+    currentlyEffective:
+      row.status === EnrollmentStatus.ACTIVE &&
+      (row.startsAt === null || row.startsAt <= now) &&
+      (row.endsAt === null || row.endsAt > now),
   };
 }

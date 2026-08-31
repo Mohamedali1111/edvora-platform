@@ -10,6 +10,7 @@ Implemented:
 - Instructor tenant context reads.
 - Instructor tenant-scoped student association.
 - Instructor tenant-scoped enrollment creation and revocation.
+- Instructor enrollment visibility: a course roster and a student's enrollment history, via one filtered, paginated read.
 - Student enrollment listing behind authentication and student-device authorization.
 - Student course entitlement and read access (own entitled course list, entitled course structure) behind authentication, student-device authorization, and the full course-content entitlement chain. Course, section, and lesson *authoring* APIs are documented separately (see `docs/STATUS.md`'s Course Slice A/B entries).
 - Minimal student lesson progress: reading own progress alongside course structure, and marking an accessible non-quiz lesson completed.
@@ -107,6 +108,27 @@ Enrollment remains course entitlement. `TenantStudent` alone does not grant cour
 If an active enrollment for the same student/course has `endsAt <= now`, the service marks it `EXPIRED` inside the transaction before creating the replacement active enrollment. Active future/non-expired enrollments still block duplicates through service checks and the PostgreSQL partial unique index.
 
 `POST /instructor/tenants/:tenantId/enrollments/:enrollmentId/revoke` revokes only active enrollments within the instructor's authorized tenant and preserves historical rows.
+
+## Instructor Enrollment Visibility
+
+`GET /instructor/tenants/:tenantId/enrollments` is the one instructor-facing enrollment read, reused for both the course-roster and student-enrollment-history screens Instructor Web needs, via query filters rather than two separate nested route families:
+
+- `courseId` — a course roster: every Enrollment for that Course within this tenant.
+- `studentUserId` — a student's enrollment history: every Enrollment for that student within this tenant, across courses.
+- both together — that specific student's Enrollment(s) for that specific Course.
+- `status` (optional) — narrows to one `EnrollmentStatus`.
+
+This route already exists flat (not nested under `/courses/:courseId/` or `/students/:studentUserId/`) for `POST`/`revoke`, so a filtered `GET` on the same base path was the smaller, more consistent addition over introducing new nested route families. At least one of `courseId`/`studentUserId` is required — `ENROLLMENT_QUERY_FILTER_REQUIRED` (400) otherwise — so this stays the two concrete reads it exists for, never an unscoped "every enrollment in the tenant" read.
+
+Authorization proves, in order: current DB `ACTIVE` `INSTRUCTOR` with active tenant membership (`assertInstructorTenantAccess`, the same check every other instructor tenancy route uses); when `courseId` is given, that the Course belongs to this exact tenant (`COURSE_NOT_FOUND` otherwise — same non-leaking behavior as `createEnrollment`); when `studentUserId` is given, that a `TenantStudent` row exists for this exact (tenant, student) pair (`TENANT_STUDENT_NOT_FOUND` otherwise — same non-leaking behavior as `GET .../students/:studentUserId`, existence-only, independent of the association's current `status`, since instructor-visible enrollment history should not disappear just because a `TenantStudent` association was later deactivated). Every filter is applied as a relational `WHERE` clause in the single list query (`tenantId` always included), never as an in-memory post-filter.
+
+Each item is an `InstructorEnrollmentSummary`: `enrollmentId`, `tenantId`, `courseId`/`courseTitle`/`courseStatus`, `studentUserId`, `status`, `startsAt`/`endsAt`/`revokedAt`/`createdAt`, a nested `student` contact object (`studentUserId`, `email`, `displayName`, `accountStatus` — exactly the fields already exposed to instructors via `TenantStudentSummary`, never broadened), and a derived `currentlyEffective` boolean. `currentlyEffective` is computed at read time from the exact canonical Enrollment-row entitlement predicate (`status === ACTIVE && (startsAt IS NULL OR startsAt <= now) && (endsAt IS NULL OR endsAt > now)`) — deliberately narrower than full student entitlement, since it does not also require the Course to be `PUBLISHED` or the Tenant/`TenantStudent` to be `ACTIVE`; an instructor roster already has that context.
+
+Lists persisted rows as-is by default, `REVOKED`/`EXPIRED` history included — an Enrollment row is never deleted or hidden. A student re-enrolled after revocation legitimately has multiple durable rows for the same (student, Course): the partial unique index `enrollments_one_active_per_student_course_key` only forbids two simultaneously `ACTIVE` rows for the same (student, course), never multiple historical ones, and this endpoint never collapses them.
+
+Pagination uses the repository's current bounded `limit`/`offset` contract (`PaginationQueryDto`: `limit` 1–100, default 25; `offset` ≥ 0, default 0) with deterministic `createdAt` descending, `id` ascending ordering — newest enrollment first, stable tie-break — matching every other instructor list route in this codebase. This endpoint does not add the `hasMore` pagination-contract change; that is reserved for a dedicated API-readiness slice so every list contract changes together.
+
+Existing indexes (`enrollments_tenant_id_course_id_status_idx` on `(tenantId, courseId, status)`; `enrollments_student_user_id_status_idx` on `(studentUserId, status)`; `enrollments_student_user_id_course_id_status_idx` on `(studentUserId, courseId, status)`) are sufficient for V1 scale: the course-roster query is a direct prefix match on the first index, and the student-history query narrows on `studentUserId` (already a highly selective equality match, then re-checked against `tenantId`) via the second or third. No migration was needed or added.
 
 ## Student Enrollment Read
 

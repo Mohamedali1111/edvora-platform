@@ -10,6 +10,7 @@ export type TenancyErrorCode =
   | 'TENANT_STUDENT_NOT_FOUND'
   | 'ENROLLMENT_NOT_FOUND'
   | 'ENROLLMENT_ALREADY_ACTIVE'
+  | 'ENROLLMENT_QUERY_FILTER_REQUIRED'
   | 'COURSE_NOT_FOUND';
 
 export class TenancyError extends Error {
@@ -91,5 +92,18 @@ export class EnrollmentAlreadyActiveError extends TenancyError {
 export class CourseNotFoundError extends TenancyError {
   constructor() {
     super('COURSE_NOT_FOUND', 'Course was not found.');
+  }
+}
+
+// Distinct from a validation-pipe body/param shape error: the two query parameters are each
+// individually optional and independently well-formed (a valid UUID or absent), but listing
+// enrollments with neither would mean "every enrollment in the tenant," a broader read this
+// endpoint deliberately does not support — see `ListEnrollmentsQueryDto`.
+export class EnrollmentQueryFilterRequiredError extends TenancyError {
+  constructor() {
+    super(
+      'ENROLLMENT_QUERY_FILTER_REQUIRED',
+      'Provide a courseId or studentUserId filter to list enrollments.',
+    );
   }
 }

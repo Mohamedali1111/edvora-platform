@@ -1,12 +1,19 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { CreateEnrollmentDto } from '../dto/create-enrollment.dto';
+import { ListEnrollmentsQueryDto } from '../dto/list-enrollments-query.dto';
 import { EnrollmentIdParamDto, TenantIdParamDto } from '../dto/uuid-param.dto';
 import { EnrollmentService } from '../services/enrollment.service';
-import type { EnrollmentSummary } from '../types/tenancy.types';
+import type { EnrollmentSummary, InstructorEnrollmentSummary } from '../types/tenancy.types';
+
+type InstructorEnrollmentListResponse = {
+  items: InstructorEnrollmentSummary[];
+  limit: number;
+  offset: number;
+};
 
 const TENANCY_THROTTLE = {
   tenancy: {
@@ -20,6 +27,30 @@ const TENANCY_THROTTLE = {
 @Throttle(TENANCY_THROTTLE)
 export class InstructorEnrollmentController {
   constructor(private readonly enrollments: EnrollmentService) {}
+
+  @Get()
+  @HttpCode(HttpStatus.OK)
+  async list(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: TenantIdParamDto,
+    @Query() query: ListEnrollmentsQueryDto,
+  ): Promise<InstructorEnrollmentListResponse> {
+    const limit = query.limit ?? 25;
+    const offset = query.offset ?? 0;
+    return {
+      items: await this.enrollments.listEnrollments({
+        principal,
+        tenantId: params.tenantId,
+        courseId: query.courseId,
+        studentUserId: query.studentUserId,
+        status: query.status,
+        limit,
+        offset,
+      }),
+      limit,
+      offset,
+    };
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

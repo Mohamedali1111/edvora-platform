@@ -405,6 +405,310 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
       });
   });
 
+  // --- Enrollment Visibility Slice: instructor course-roster / student-enrollment reads ---
+
+  it('lists a course roster scoped to the exact tenant/course, with student contact info, currentlyEffective, deterministic ordering, and pagination', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('roster');
+    const courseX = await createCourse(tenantId, instructorId, 'Roster course X');
+    const courseY = await createCourse(tenantId, instructorId, 'Roster course Y');
+    const student1 = await createStudentWithTenant('roster-student-1', tenantId, instructorId);
+    const student2 = await createStudentWithTenant('roster-student-2', tenantId, instructorId);
+    const student3 = await createStudentWithTenant('roster-student-3', tenantId, instructorId);
+
+    const enrollment1 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: student1,
+      courseId: courseX,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.ACTIVE,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const enrollment2 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: student2,
+      courseId: courseX,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.ACTIVE,
+      startsAt: new Date('2999-01-01T00:00:00.000Z'), // scheduled far in the future
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
+    const enrollment3 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: student3,
+      courseId: courseX,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.REVOKED,
+      revokedAt: new Date('2026-01-03T00:00:00.000Z'),
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    });
+    // A different course for student1 — must never appear in courseX's roster.
+    await createEnrollmentDirect({
+      tenantId,
+      studentUserId: student1,
+      courseId: courseY,
+      grantedByUserId: instructorId,
+      createdAt: new Date('2026-01-04T00:00:00.000Z'),
+    });
+
+    const firstPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId: courseX, limit: 2, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    type RosterItem = {
+      enrollmentId: string;
+      courseId: string;
+      courseTitle: string;
+      status: string;
+      currentlyEffective: boolean;
+      student: { studentUserId: string; email: string; displayName: string | null; accountStatus: string };
+    };
+    const firstBody = responseBody<{ items: RosterItem[]; limit: number; offset: number }>(firstPage);
+    expect(firstBody.items.map((item) => item.enrollmentId)).toEqual([enrollment3, enrollment2]);
+    expect(firstBody.items.every((item) => item.courseId === courseX)).toBe(true);
+
+    const secondPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId: courseX, limit: 2, offset: 2 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const secondBody = responseBody<{ items: RosterItem[] }>(secondPage);
+    expect(secondBody.items.map((item) => item.enrollmentId)).toEqual([enrollment1]);
+
+    const active = firstBody.items.find((item) => item.enrollmentId === enrollment2) as RosterItem;
+    expect(active.currentlyEffective).toBe(false); // ACTIVE but not yet started
+    expect(active.student).toMatchObject({ studentUserId: student2, email: `roster-student-2@example.test` });
+
+    const revoked = firstBody.items.find((item) => item.enrollmentId === enrollment3) as RosterItem;
+    expect(revoked.currentlyEffective).toBe(false);
+    expect(revoked.status).toBe(EnrollmentStatus.REVOKED);
+
+    const eligible = secondBody.items[0];
+    expect(eligible.currentlyEffective).toBe(true);
+  });
+
+  it('denies a course roster for a foreign/random course and a foreign instructor without leaking existence', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('roster-deny');
+    const { token: otherToken, tenantId: otherTenantId, instructorId: otherInstructorId } =
+      await createInstructorTenant('roster-deny-other');
+    const courseId = await createCourse(tenantId, instructorId, 'Deny roster course');
+    const otherCourseId = await createCourse(otherTenantId, otherInstructorId, 'Other tenant course');
+
+    const randomCourse = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId: uuid.create() })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+    expect(randomCourse.body).toMatchObject({ error: { code: 'COURSE_NOT_FOUND' } });
+
+    // A real course, but belonging to a different tenant — queried under this instructor's own
+    // (authorized) tenant path. Must not leak that the course exists elsewhere.
+    const foreignCourse = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId: otherCourseId })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+    expect(foreignCourse.body).toMatchObject({ error: { code: 'COURSE_NOT_FOUND' } });
+
+    // An instructor with no membership in the target tenant at all.
+    await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId })
+      .set('Authorization', `Bearer ${otherToken}`)
+      .expect(HttpStatus.FORBIDDEN);
+  });
+
+  it('shows multiple historical Enrollment rows for the same student/course after re-enrollment, never collapsed', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('history-rows');
+    const courseId = await createCourse(tenantId, instructorId, 'History course');
+    const studentId = await createStudentWithTenant('history-student', tenantId, instructorId);
+
+    const revokedRow = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.REVOKED,
+      revokedAt: new Date('2026-02-01T00:00:00.000Z'),
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    // Legitimate re-enrollment after revocation: a second durable row for the identical
+    // (student, course) pair. Only one ACTIVE row may exist at a time (the partial unique index),
+    // but historical rows are never merged or hidden.
+    const activeRow = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.ACTIVE,
+      createdAt: new Date('2026-02-02T00:00:00.000Z'),
+    });
+
+    const response = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const body = responseBody<{ items: Array<{ enrollmentId: string; status: string }> }>(response);
+    expect(body.items.map((item) => item.enrollmentId)).toEqual([activeRow, revokedRow]);
+    expect(new Set(body.items.map((item) => item.enrollmentId)).size).toBe(2);
+
+    const onlyRevoked = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId, status: EnrollmentStatus.REVOKED })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    expect(
+      responseBody<{ items: Array<{ enrollmentId: string }> }>(onlyRevoked).items.map((item) => item.enrollmentId),
+    ).toEqual([revokedRow]);
+  });
+
+  it("lists a tenant student's enrollment history across courses, scoped to the exact tenant/student, with pagination and revoked history", async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('student-list');
+    const studentId = await createStudentWithTenant('student-list-target', tenantId, instructorId);
+    const otherStudentId = await createStudentWithTenant('student-list-other', tenantId, instructorId);
+    const course1 = await createCourse(tenantId, instructorId, 'Student list course 1');
+    const course2 = await createCourse(tenantId, instructorId, 'Student list course 2');
+    const course3 = await createCourse(tenantId, instructorId, 'Student list course 3');
+
+    const e1 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId: course1,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.REVOKED,
+      revokedAt: new Date('2026-01-05T00:00:00.000Z'),
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const e2 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId: course2,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.ACTIVE,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
+    const e3 = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId: course3,
+      grantedByUserId: instructorId,
+      status: EnrollmentStatus.ACTIVE,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+    });
+    // A different student's enrollment — must never appear in this student's list.
+    await createEnrollmentDirect({
+      tenantId,
+      studentUserId: otherStudentId,
+      courseId: course1,
+      grantedByUserId: instructorId,
+      createdAt: new Date('2026-01-04T00:00:00.000Z'),
+    });
+
+    const firstPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ studentUserId: studentId, limit: 2, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<{ items: Array<{ enrollmentId: string; courseTitle: string }> }>(firstPage);
+    expect(firstBody.items.map((item) => item.enrollmentId)).toEqual([e3, e2]);
+    expect(firstBody.items.map((item) => item.courseTitle)).toEqual([
+      'Student list course 3',
+      'Student list course 2',
+    ]);
+
+    const secondPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ studentUserId: studentId, limit: 2, offset: 2 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    expect(
+      responseBody<{ items: Array<{ enrollmentId: string }> }>(secondPage).items.map((item) => item.enrollmentId),
+    ).toEqual([e1]);
+  });
+
+  it('denies a student enrollment list for a random/foreign student without leaking existence, and enforces tenant isolation', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('student-list-deny');
+    const { token: otherToken, tenantId: otherTenantId, instructorId: otherInstructorId } =
+      await createInstructorTenant('student-list-deny-other');
+    const foreignStudentId = await createStudentWithTenant(
+      'student-list-deny-foreign',
+      otherTenantId,
+      otherInstructorId,
+    );
+    const ownStudentId = await createStudentWithTenant('student-list-deny-own', tenantId, instructorId);
+
+    const randomStudent = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ studentUserId: uuid.create() })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+    expect(randomStudent.body).toMatchObject({ error: { code: 'TENANT_STUDENT_NOT_FOUND' } });
+
+    // A real student, but only associated with a different tenant — queried under this
+    // instructor's own authorized tenant. Must not leak the student's existence elsewhere.
+    const foreignStudent = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ studentUserId: foreignStudentId })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+    expect(foreignStudent.body).toMatchObject({ error: { code: 'TENANT_STUDENT_NOT_FOUND' } });
+
+    // An instructor with no membership in the target tenant at all.
+    await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ studentUserId: ownStudentId })
+      .set('Authorization', `Bearer ${otherToken}`)
+      .expect(HttpStatus.FORBIDDEN);
+  });
+
+  it('requires at least one of courseId/studentUserId and supports combining both as an AND filter', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('combined-filter');
+    const courseA = await createCourse(tenantId, instructorId, 'Combined course A');
+    const courseB = await createCourse(tenantId, instructorId, 'Combined course B');
+    const studentId = await createStudentWithTenant('combined-student', tenantId, instructorId);
+    const otherStudentId = await createStudentWithTenant('combined-other-student', tenantId, instructorId);
+
+    const unfiltered = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.BAD_REQUEST);
+    expect(unfiltered.body).toMatchObject({ error: { code: 'ENROLLMENT_QUERY_FILTER_REQUIRED' } });
+
+    const target = await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId: courseA,
+      grantedByUserId: instructorId,
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    });
+    // Same student, different course — must be excluded by the combined filter.
+    await createEnrollmentDirect({
+      tenantId,
+      studentUserId: studentId,
+      courseId: courseB,
+      grantedByUserId: instructorId,
+      createdAt: new Date('2026-03-02T00:00:00.000Z'),
+    });
+    // Same course, different student — must also be excluded by the combined filter.
+    await createEnrollmentDirect({
+      tenantId,
+      studentUserId: otherStudentId,
+      courseId: courseA,
+      grantedByUserId: instructorId,
+      createdAt: new Date('2026-03-03T00:00:00.000Z'),
+    });
+
+    const combined = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId: courseA, studentUserId: studentId })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    expect(
+      responseBody<{ items: Array<{ enrollmentId: string }> }>(combined).items.map((item) => item.enrollmentId),
+    ).toEqual([target]);
+  });
+
   async function clearTenancyData(): Promise<void> {
     await prisma.client.notification.deleteMany();
     await prisma.client.securityEvent.deleteMany();
@@ -552,6 +856,38 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
         courseId,
         grantedByUserId,
         status: EnrollmentStatus.ACTIVE,
+      },
+    });
+    return id;
+  }
+
+  // Direct-write variant with full control over status/time-window/createdAt, for Enrollment
+  // Visibility Slice tests that need deterministic ordering or specific history states (REVOKED/
+  // EXPIRED/scheduled) that the HTTP create/revoke endpoints cannot themselves produce on demand.
+  async function createEnrollmentDirect(input: {
+    tenantId: string;
+    studentUserId: string;
+    courseId: string;
+    grantedByUserId: string;
+    status?: EnrollmentStatus;
+    startsAt?: Date | null;
+    endsAt?: Date | null;
+    revokedAt?: Date | null;
+    createdAt?: Date;
+  }): Promise<string> {
+    const id = uuid.create();
+    await prisma.client.enrollment.create({
+      data: {
+        id,
+        tenantId: input.tenantId,
+        studentUserId: input.studentUserId,
+        courseId: input.courseId,
+        grantedByUserId: input.grantedByUserId,
+        status: input.status ?? EnrollmentStatus.ACTIVE,
+        startsAt: input.startsAt ?? null,
+        endsAt: input.endsAt ?? null,
+        revokedAt: input.revokedAt ?? null,
+        createdAt: input.createdAt ?? new Date(),
       },
     });
     return id;

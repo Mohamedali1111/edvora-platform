@@ -69,4 +69,26 @@ export type EnrollmentSummary = {
 
 export type StudentEnrollmentSummary = Omit<EnrollmentSummary, 'studentUserId'>;
 
+// Reuses exactly the fields already legitimately exposed to instructors via
+// `TenantStudentSummary` (`GET /instructor/tenants/:tenantId/students/:studentUserId`) — never
+// broadens instructor-facing student PII exposure beyond that existing boundary.
+export type StudentContactSummary = {
+  studentUserId: string;
+  email: string;
+  displayName: string | null;
+  accountStatus: string;
+};
+
+export type InstructorEnrollmentSummary = EnrollmentSummary & {
+  student: StudentContactSummary;
+  // Derived, never persisted: the exact canonical Enrollment-row time predicate used for student
+  // entitlement (`status === ACTIVE && (startsAt === null || startsAt <= now) && (endsAt === null
+  // || endsAt > now)` — see `StudentCourseAccessService`'s `entitlementWhere`), computed at read
+  // time. Deliberately narrower than full student entitlement: it does not also require the
+  // Course to be `PUBLISHED` or the Tenant/TenantStudent to be `ACTIVE`, since an instructor
+  // roster already has that context and re-joining it here was not needed to save the frontend
+  // from re-implementing this one specific date-window computation.
+  currentlyEffective: boolean;
+};
+
 export type PrincipalRole = PlatformRole;

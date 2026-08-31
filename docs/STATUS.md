@@ -6,7 +6,7 @@ Edvora Platform
 
 ## Current Phase
 
-Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate), and explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson, and Quiz — including the concurrency-safe invariant that a `PUBLISHED` Quiz's aggregate publishability is re-validated, transactionally and behind a Quiz-level advisory lock, after every subsequent authoring mutation capable of affecting it — are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration is not implemented yet.
+Initial Prisma schema, reviewed PostgreSQL migration artifacts, NestJS Prisma/PostgreSQL runtime foundation, authentication/session security design, V1 account onboarding decisions, auth one-time token persistence, internal auth/security primitives, internal auth use-case orchestration, the first public auth HTTP boundary, student device authorization foundation, tenant-student association design, tenant-student persistence, the first tenancy/enrollment service/API foundation, Instructor Course Core Slice A, Instructor Course Sections/Lessons/Ordering Slice B, Student Course Authorization/Read Slice C, Minimal Lesson Progress Slice D, Instructor Quiz Authoring (Quiz/Question/QuestionOption create/read/update/reorder), Quiz Milestone Slice B (student-safe Quiz content delivery), Quiz Milestone Slice C (student Quiz attempt creation, answer submission, and server-side scoring), Quiz Milestone Slice D (Quiz completion → `LessonProgress` integration), Media Slice A (instructor tenant-scoped VideoAsset/DocumentAsset reads), Media Slice B (the protected student DOCUMENT Lesson runtime authorization boundary), Media Slice C (the protected student VIDEO Lesson runtime playback authorization boundary), Media Slice D (secure R2 document uploads), student R2 document download capability issuance, the Bunny Stream video upload/processing lifecycle, Media Slice G (protected Bunny video playback capability issuance), Media Slice H (a full backend Media domain audit, focused hardening fixes, and a passing final Media milestone regression gate), explicit instructor authoring lifecycle transitions for Course, CourseSection, Lesson, and Quiz — including the concurrency-safe invariant that a `PUBLISHED` Quiz's aggregate publishability is re-validated, transactionally and behind a Quiz-level advisory lock, after every subsequent authoring mutation capable of affecting it — and the Backend V1 Completion Enrollment Visibility Slice (instructor course-roster and student-enrollment-history reads) are completed. **The backend Media milestone is closed**: Cloudflare R2 document upload/download and Bunny Stream video upload/playback are implemented end-to-end behind the canonical student entitlement chain, audited for lifecycle/concurrency/leakage correctness, and covered by a full-workspace regression gate; only DRM (future MediaCage Enterprise work) and operational cleanup tooling (a documented, non-blocking V1 policy — see `docs/MEDIA.md`) remain outstanding. The repository has minimal framework foundations for API, web, and mobile; DRM integration is not implemented yet.
 
 Current media update: Media Slice D is completed, and the student DOCUMENT Lesson access route issues
 a short-lived Cloudflare R2/S3 presigned GET for the finalized READY object. Documents are locked to
@@ -790,6 +790,84 @@ mutation/concurrency repair validation passed:
   all passed.
 - No migration was required or added — the entire repair is application-level transactional
   validation and locking; `schema.prisma` and every migration file are unchanged.
+- Disposable PostgreSQL 16 containers were created and removed for validation; the unrelated
+  `mini-inventory-system-db-1` container was not touched.
+
+Backend V1 Completion — Enrollment Visibility Slice validation passed:
+
+- Confirmed repository started clean at `d39c74b feat(courses): add secure content publishing
+  lifecycle`.
+- Added the one instructor-facing enrollment read Instructor Web needs for course rosters, student
+  enrollment views, and enrollment management: `GET /instructor/tenants/:tenantId/enrollments`,
+  filterable by `courseId` (course roster) and/or `studentUserId` (a student's enrollment history
+  across courses), with an optional `status` filter — one flat, filtered route reusing the existing
+  `/instructor/tenants/:tenantId/enrollments` base path (already used by the existing `POST`
+  create/`revoke` routes) rather than two new nested route families, since that existing convention
+  is itself flat, not nested under Course or Student. At least one of `courseId`/`studentUserId` is
+  required (`ENROLLMENT_QUERY_FILTER_REQUIRED`, 400) so this stays the two concrete reads it exists
+  for, never an unscoped tenant-wide enrollment search.
+- Existing `create`/`revoke` enrollment semantics were not redesigned or touched — no change to the
+  enrollment-creation transaction, the `ENROLLMENT_CREATED`/`ENROLLMENT_REVOKED` `SecurityEvent`
+  producers, the `COURSE_ENROLLMENT_CREATED` notification producer, student entitlement, or
+  `TenantStudent` status behavior.
+- Authorization reuses the canonical chain: `TenantAuthorizationService.assertInstructorTenantAccess`
+  (current DB `ACTIVE` `INSTRUCTOR`, active tenant membership, active Tenant) for every request;
+  when `courseId` is given, a tenant-scoped Course existence check (`COURSE_NOT_FOUND` otherwise,
+  matching `createEnrollment`'s existing non-leaking behavior); when `studentUserId` is given, a
+  tenant-scoped `TenantStudent` existence check (`TENANT_STUDENT_NOT_FOUND` otherwise, matching
+  `getStudent`'s existing behavior — existence-only, independent of the association's `status`).
+  Every filter (`tenantId` always included) is a relational `WHERE` clause in one query, never an
+  in-memory post-filter, so a random or genuinely foreign course/student ID cannot return another
+  tenant's rows.
+- Response type `InstructorEnrollmentSummary`: existing `EnrollmentSummary` fields plus a nested
+  `student` contact object (`studentUserId`, `email`, `displayName`, `accountStatus` — exactly the
+  fields already exposed to instructors via `TenantStudentSummary`, no broadened PII exposure) and
+  a derived `currentlyEffective` boolean computed at read time from the exact canonical
+  Enrollment-row entitlement predicate already used for student access (`status === ACTIVE &&
+  (startsAt IS NULL OR startsAt <= now) && (endsAt IS NULL OR endsAt > now)`), deliberately not
+  re-joining the full Course-published/Tenant-active/TenantStudent-active chain an instructor
+  roster does not need.
+- Confirmed and preserved actual schema/domain semantics rather than inventing a new status model:
+  persisted `EnrollmentStatus` (`ACTIVE`/`INACTIVE`/`REVOKED`/`EXPIRED`) rows are listed as-is,
+  `REVOKED`/`EXPIRED` history included by default (never deleted/hidden, matching
+  `docs/TENANCY-ENROLLMENT.md`'s existing "revoke... preserves historical rows"); a student
+  re-enrolled after revocation legitimately produces multiple durable rows for the same (student,
+  Course) — the partial unique index `enrollments_one_active_per_student_course_key` only forbids
+  two simultaneously `ACTIVE` rows, never multiple historical ones — and this list never collapses
+  them.
+- Pagination reuses the repository's current bounded `limit`/`offset` contract (`PaginationQueryDto`)
+  with deterministic `createdAt` descending / `id` ascending ordering, matching every other
+  instructor list route; the `hasMore` pagination-contract change was deliberately not introduced
+  here, reserved for a dedicated future API-readiness slice.
+- Query efficiency: one query proves tenant/course/student ownership (two narrow existence checks,
+  each `select`-projecting only an `id`) and one query lists/filters/orders/paginates entirely at
+  the database level with a `select` projecting only the fields the response needs — no N+1, no
+  in-memory pagination. Assessed the existing indexes
+  (`enrollments_tenant_id_course_id_status_idx`, `enrollments_student_user_id_status_idx`,
+  `enrollments_student_user_id_course_id_status_idx`) as sufficient for V1 scale: the course-roster
+  query is a direct prefix match on the first, and the student-history query narrows on the
+  already highly-selective `studentUserId` via the second/third before the `tenantId` recheck. No
+  migration was required or added.
+- Added 6 new PostgreSQL HTTP tests to `tenancy-http.postgres-test.ts`: course roster scoped to
+  exact tenant/course with student contact info, `currentlyEffective`, deterministic ordering, and
+  pagination; denies a foreign/random course and a foreign instructor without leaking existence;
+  multiple historical rows for the same student/course after re-enrollment are never collapsed and
+  a `status` filter narrows correctly; a student's enrollment history across courses scoped to the
+  exact tenant/student, with pagination and revoked history; denies a random/foreign student
+  without leaking existence and enforces tenant isolation; requires at least one filter and
+  supports combining both as an AND filter. All 13 tests in the file (7 existing + 6 new) passed
+  together.
+- Full regression: the existing `notification-http.postgres-test.ts` (9 tests, including the
+  `COURSE_ENROLLMENT_CREATED` producer emitting exactly once and never for a rejected cross-tenant
+  attempt) and `student-course-http.postgres-test.ts` (21 tests) suites passed unmodified,
+  confirming this slice touched neither the notification producer nor student entitlement.
+- The complete PostgreSQL backend suite — 16 suites, 251 tests, spanning auth/device/tenancy/
+  course/quiz/media/notifications — was run twice against a fresh disposable PostgreSQL 16
+  database (all four existing migrations applied from empty) for determinism: 251/251 both runs.
+- API lint, typecheck, and unit tests (93/93) passed. API build, root `corepack pnpm check`
+  (install, prisma generate, lint, typecheck, test, API build, web build), and `git diff --check`
+  all passed.
+- No migration was required, requested, or added.
 - Disposable PostgreSQL 16 containers were created and removed for validation; the unrelated
   `mini-inventory-system-db-1` container was not touched.
 
