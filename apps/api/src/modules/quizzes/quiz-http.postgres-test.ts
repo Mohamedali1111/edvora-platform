@@ -192,7 +192,7 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
     void otherInstructorId;
   });
 
-  it('creates a valid MULTIPLE_CHOICE question with options and enforces at most one correct answer', async () => {
+  it('creates a valid MULTIPLE_CHOICE question with options and switches the correct answer atomically', async () => {
     const { token, tenantId } = await createInstructorTenant('mc');
     const quizId = await createQuizDirect(tenantId, 'MC quiz');
 
@@ -217,20 +217,20 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       .expect(HttpStatus.CREATED);
     const optionBId = responseBody<{ optionId: string }>(optionB).optionId;
 
-    // A second option cannot also be marked correct.
-    const conflict = await request(server)
+    await request(server)
       .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${responseBody<{ optionId: string }>(optionA).optionId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ isCorrect: true })
-      .expect(HttpStatus.BAD_REQUEST);
-    expect(conflict.body).toMatchObject({ error: { code: 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED' } });
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ isCorrect: true }));
 
     const options = await request(server)
       .get(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options`)
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.OK);
     const items = responseBody<{ items: Array<{ optionId: string; isCorrect: boolean }> }>(options).items;
-    expect(items.filter((item) => item.isCorrect).map((item) => item.optionId)).toEqual([optionBId]);
+    expect(items.filter((item) => item.isCorrect).map((item) => item.optionId)).toEqual([responseBody<{ optionId: string }>(optionA).optionId]);
+    expect(items.find((item) => item.optionId === optionBId)?.isCorrect).toBe(false);
   });
 
   it('creates a valid TRUE_FALSE question limited to exactly two options', async () => {
@@ -527,7 +527,7 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
     await expect(prisma.client.questionOption.count({ where: { questionId } })).resolves.toBe(2);
   });
 
-  it('serializes concurrent correct-option updates on two existing options: exactly one wins', async () => {
+  it('serializes concurrent correct-option updates on two existing options: final state remains single-correct', async () => {
     const { token, tenantId } = await createInstructorTenant('concurrency-correct-update');
     const quizId = await createQuizDirect(tenantId, 'Quiz');
     const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
@@ -547,19 +547,14 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
 
     const responses = [first, second];
     const okStatus: number = HttpStatus.OK;
-    const rejectedStatus: number = HttpStatus.BAD_REQUEST;
     const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
-    expect(statuses).toEqual([okStatus, rejectedStatus].sort((a, b) => a - b));
-
-    const rejected = responses.find((response) => response.status === rejectedStatus);
-    expect(rejected?.body).toMatchObject({ error: { code: 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED' } });
+    expect(statuses).toEqual([okStatus, okStatus]);
 
     const finalOptions = await prisma.client.questionOption.findMany({ where: { questionId } });
     expect(finalOptions.filter((row) => row.isCorrect)).toHaveLength(1);
     expect(finalOptions).toHaveLength(2);
     // The losing option must remain exactly as it was — not left in some intermediate state.
-    const loserId = rejected === first ? optionA : optionB;
-    expect(finalOptions.find((row) => row.id === loserId)?.isCorrect).toBe(false);
+    expect([optionA, optionB]).toContain(finalOptions.find((row) => row.isCorrect)?.id);
   });
 
   it('rejects invalid type/correct-answer configuration atomically, leaving no partial state', async () => {
@@ -583,10 +578,11 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${falseOption.id}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ isCorrect: true })
-      .expect(HttpStatus.BAD_REQUEST);
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ optionId: falseOption.id, isCorrect: true }));
     await expect(
       prisma.client.questionOption.findUniqueOrThrow({ where: { id: falseOption.id } }),
-    ).resolves.toMatchObject({ isCorrect: false });
+    ).resolves.toMatchObject({ isCorrect: true });
     await expect(prisma.client.questionOption.count({ where: { questionId, isCorrect: true } })).resolves.toBe(1);
   });
 
@@ -643,6 +639,69 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } }));
   });
 
+  it('rejects all ordinary Question and Option mutations when the parent Quiz is ARCHIVED', async () => {
+    const { token, tenantId } = await createInstructorTenant('archived-child-mutations');
+    const quizId = await createQuizDirect(tenantId, 'Archived quiz');
+    const q1 = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+    const q2 = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 2);
+    const o1 = await createQuestionOptionDirect(tenantId, q1, 'A', 1, true);
+    const o2 = await createQuestionOptionDirect(tenantId, q1, 'B', 2, false);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: 'ARCHIVED' }));
+
+    const questionsBefore = await prisma.client.question.findMany({ where: { quizId }, orderBy: { position: 'asc' } });
+    const optionsBefore = await prisma.client.questionOption.findMany({ where: { questionId: q1 }, orderBy: { position: 'asc' } });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'MULTIPLE_CHOICE', prompt: 'New question', points: 1 })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${q1}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prompt: 'Changed prompt', points: 2 })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/reorder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ questionIds: [q2, q1] })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${q1}/options`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ text: 'C', isCorrect: false })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${q1}/options/${o2}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ text: 'Changed option', isCorrect: true })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${q1}/options/reorder`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ optionIds: [o2, o1] })
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }));
+
+    await expect(prisma.client.question.findMany({ where: { quizId }, orderBy: { position: 'asc' } })).resolves.toEqual(questionsBefore);
+    await expect(prisma.client.questionOption.findMany({ where: { questionId: q1 }, orderBy: { position: 'asc' } })).resolves.toEqual(optionsBefore);
+  });
+
   it('rejects creating a new Question on a PUBLISHED Quiz atomically, leaving the prior valid Quiz unchanged', async () => {
     const { token, tenantId } = await createInstructorTenant('published-question-create');
     const quizId = await createPublishedQuiz(tenantId, token, 'Published quiz');
@@ -692,7 +751,31 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
     });
   });
 
-  it('rejects a second correct Option and a TRUE_FALSE third Option on a PUBLISHED Quiz, leaving prior state unchanged', async () => {
+  it('switches the correct Option on a PUBLISHED Quiz in one request while preserving publishability', async () => {
+    const { token, tenantId } = await createInstructorTenant('published-correct-switch');
+    const quizId = await createQuizDirect(tenantId, 'Quiz');
+    const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+    const optionA = await createQuestionOptionDirect(tenantId, questionId, 'A', 1, true);
+    const optionB = await createQuestionOptionDirect(tenantId, questionId, 'B', 2, false);
+    await publishQuizDirect(token, tenantId, quizId);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${optionB}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ isCorrect: true })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ optionId: optionB, isCorrect: true }));
+
+    const options = await prisma.client.questionOption.findMany({ where: { questionId }, orderBy: { position: 'asc' } });
+    expect(options.find((option) => option.id === optionA)?.isCorrect).toBe(false);
+    expect(options.find((option) => option.id === optionB)?.isCorrect).toBe(true);
+    expect(options.filter((option) => option.isCorrect)).toHaveLength(1);
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+  });
+
+  it('keeps correct-answer switching single-select and rejects a TRUE_FALSE third Option on a PUBLISHED Quiz', async () => {
     const { token, tenantId } = await createInstructorTenant('published-invalid-shapes');
     const quizId = await createQuizDirect(tenantId, 'Quiz');
     const mcQuestion = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
@@ -703,20 +786,19 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
     await createQuestionOptionDirect(tenantId, tfQuestion, 'False', 2, false);
     await publishQuizDirect(token, tenantId, quizId);
 
-    // Multiple correct options: still rejected on a PUBLISHED Quiz by the pre-existing per-Option
-    // check (not the new aggregate check), but must remain rejected here too.
     await request(server)
       .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${mcQuestion}/options/${optionB}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ isCorrect: true })
-      .expect(HttpStatus.BAD_REQUEST)
-      .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'MULTIPLE_CORRECT_OPTIONS_NOT_ALLOWED' } }));
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ optionId: optionB, isCorrect: true }));
     await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionB } })).resolves.toMatchObject({
-      isCorrect: false,
-    });
-    await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionA } })).resolves.toMatchObject({
       isCorrect: true,
     });
+    await expect(prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionA } })).resolves.toMatchObject({
+      isCorrect: false,
+    });
+    await expect(prisma.client.questionOption.count({ where: { questionId: mcQuestion, isCorrect: true } })).resolves.toBe(1);
 
     // A third Option on a TRUE_FALSE Question would violate "exactly two options" — rejected the
     // same way, and no row is left behind.
@@ -877,6 +959,76 @@ maybeDescribe('instructor quiz HTTP PostgreSQL integration', () => {
       // The one outcome that must never happen under any interleaving.
       const invalidPublishedState = quiz.status === QuizStatus.PUBLISHED && correctCount !== 1;
       expect(invalidPublishedState).toBe(false);
+    }
+  });
+
+  it('races archive against Question mutation without applying a child mutation after archival', async () => {
+    const { token, tenantId } = await createInstructorTenant('race-archive-question');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const quizId = await createQuizDirect(tenantId, `Archive race quiz ${attempt}`);
+      const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+      await createQuestionOptionDirect(tenantId, questionId, 'A', 1, true);
+      await createQuestionOptionDirect(tenantId, questionId, 'B', 2, false);
+
+      const [archiveResponse, updateResponse] = await Promise.all([
+        request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`).set('Authorization', `Bearer ${token}`),
+        request(server)
+          .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ prompt: `Question mutation ${attempt}` }),
+      ]);
+
+      expect(archiveResponse.status).toBe(HttpStatus.OK);
+      expect(archiveResponse.body).toMatchObject({ status: 'ARCHIVED' });
+      const conflictStatus: number = HttpStatus.CONFLICT;
+      expect([HttpStatus.OK, conflictStatus]).toContain(updateResponse.status);
+
+      const quiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+      const question = await prisma.client.question.findUniqueOrThrow({ where: { id: questionId } });
+      expect(quiz.status).toBe(QuizStatus.ARCHIVED);
+
+      if (updateResponse.status === conflictStatus) {
+        expect(updateResponse.body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } });
+        expect(question.prompt).toBe('Prompt 1');
+      } else {
+        expect(question.prompt).toBe(`Question mutation ${attempt}`);
+      }
+    }
+  });
+
+  it('races archive against Option mutation without applying a child mutation after archival', async () => {
+    const { token, tenantId } = await createInstructorTenant('race-archive-option');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const quizId = await createQuizDirect(tenantId, `Archive race quiz ${attempt}`);
+      const questionId = await createQuestionDirect(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, 1);
+      await createQuestionOptionDirect(tenantId, questionId, 'A', 1, true);
+      const optionB = await createQuestionOptionDirect(tenantId, questionId, 'B', 2, false);
+
+      const [archiveResponse, updateResponse] = await Promise.all([
+        request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`).set('Authorization', `Bearer ${token}`),
+        request(server)
+          .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${optionB}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ text: `Option mutation ${attempt}` }),
+      ]);
+
+      expect(archiveResponse.status).toBe(HttpStatus.OK);
+      expect(archiveResponse.body).toMatchObject({ status: 'ARCHIVED' });
+      const conflictStatus: number = HttpStatus.CONFLICT;
+      expect([HttpStatus.OK, conflictStatus]).toContain(updateResponse.status);
+
+      const quiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+      const option = await prisma.client.questionOption.findUniqueOrThrow({ where: { id: optionB } });
+      expect(quiz.status).toBe(QuizStatus.ARCHIVED);
+
+      if (updateResponse.status === conflictStatus) {
+        expect(updateResponse.body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } });
+        expect(option.text).toBe('B');
+      } else {
+        expect(option.text).toBe(`Option mutation ${attempt}`);
+      }
     }
   });
 

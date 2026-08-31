@@ -16,7 +16,7 @@ import {
   QuestionOptionPositionConflictError,
 } from '../errors/quiz.errors';
 import type { QuestionOptionSummary } from '../types/quiz.types';
-import { assertPublishedQuizRemainsPublishable, lockQuizPublicationBoundary } from './quiz-publishability.util';
+import { assertPublishedQuizRemainsPublishable, lockAndAssertQuizAuthoringMutable } from './quiz-publishability.util';
 
 export type CreateQuestionOptionInput = {
   principal: AuthenticatedPrincipal;
@@ -61,7 +61,7 @@ export class QuestionOptionService {
         // Quiz-level lock strictly before the Question-level lock — see
         // `lockQuizPublicationBoundary`'s docstring for why this closes the publish-vs-Option
         // race and for the fixed ordering every caller of both locks must preserve.
-        await lockQuizPublicationBoundary(tx, input.quizId);
+        await lockAndAssertQuizAuthoringMutable(tx, input.tenantId, input.quizId);
         await this.lockQuestionOptionMutations(tx, input.questionId);
 
         const question = await tx.question.findFirst({
@@ -151,7 +151,7 @@ export class QuestionOptionService {
       await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
       // Quiz-level lock strictly before the Question-level lock — same fixed ordering as
       // `createOption`; see `lockQuizPublicationBoundary`'s docstring.
-      await lockQuizPublicationBoundary(tx, input.quizId);
+      await lockAndAssertQuizAuthoringMutable(tx, input.tenantId, input.quizId);
       await this.lockQuestionOptionMutations(tx, input.questionId);
 
       const question = await tx.question.findFirst({
@@ -174,7 +174,7 @@ export class QuestionOptionService {
         throw new QuestionOptionNotFoundError();
       }
 
-      if (input.isCorrect !== undefined) {
+      if (input.isCorrect === false) {
         await assertValidOptionConfiguration(tx, {
           tenantId: input.tenantId,
           questionId: input.questionId,
@@ -182,6 +182,18 @@ export class QuestionOptionService {
           wantsCorrect: input.isCorrect,
           excludeOptionId: existing.id,
           isNewOption: false,
+        });
+      }
+
+      if (input.isCorrect === true) {
+        await tx.questionOption.updateMany({
+          where: {
+            tenantId: input.tenantId,
+            questionId: input.questionId,
+            id: { not: existing.id },
+            isCorrect: true,
+          },
+          data: { isCorrect: false },
         });
       }
 
@@ -194,11 +206,8 @@ export class QuestionOptionService {
         },
       });
 
-      // `assertValidOptionConfiguration` above only ever rejects *adding* a second correct
-      // option — it has no opinion on `isCorrect: false`, so flipping the only correct option to
-      // false is otherwise silently accepted and would leave an ACTIVE question with zero correct
-      // answers. If this Quiz is PUBLISHED, that violates the same invariant `publishQuiz()`
-      // enforces, so re-check it here, inside the same transaction, and roll back atomically.
+      // Selecting a correct option is radio-style: clear siblings, set this option, then let the
+      // canonical PUBLISHED aggregate check accept or roll back the final state.
       await assertPublishedQuizRemainsPublishable(tx, input.tenantId, input.quizId);
 
       return toQuestionOptionSummary(updated);
@@ -218,10 +227,7 @@ export class QuestionOptionService {
    * sequential request would get — never a raw Prisma/PostgreSQL error. Scoped to `questionId`,
    * not global, so concurrent authoring on different Questions (or different Quizzes) never
    * blocks on each other. Reordering is deliberately excluded: it only changes `position`, never
-   * `isCorrect` or the option count, so it cannot violate either invariant — and for the same
-   * reason `reorderOptions` also does not take `lockQuizPublicationBoundary` (see that lock's
-   * docstring): it cannot turn a valid aggregate into an invalid one, so no ordering against a
-   * concurrent `publishQuiz` can produce PUBLISHED + aggregate-invalid.
+   * `isCorrect` or the option count, so it cannot violate either invariant.
    */
   private async lockQuestionOptionMutations(tx: PrismaTransactionClient, questionId: string): Promise<void> {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${questionId}, 0::bigint))`;
@@ -256,6 +262,7 @@ export class QuestionOptionService {
   ): Promise<QuestionOptionSummary[]> {
     return this.prismaService.client.$transaction(async (tx) => {
       await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+      await lockAndAssertQuizAuthoringMutable(tx, tenantId, quizId);
 
       const question = await tx.question.findFirst({
         where: { id: questionId, tenantId, quizId },

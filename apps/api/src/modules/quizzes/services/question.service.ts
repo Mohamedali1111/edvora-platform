@@ -16,7 +16,7 @@ import {
   QuizNotPublishableError,
 } from '../errors/quiz.errors';
 import type { QuestionSummary } from '../types/quiz.types';
-import { assertPublishedQuizRemainsPublishable, lockQuizPublicationBoundary } from './quiz-publishability.util';
+import { assertPublishedQuizRemainsPublishable, lockAndAssertQuizAuthoringMutable } from './quiz-publishability.util';
 
 export type CreateQuestionInput = {
   principal: AuthenticatedPrincipal;
@@ -50,19 +50,8 @@ export class QuestionService {
     try {
       return await this.prismaService.client.$transaction(async (tx) => {
         await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
-        // Serializes against `publishQuiz` and every other publishability-affecting mutation on
-        // this Quiz — see `lockQuizPublicationBoundary`'s docstring for why a plain status read
-        // alone cannot prevent PUBLISHED + aggregate-invalid under concurrency.
-        await lockQuizPublicationBoundary(tx, input.quizId);
-
-        const quiz = await tx.quiz.findUnique({
-          where: { id_tenantId: { id: input.quizId, tenantId: input.tenantId } },
-          select: { id: true, status: true },
-        });
-
-        if (!quiz) {
-          throw new QuizNotFoundError();
-        }
+        // Serializes against publish/archive and rejects ARCHIVED parents before any child write.
+        const quiz = await lockAndAssertQuizAuthoringMutable(tx, input.tenantId, input.quizId);
 
         // V1 policy for creating a Question on a PUBLISHED Quiz: this authoring API creates the
         // Question first and its Options only through later, separate `POST .../options` calls
@@ -143,9 +132,8 @@ export class QuestionService {
   async updateQuestionMetadata(input: UpdateQuestionMetadataInput): Promise<QuestionSummary> {
     return this.prismaService.client.$transaction(async (tx) => {
       await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId, tx);
-      // See `lockQuizPublicationBoundary`'s docstring — a changed `points` value can affect
-      // aggregate publishability, so this must serialize against `publishQuiz` too.
-      await lockQuizPublicationBoundary(tx, input.quizId);
+      // Serializes against publish/archive and rejects ARCHIVED parents before any child write.
+      await lockAndAssertQuizAuthoringMutable(tx, input.tenantId, input.quizId);
 
       // Question has no (id, quizId, tenantId) composite unique key in the schema (only
       // (id, tenantId) and (quizId, position)) — `findFirst` combining all three ownership
@@ -211,19 +199,10 @@ export class QuestionService {
     return this.prismaService.client.$transaction(async (tx) => {
       await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
 
-      const quiz = await tx.quiz.findUnique({
-        where: { id_tenantId: { id: quizId, tenantId } },
-        select: { id: true },
-      });
+      await lockAndAssertQuizAuthoringMutable(tx, tenantId, quizId);
 
-      if (!quiz) {
-        throw new QuizNotFoundError();
-      }
-
-      // Deliberately does NOT take `lockQuizPublicationBoundary`: reordering only ever changes
-      // `position`, never points/correctness/counts, so it cannot turn a valid aggregate into an
-      // invalid one no matter how it interleaves with a concurrent `publishQuiz` — see that
-      // lock's docstring for the full reasoning shared by every caller.
+      // Reordering only changes position, but it still serializes against archive so an ARCHIVED
+      // parent cannot be mutated through child ordering endpoints.
       const [activeQuestions, maxPositionRow] = await Promise.all([
         tx.question.findMany({
           where: { quizId, tenantId, status: { not: QuestionStatus.ARCHIVED } },

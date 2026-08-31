@@ -349,7 +349,9 @@ Quiz lifecycle is explicit. Publishing validates the current active aggregate: a
 `ACTIVE` question, positive points, valid options, and exactly one correct option per active
 question. `ARCHIVED` questions are ignored, matching student delivery and attempt snapshot reads.
 Archiving a Quiz does not cascade to QuizLesson rows or attempts; student access is blocked by the
-Quiz status gate.
+Quiz status gate. `ARCHIVED` is terminal for authoring: ordinary child Question and Option
+mutations, including create, metadata/correctness update, and reorder, are rejected at the parent
+Quiz boundary.
 
 The same aggregate validation is re-run, in the same transaction, after every subsequent Question
 create/update and Option create/update while the Quiz is `PUBLISHED`, so a `PUBLISHED` Quiz cannot
@@ -361,6 +363,12 @@ PostgreSQL transaction-scoped advisory lock keyed on the Quiz ID; Option mutatio
 keep their pre-existing Question-scoped advisory lock, always acquired after the Quiz-level lock
 (Quiz-level → Question-level, never the reverse) to keep lock ordering deadlock-free. No schema or
 migration change was required for this.
+
+`archiveQuiz()` and ordinary Question/Option child mutations also serialize on the same Quiz-level
+advisory lock. A child mutation may complete before archive, but no child mutation can observe a
+mutable Quiz and then commit after the parent has become `ARCHIVED`. Setting an existing Option's
+`isCorrect` to `true` through the Option update contract atomically clears sibling Options and makes
+that Option the sole correct answer before any `PUBLISHED` aggregate validation runs.
 
 #### QuizLesson
 

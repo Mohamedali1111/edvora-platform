@@ -5,7 +5,7 @@ import {
   type Prisma,
 } from '../../../../.generated/prisma/client';
 import type { PrismaTransactionClient } from '../../auth/types/prisma-transaction.type';
-import { QuizNotPublishableError } from '../errors/quiz.errors';
+import { InvalidQuizLifecycleTransitionError, QuizNotFoundError, QuizNotPublishableError } from '../errors/quiz.errors';
 
 export type QuizPublishabilityRow = {
   status: QuizStatus;
@@ -78,6 +78,29 @@ export async function assertPublishedQuizRemainsPublishable(
   }
 }
 
+export async function lockAndAssertQuizAuthoringMutable(
+  tx: PrismaTransactionClient,
+  tenantId: string,
+  quizId: string,
+): Promise<{ status: QuizStatus }> {
+  await lockQuizPublicationBoundary(tx, quizId);
+
+  const quiz = await tx.quiz.findUnique({
+    where: { id_tenantId: { id: quizId, tenantId } },
+    select: { status: true },
+  });
+
+  if (!quiz) {
+    throw new QuizNotFoundError();
+  }
+
+  if (quiz.status === QuizStatus.ARCHIVED) {
+    throw new InvalidQuizLifecycleTransitionError();
+  }
+
+  return quiz;
+}
+
 /**
  * Serializes every operation that can move a Quiz across the DRAFT/PUBLISHED "publication
  * boundary" or mutate the aggregate a PUBLISHED Quiz must keep satisfying, using the same
@@ -116,16 +139,13 @@ export async function assertPublishedQuizRemainsPublishable(
  *    aggregate: a new question, or a changed points value).
  *  - `QuestionOptionService.createOption` / `updateOption` — acquire it, in addition to their
  *    existing `questionId`-scoped lock (can affect the aggregate: option count/correctness).
- *  - `QuestionService.reorderQuestions`, `QuestionOptionService.reorderOptions` — do NOT
- *    acquire it. Reordering only ever changes `position`; it can never change points,
- *    correctness, or option/question counts, so it cannot turn a valid aggregate into an
- *    invalid one regardless of what a concurrent `publishQuiz` observes or does.
- *  - `QuizService.archiveQuiz` — does NOT acquire it. The invariant only constrains a Quiz
- *    while `status === PUBLISHED`; archiving only ever moves a Quiz *out* of PUBLISHED, and a
- *    concurrent mutation that races it either observes PUBLISHED (and is correctly validated
- *    against the aggregate rule, independent of whether the archive lands before or after) or
- *    observes the post-archive status (where the invariant no longer applies). No ordering
- *    between archive and a concurrent mutation can produce PUBLISHED + aggregate-invalid.
+ *  - `QuestionService.reorderQuestions`, `QuestionOptionService.reorderOptions` — acquire it
+ *    through `lockAndAssertQuizAuthoringMutable` so they serialize against archive and cannot
+ *    mutate an already-ARCHIVED parent; they still do not need publishability validation because
+ *    reordering only ever changes `position`.
+ *  - `QuizService.archiveQuiz` — acquires it so archive serializes against every ordinary
+ *    Question/Option authoring mutation. A mutation may commit before archive, but no mutation can
+ *    observe a non-archived parent and then commit after archive has already made the Quiz ARCHIVED.
  *
  * Lock ordering: every path that needs both locks acquires this Quiz-level lock strictly
  * *before* the Question-level lock (`createOption`/`updateOption`: Quiz lock, then

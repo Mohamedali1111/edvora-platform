@@ -144,7 +144,9 @@ metadata writes. `Course`, `CourseSection`, `Lesson`, and `Quiz` support `DRAFT 
 archiving an already-archived resource are idempotent, while `ARCHIVED` is terminal and cannot be
 published/restored. Publishing never cascades to descendants or ancestors: each Course, Section,
 Lesson, and Quiz must be published explicitly. Archiving likewise does not cascade; ancestor status
-already blocks student access while preserving descendant authoring state and historical ordering.
+already blocks student access while preserving descendant state and historical ordering. For Quiz
+authoring specifically, an `ARCHIVED` parent Quiz rejects ordinary Question and Option mutations,
+including create, metadata/correctness update, and reorder.
 
 Course and Section publication has no V1 child-count prerequisite. Lesson publication additionally
 requires deliverable type-specific content: VIDEO and DOCUMENT lessons must reference tenant-linked
@@ -170,10 +172,12 @@ lock keyed on the Quiz ID, so a concurrent publish and a concurrent publishabili
 mutation on the same Quiz always serialize rather than both observing a stale pre-commit status;
 Option mutations additionally keep their existing Question-scoped advisory lock for the
 option-count/correctness invariants, always acquired after the Quiz-level lock, never before, to
-keep lock ordering consistent and deadlock-free. Reorder operations (Question or Option) and Quiz
-archive do not need either lock: reordering only ever changes position, never points, correctness,
-or counts, and archiving only ever moves a Quiz out of `PUBLISHED`, so neither can produce a
-`PUBLISHED` Quiz with an invalid aggregate.
+keep lock ordering consistent and deadlock-free. Quiz archive and ordinary Question/Option
+authoring mutations share the Quiz-level advisory lock, so a child mutation may complete before an
+archive, but cannot observe a mutable parent and then commit after the Quiz has become `ARCHIVED`.
+Setting `QuestionOption.isCorrect` to `true` through the existing Option update route atomically
+selects that Option as the sole correct Option for its Question by clearing sibling correctness in
+the same transaction before re-validating any already-`PUBLISHED` Quiz aggregate.
 
 ## Video and Document Metadata
 

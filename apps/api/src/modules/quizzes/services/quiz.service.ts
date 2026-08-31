@@ -210,6 +210,9 @@ export class QuizService {
   ): Promise<QuizSummary> {
     return this.prismaService.client.$transaction(async (tx) => {
       await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+      // Serializes archive with ordinary Question/Option authoring mutations so no child write can
+      // observe a mutable Quiz and then commit after this Quiz has become ARCHIVED.
+      await lockQuizPublicationBoundary(tx, quizId);
 
       const existing = await tx.quiz.findUnique({
         where: { id_tenantId: { id: quizId, tenantId } },
