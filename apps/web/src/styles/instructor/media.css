@@ -1,0 +1,93 @@
+/**
+ * Instructor Media Management only (`features/instructor/media`) - the
+ * Documents/Videos tab switcher, panel/upload-dialog chrome, and the
+ * upload-progress/status treatment. Depends on `../components.css`/
+ * `../tables.css`/`../dialogs.css`/`../forms.css` loading first for the
+ * shared page/table/dialog/form chrome this feature otherwise reuses
+ * unchanged (status badges, data-table, modal, buttons, `.field`).
+ */
+.media-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.media-tablist {
+  display: flex;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.media-tab {
+  min-height: 44px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 0.65rem 0.9rem;
+}
+
+.media-tab[aria-selected="true"] {
+  border-block-end-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.media-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.media-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.media-filename-cell {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
+.media-file-hint,
+.media-selected-file {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.media-selected-file {
+  overflow-wrap: anywhere;
+}
+
+.media-upload-status p {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.media-upload-progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.media-busy-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.media-processing-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 620px) {
+  .media-panel-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

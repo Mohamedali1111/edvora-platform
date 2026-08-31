@@ -196,7 +196,13 @@ export type ReorderLessonsRequest = {
 
 export type AssetProcessingStatus = "UPLOADING" | "PROCESSING" | "READY" | "FAILED" | "ARCHIVED";
 
-/** GET /instructor/tenants/:tenantId/media/videos - a real, already-existing asset list; this frontend never uploads or processes video. */
+/**
+ * GET /instructor/tenants/:tenantId/media/videos - the same real,
+ * tenant-scoped asset list the Lesson content picker uses (see
+ * lessons-service.ts). No `title`/filename field exists on this response -
+ * the backend never returns one, so Media Management shows only these real
+ * fields (status/duration/dates), never an invented display name.
+ */
 export type VideoAssetSummary = {
   videoAssetId: string;
   tenantId: string;
@@ -207,7 +213,7 @@ export type VideoAssetSummary = {
   updatedAt: string;
 };
 
-/** GET /instructor/tenants/:tenantId/media/documents - a real, already-existing asset list; this frontend never uploads or processes documents. */
+/** GET /instructor/tenants/:tenantId/media/documents - the same real, tenant-scoped asset list the Lesson content picker uses (see lessons-service.ts). */
 export type DocumentAssetSummary = {
   documentAssetId: string;
   tenantId: string;
@@ -218,6 +224,69 @@ export type DocumentAssetSummary = {
   processingStatus: AssetProcessingStatus;
   createdAt: string;
   updatedAt: string;
+};
+
+/**
+ * Body for POST /instructor/tenants/:tenantId/media/documents/upload-intents.
+ * `fileSizeBytes` must be the exact byte length of the file that will be
+ * PUT to the returned `uploadUrl` - confirmation later verifies R2's actual
+ * object size against this declared value.
+ */
+export type CreateDocumentUploadIntentRequest = {
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
+};
+
+/**
+ * Response for the same endpoint - a short-lived, single-object-scoped
+ * Cloudflare R2 presigned `PUT` capability. `uploadUrl`/`headers` are
+ * bearer material: never logged, never persisted beyond the active upload.
+ * No R2 access key/secret is ever present here - only a capability the
+ * backend already signed.
+ */
+export type DocumentUploadIntent = {
+  documentAssetId: string;
+  uploadUrl: string;
+  expiresAt: string;
+  headers: Record<string, string>;
+};
+
+/** Response for POST /instructor/tenants/:tenantId/media/documents/:documentAssetId/confirm-upload (no request body). */
+export type DocumentUploadConfirmation = {
+  documentAssetId: string;
+  processingStatus: AssetProcessingStatus;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: string;
+  verifiedAt: string | null;
+};
+
+/** Body for POST /instructor/tenants/:tenantId/media/videos/upload-intents. The backend creates the real Bunny Stream video resource from this title - no other identity/config is client-supplied. */
+export type CreateVideoUploadIntentRequest = {
+  title: string;
+};
+
+/**
+ * Response for the same endpoint - a short-lived Bunny Stream TUS upload
+ * capability. `headers` carry only what Bunny's TUS protocol requires to
+ * authorize this one upload (`AuthorizationSignature`, `AuthorizationExpire`,
+ * `VideoId`, `LibraryId`) - never Bunny's API key or webhook signing
+ * secret, which stay backend-only. `provider.bunnyStream` is exposed only
+ * because Bunny's TUS contract requires the library/video identifiers as
+ * upload metadata, not because it's a secret.
+ */
+export type VideoUploadIntent = {
+  videoAssetId: string;
+  tusEndpoint: string;
+  expiresAt: string;
+  headers: Record<string, string>;
+  provider: {
+    bunnyStream: {
+      libraryId: string;
+      videoId: string;
+    };
+  };
 };
 
 export type QuizStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
