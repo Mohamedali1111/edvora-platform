@@ -1,0 +1,26 @@
+/**
+ * Design tokens - the single source of truth for color, surface, border,
+ * radius, and spacing values used across Instructor Web. Feature
+ * stylesheets should reference these custom properties (`var(--token)`)
+ * rather than hardcoding literal color/radius/spacing values.
+ */
+:root {
+  color-scheme: light;
+  --background: #f7f4ef;
+  --surface: #fffdf9;
+  --surface-strong: #ffffff;
+  --text: #1f2523;
+  --muted: #65716d;
+  --border: #ded8cf;
+  --border-strong: #bfb6aa;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-soft: #d9f1ec;
+  --danger: #b42318;
+  --danger-soft: #fff1f0;
+  --focus: #2563eb;
+  --shadow: 0 18px 50px rgb(31 37 35 / 12%);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --space-page: clamp(1rem, 2vw, 1.75rem);
+}

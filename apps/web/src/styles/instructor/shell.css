@@ -1,0 +1,359 @@
+/**
+ * The persistent instructor shell: sidebar, topbar, mobile drawer, and the
+ * brand mark it shares with the login screen. Also owns the generic
+ * placeholder/loading page-state treatment (`.overview-panel`/
+ * `.placeholder-panel`/`.centered-state`) used by the not-yet-built stub
+ * pages and the auth-bootstrap loading screen, since several of those rules
+ * are declared together with `.title-area`/`.centered-state` below and
+ * splitting them into a separate file would duplicate the shared
+ * declarations. Changing sidebar/topbar/drawer behavior, the brand mark, or
+ * a stub page's empty-state look all belong here.
+ */
+.app-shell {
+  display: grid;
+  min-height: 100svh;
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: grid;
+  height: 100svh;
+  grid-template-rows: auto 1fr;
+  gap: 1.2rem;
+  border-inline-end: 1px solid var(--border);
+  background: #fffbf4;
+  padding: 1.1rem;
+}
+
+.sidebar-brand,
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  font-weight: 900;
+}
+
+.sidebar-brand {
+  justify-content: flex-start;
+}
+
+/* Reused by the login screen (instructor/../auth.css owns login layout,
+   not this mark itself). */
+.brand-mark {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--accent-strong);
+  font-size: 1.45rem;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+
+.brand-mark.small {
+  width: 36px;
+  height: 36px;
+  font-size: 1rem;
+  box-shadow: none;
+}
+
+.brand-name {
+  margin: 0;
+  color: var(--accent-strong);
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.nav-list {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+}
+
+.nav-link {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-weight: 800;
+  padding: 0.75rem 0.85rem;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.nav-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.shell-main {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  padding: 0.9rem var(--space-page);
+  backdrop-filter: blur(16px);
+}
+
+.title-area {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Also styles the generic panel "eyebrow" paragraph on `.overview-panel`/
+   `.placeholder-panel` below - kept as one rule since all three share this
+   exact treatment. */
+.title-area p,
+.overview-panel > p,
+.placeholder-panel > p {
+  margin: 0 0 0.25rem;
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.title-area h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+  line-height: 1.15;
+}
+
+.header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.language-control {
+  display: grid;
+  min-width: 142px;
+  gap: 0.25rem;
+}
+
+.language-control select {
+  min-height: 40px;
+  padding-block: 0.55rem;
+}
+
+.content {
+  display: grid;
+  gap: 1rem;
+  max-width: 1180px;
+  padding: var(--space-page);
+}
+
+.context-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+}
+
+.context-strip div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.context-strip strong {
+  overflow-wrap: anywhere;
+}
+
+.overview-panel,
+.placeholder-panel,
+.centered-state {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+}
+
+.overview-panel,
+.placeholder-panel {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.overview-panel h2,
+.placeholder-panel h2,
+.centered-state h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 1.15;
+}
+
+.overview-panel p,
+.placeholder-panel p {
+  max-width: 62rem;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.centered-state {
+  display: grid;
+  min-height: 100svh;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.loading-mark {
+  width: 42px;
+  height: 42px;
+  border: 4px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mobile-only,
+.drawer-layer {
+  display: none;
+}
+
+/* Icon-button shape for the mobile menu toggle - loads after forms.css's
+   generic button-family base so `border-color`/`background` here win. */
+.icon-button {
+  display: grid;
+  width: 44px;
+  place-items: center;
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+}
+
+.menu-bars,
+.menu-bars::before,
+.menu-bars::after {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.menu-bars {
+  position: relative;
+}
+
+.menu-bars::before,
+.menu-bars::after {
+  position: absolute;
+  content: "";
+  inset-inline-start: 0;
+}
+
+.menu-bars::before {
+  top: -6px;
+}
+
+.menu-bars::after {
+  top: 6px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .mobile-only {
+    display: grid;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    display: grid;
+    justify-items: end;
+  }
+
+  .drawer-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: block;
+  }
+
+  .drawer-scrim {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgb(31 37 35 / 42%);
+  }
+
+  .drawer-panel {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    display: grid;
+    width: min(320px, calc(100vw - 2rem));
+    align-content: start;
+    gap: 1rem;
+    background: var(--surface-strong);
+    padding: 1rem;
+    box-shadow: var(--shadow);
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .title-area {
+    flex: 1 1 calc(100% - 58px);
+  }
+
+  .header-actions {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .language-control {
+    min-width: 0;
+  }
+}

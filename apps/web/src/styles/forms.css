@@ -1,0 +1,140 @@
+/**
+ * Shared form primitives - `.auth-form`/`.field`, native form controls, and
+ * the button family (`.primary-button`/`.secondary-button`/`.ghost-button`/
+ * `.icon-button`). Reused by the login form and by every instructor dialog
+ * (create/edit/lifecycle-confirm across Courses, Sections, Lessons,
+ * Students, Enrollments) - changing an input/button/error treatment here
+ * changes it everywhere it's used.
+ */
+.auth-form,
+.field {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.auth-form {
+  gap: 1.05rem;
+}
+
+/* Also styles `.language-control span` / `.context-strip span` in
+   instructor/shell.css - kept as one rule (not duplicated) since all three
+   share this exact label treatment. */
+.field label,
+.language-control span,
+.context-strip span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+}
+
+input,
+select {
+  min-height: 46px;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.password-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+/**
+ * Generic button family base. `.icon-button` gets further, shape-specific
+ * overrides in instructor/shell.css (for the mobile menu toggle) - that
+ * file's rule intentionally loads after this one so its `border-color`/
+ * `background` win over this shorthand `border`/no-background base.
+ */
+.primary-button,
+.secondary-button,
+.ghost-button,
+.icon-button {
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-weight: 800;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: #ffffff;
+  padding: 0.85rem 1.1rem;
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.secondary-button {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+  color: var(--text);
+  padding: 0.75rem 1rem;
+}
+
+.ghost-button {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  padding: 0.75rem 0.9rem;
+}
+
+.compact,
+.compact-action {
+  min-height: 40px;
+  padding: 0.6rem 0.8rem;
+}
+
+.field-error,
+.form-error,
+.form-note {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+.form-error {
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  padding: 0.8rem;
+}
+
+.form-note {
+  color: var(--muted);
+}
+
+@media (max-width: 620px) {
+  /* Also styles instructor/shell.css's `.context-strip` at the same
+     breakpoint - kept as one rule since both collapse to a single column
+     together. */
+  .password-control,
+  .context-strip {
+    grid-template-columns: 1fr;
+  }
+}

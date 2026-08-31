@@ -1,0 +1,152 @@
+/**
+ * Shared cross-feature page chrome - the list/detail page shell
+ * (`.page-header`, `.detail-*`, `.back-link`), the status badge family, and
+ * `.form-success`. Used by both Students/Enrollments and Courses (and the
+ * status badge further by Sections/Lessons) - a feature-specific stylesheet
+ * should not redeclare any of these; add a new `status-badge-*` variant or
+ * detail-page pattern here so every consumer stays visually consistent.
+ */
+.students-page,
+.courses-page,
+.detail-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  line-height: 1.2;
+}
+
+.page-subtitle {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.form-success {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+  padding: 0.8rem;
+}
+
+/**
+ * Base badge - `status-badge-<status>` (e.g. `status-badge-archived`,
+ * `status-badge-enrollment-revoked`) always accompanies this class on the
+ * same element and must load after it here to win the color/background
+ * override. Generic lifecycle variants (archived/removed/inactive/
+ * effective, reused across Courses/Sections/Lessons/Students) live here;
+ * Students-only enrollment variants live in instructor/students.css and
+ * rely on importing after this file.
+ */
+.status-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.25rem 0.6rem;
+  white-space: nowrap;
+}
+
+.status-badge-archived,
+.status-badge-removed,
+.status-badge-inactive {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.back-arrow {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-block-start: 2px solid currentColor;
+  border-inline-start: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+:dir(rtl) .back-arrow {
+  transform: rotate(135deg);
+}
+
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.detail-header h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1.1rem;
+}
+
+.detail-grid dt {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.detail-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-section {
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1.1rem;
+}
+
+.detail-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.detail-section-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}

@@ -1,0 +1,62 @@
+/**
+ * Login screen layout only. The brand mark/name it displays
+ * (`.brand-mark`/`.brand-name`) is defined in `instructor/shell.css`
+ * instead, since the instructor shell's sidebar reuses the exact same
+ * brand treatment - see that file for changes to the mark itself.
+ */
+.login-page {
+  display: grid;
+  min-height: 100svh;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 480px);
+  gap: clamp(2rem, 6vw, 6rem);
+  align-items: center;
+  padding: clamp(1.25rem, 4vw, 4rem);
+}
+
+.login-brand {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 680px;
+}
+
+.login-brand h1 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.7rem, 7vw, 5.7rem);
+  line-height: 0.94;
+  letter-spacing: 0;
+}
+
+.login-brand p:not(.brand-name) {
+  max-width: 34rem;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
+
+.login-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: clamp(1.25rem, 4vw, 2rem);
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 900px) {
+  .login-page {
+    grid-template-columns: 1fr;
+    align-content: center;
+  }
+
+  .login-brand h1 {
+    max-width: 14ch;
+    font-size: clamp(2.2rem, 12vw, 4rem);
+  }
+}
+
+@media (max-width: 620px) {
+  .login-page {
+    padding: 1rem;
+  }
+}

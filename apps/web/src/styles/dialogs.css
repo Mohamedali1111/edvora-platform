@@ -1,0 +1,88 @@
+/**
+ * Shared modal/dialog chrome - the scrim/panel/actions treatment used by
+ * every create/edit/lifecycle-confirm dialog, plus the bounded
+ * radiogroup-style list (`.course-selector-list`/`.course-selector-option`)
+ * reused by both the Enrollment "select a course" picker and the Lesson
+ * content picker (video/document/quiz). Changing a dialog's visual
+ * treatment belongs here, not in a feature stylesheet.
+ */
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgb(31 37 35 / 48%);
+}
+
+.modal-panel {
+  position: relative;
+  display: grid;
+  max-height: calc(100svh - 2rem);
+  width: min(480px, 100%);
+  gap: 1rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: clamp(1.25rem, 4vw, 1.75rem);
+  box-shadow: var(--shadow);
+}
+
+.modal-panel h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.danger-button {
+  background: var(--danger);
+}
+
+.danger-button:hover {
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
+
+.course-selector-list {
+  display: grid;
+  max-height: 220px;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  list-style: none;
+}
+
+.course-selector-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.course-selector-option:hover {
+  background: var(--accent-soft);
+}
+
+.course-selector-option span:first-of-type {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
