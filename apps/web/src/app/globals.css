@@ -1132,3 +1132,46 @@ textarea[aria-invalid="true"] {
   font-weight: 700;
   user-select: all;
 }
+
+.section-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.section-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.section-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 0.85rem 1rem;
+}
+
+.section-row-main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 220px;
+  gap: 0.2rem;
+}
+
+.section-row-main strong {
+  overflow-wrap: anywhere;
+}
+
+.section-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}

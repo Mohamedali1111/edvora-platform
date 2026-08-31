@@ -13,6 +13,7 @@ import { canArchive, canEditCourseMetadata, canPublish, isTerminal } from "./lif
 import { LifecycleConfirmDialog } from "./lifecycle-confirm-dialog";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { validateCourseInput } from "./validation";
+import { SectionsPanel } from "./sections/sections-panel";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   DRAFT: "status.courseDraft",
@@ -298,7 +299,7 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
         <div className="detail-section-header">
           <h2 id="course-sections-heading">{t("courses.sectionsHeading")}</h2>
         </div>
-        <p className="overview-empty">{t("courses.sectionsComingSoon")}</p>
+        <SectionsPanel tenantId={tenantId} courseId={course.courseId} />
       </section>
 
       {lifecycleAction ? (

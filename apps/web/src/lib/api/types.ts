@@ -86,6 +86,54 @@ export type UpdateCourseRequest = {
   visibility?: CourseVisibility;
 };
 
+export type SectionStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+
+export type CourseSectionSummary = {
+  sectionId: string;
+  tenantId: string;
+  courseId: string;
+  title: string;
+  description: string | null;
+  /**
+   * Server-authoritative order within the course. Not necessarily contiguous:
+   * `(courseId, position)` is a plain unique index that also constrains ARCHIVED
+   * rows, so an archived section permanently retains its old position value even
+   * though it's excluded from reorder. The frontend must never display this raw
+   * number as a rank - only the list's own (backend-sorted) row order matters.
+   */
+  position: number;
+  status: SectionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Response for GET /instructor/tenants/:tenantId/courses/:courseId/sections and the reorder endpoint. Unpaginated - the frozen API returns every section for a course in one response, including ARCHIVED ones. */
+export type SectionListResponse = {
+  items: CourseSectionSummary[];
+};
+
+/** Body for POST /instructor/tenants/:tenantId/courses/:courseId/sections. `position` is always server-computed - never client-supplied. */
+export type CreateSectionRequest = {
+  title: string;
+  description?: string;
+};
+
+/** Body for PATCH .../sections/:sectionId. Metadata only - lifecycle status changes go through the dedicated publish/archive endpoints. */
+export type UpdateSectionRequest = {
+  title?: string;
+  description?: string | null;
+};
+
+/**
+ * Body for POST .../sections/reorder. Must contain exactly the current set of
+ * non-ARCHIVED section IDs for the course, in the desired final order - not a
+ * single section + target position, and never including archived section IDs
+ * (the backend rejects a mismatched set with INVALID_SECTION_REORDER).
+ */
+export type ReorderSectionsRequest = {
+  sectionIds: string[];
+};
+
 export type TenantStudentStatus = "ACTIVE" | "INACTIVE" | "REMOVED";
 
 export type TenantStudentSummary = {
