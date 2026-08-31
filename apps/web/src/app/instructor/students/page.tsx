@@ -1,5 +1,5 @@
-import { Placeholder } from "@/features/instructor/placeholder";
+import { StudentsList } from "@/features/instructor/students/students-list";
 
 export default function StudentsPage() {
-  return <Placeholder />;
+  return <StudentsList />;
 }

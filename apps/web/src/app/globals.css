@@ -776,3 +776,332 @@ input[aria-invalid="true"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Students & enrollments */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.students-page,
+.detail-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  line-height: 1.2;
+}
+
+.page-subtitle {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.form-success {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+  padding: 0.8rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+}
+
+.data-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+}
+
+.data-table caption {
+  caption-side: top;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.75rem 1rem;
+  text-align: start;
+  vertical-align: middle;
+}
+
+.data-table thead th {
+  border-block-end: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.data-table tbody tr {
+  border-block-end: 1px solid var(--border);
+}
+
+.data-table tbody tr:last-child {
+  border-block-end: 0;
+}
+
+.data-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+
+.table-secondary-text {
+  display: block;
+  margin-block-start: 0.15rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.pagination-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgb(31 37 35 / 48%);
+}
+
+.modal-panel {
+  position: relative;
+  display: grid;
+  max-height: calc(100svh - 2rem);
+  width: min(480px, 100%);
+  gap: 1rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: clamp(1.25rem, 4vw, 1.75rem);
+  box-shadow: var(--shadow);
+}
+
+.modal-panel h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.danger-button {
+  background: var(--danger);
+}
+
+.danger-button:hover {
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
+
+.course-selector-list {
+  display: grid;
+  max-height: 220px;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  list-style: none;
+}
+
+.course-selector-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.course-selector-option:hover {
+  background: var(--accent-soft);
+}
+
+.course-selector-option span:first-of-type {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.back-arrow {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-block-start: 2px solid currentColor;
+  border-inline-start: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+:dir(rtl) .back-arrow {
+  transform: rotate(135deg);
+}
+
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.detail-header h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1.1rem;
+}
+
+.detail-grid dt {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.detail-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-section {
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1.1rem;
+}
+
+.detail-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.detail-section-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.enrollment-filter {
+  max-width: 220px;
+}
+
+.enrollment-dates {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.status-badge-enrollment-inactive {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.status-badge-enrollment-revoked,
+.status-badge-enrollment-expired {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.status-badge-effective {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+@media (max-width: 720px) {
+  .table-col-secondary {
+    display: none;
+  }
+}
+
+.activation-token-box {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 0.9rem;
+}
+
+.activation-token-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.activation-token-value {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  user-select: all;
+}
