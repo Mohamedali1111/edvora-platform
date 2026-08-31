@@ -60,7 +60,8 @@ Instructor self-inbox:
 - `GET /instructor/notifications/unread-count`
 - `PATCH /instructor/notifications/:notificationId/read`
 
-List responses are bounded with the existing `limit` / `offset` pagination convention. The default
+List responses are bounded with the existing `limit` / `offset` pagination convention, plus
+`hasMore` (see `docs/BACKEND-DOMAIN.md`'s "API Boundary Implications"). The default
 limit is `25`, the maximum limit is `100`, and ordering is deterministic:
 
 ```text

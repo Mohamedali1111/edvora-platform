@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AssetProcessingStatus } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -48,17 +49,18 @@ export class MediaAssetService {
     tenantId: string,
     limit: number,
     offset: number,
-  ): Promise<VideoAssetSummary[]> {
+  ): Promise<{ items: VideoAssetSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(principal, tenantId);
 
-    const assets = await this.prismaService.client.videoAsset.findMany({
+    const rows = await this.prismaService.client.videoAsset.findMany({
       where: { tenantId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return assets.map(toVideoAssetSummary);
+    return { items: items.map(toVideoAssetSummary), hasMore };
   }
 
   async getVideoAsset(
@@ -84,17 +86,18 @@ export class MediaAssetService {
     tenantId: string,
     limit: number,
     offset: number,
-  ): Promise<DocumentAssetSummary[]> {
+  ): Promise<{ items: DocumentAssetSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(principal, tenantId);
 
-    const assets = await this.prismaService.client.documentAsset.findMany({
+    const rows = await this.prismaService.client.documentAsset.findMany({
       where: { tenantId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return assets.map(toDocumentAssetSummary);
+    return { items: items.map(toDocumentAssetSummary), hasMore };
   }
 
   async getDocumentAsset(

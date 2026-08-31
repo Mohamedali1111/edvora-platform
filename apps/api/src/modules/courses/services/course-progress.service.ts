@@ -6,6 +6,7 @@ import {
   SectionStatus,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
@@ -71,14 +72,23 @@ export class CourseProgressService {
    *
    * Query strategy (bounded, no N+1): (1) tenant authorization, (2) one Course existence check,
    * (3) one query for the Course's current Lesson-ID set, (4) one paginated Enrollment query for
-   * the page of rows, then — only when the page is non-empty — (5) one grouped `LessonProgress`
+   * the page of rows (`take: limit + 1`, trimmed to the real page via `trimToOffsetPage` — see
+   * below), then — only when the trimmed page is non-empty — (5) one grouped `LessonProgress`
    * count aggregate scoped to the current Lesson set (skipped entirely when `totalLessons` is 0),
    * (6) one grouped `LessonProgress` max-`completedAt` aggregate (unscoped, for `lastActivityAt`),
    * and (7) one grouped `QuizAttempt` max-`updatedAt` aggregate. None of these scale per student
    * or per lesson — every aggregate is a single `groupBy` keyed on the page's bounded
    * `enrollmentId` list.
+   *
+   * `hasMore`: fetches one extra Enrollment row (`take: limit + 1`) and trims to the real page
+   * with `trimToOffsetPage` — deliberately BEFORE `enrollmentIds` is built from the page for the
+   * three follow-up `groupBy` aggregates above. The sentinel (limit + 1)th row, when present,
+   * therefore never appears in the returned `items`, never contributes to any
+   * `completedLessons`/`lastActivityAt` aggregate for the real page, and never affects
+   * `totalLessons` (computed independently from the Course's Lesson set, not from the Enrollment
+   * page at all). No extra `COUNT(*)` query.
    */
-  async listCourseProgress(input: ListCourseProgressInput): Promise<CourseProgressRow[]> {
+  async listCourseProgress(input: ListCourseProgressInput): Promise<{ items: CourseProgressRow[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
 
     const course = await this.prismaService.client.course.findUnique({
@@ -108,7 +118,7 @@ export class CourseProgressService {
     const currentLessonIds = currentLessons.map((lesson) => lesson.id);
     const totalLessons = currentLessonIds.length;
 
-    const enrollments = await this.prismaService.client.enrollment.findMany({
+    const enrollmentRows = await this.prismaService.client.enrollment.findMany({
       where: {
         tenantId: input.tenantId,
         courseId: input.courseId,
@@ -124,12 +134,13 @@ export class CourseProgressService {
         student: { select: { email: true, displayName: true, accountStatus: true } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      take: input.limit,
+      take: input.limit + 1,
       skip: input.offset,
     });
+    const { items: enrollments, hasMore } = trimToOffsetPage(enrollmentRows, input.limit);
 
     if (enrollments.length === 0) {
-      return [];
+      return { items: [], hasMore };
     }
 
     const enrollmentIds = enrollments.map((enrollment) => enrollment.id);
@@ -167,7 +178,7 @@ export class CourseProgressService {
     const lastCompletionByEnrollment = new Map(completionActivity.map((row) => [row.enrollmentId, row._max.completedAt]));
     const lastAttemptByEnrollment = new Map(attemptActivity.map((row) => [row.enrollmentId, row._max.updatedAt]));
 
-    return enrollments.map((enrollment) => {
+    const items = enrollments.map((enrollment) => {
       const completedLessons = completedCountByEnrollment.get(enrollment.id) ?? 0;
       const lastCompletion = lastCompletionByEnrollment.get(enrollment.id) ?? null;
       const lastAttempt = lastAttemptByEnrollment.get(enrollment.id) ?? null;
@@ -194,6 +205,8 @@ export class CourseProgressService {
         lastActivityAt: laterOf(lastCompletion, lastAttempt),
       };
     });
+
+    return { items, hasMore };
   }
 }
 

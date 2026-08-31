@@ -559,6 +559,66 @@ maybeDescribe('notification HTTP PostgreSQL integration', () => {
     ).resolves.toBe(1);
   });
 
+  it('reports hasMore correctly for the student notification list: fewer than limit, exactly limit, and a real next/final page split', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('haspage-notif');
+    const studentId = await createStudentWithTenant('haspage-notif-student', tenantId, instructorId);
+    const token = await issueAccessToken(studentId, PlatformRole.STUDENT);
+    const installationId = installation(80);
+    await createActiveDevice(studentId, installationId);
+    void instructorId;
+
+    for (let i = 0; i < 3; i += 1) {
+      await createNotification({
+        recipientUserId: studentId,
+        tenantId,
+        type: `HASPAGE_${i}`,
+        createdAt: new Date(2026, 0, i + 1),
+      });
+    }
+
+    type Body = { items: unknown[]; hasMore: boolean };
+
+    const fewerThanLimit = await request(server)
+      .get('/student/notifications')
+      .query({ limit: 10, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const fewerBody = responseBody<Body>(fewerThanLimit);
+    expect(fewerBody.items).toHaveLength(3);
+    expect(fewerBody.hasMore).toBe(false);
+
+    const exactlyLimit = await request(server)
+      .get('/student/notifications')
+      .query({ limit: 3, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const exactBody = responseBody<Body>(exactlyLimit);
+    expect(exactBody.items).toHaveLength(3);
+    expect(exactBody.hasMore).toBe(false);
+
+    const firstPage = await request(server)
+      .get('/student/notifications')
+      .query({ limit: 2, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<Body>(firstPage);
+    expect(firstBody.items).toHaveLength(2);
+    expect(firstBody.hasMore).toBe(true);
+
+    const finalPage = await request(server)
+      .get('/student/notifications')
+      .query({ limit: 2, offset: 2 })
+      .set('Authorization', `Bearer ${token}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK);
+    const finalBody = responseBody<Body>(finalPage);
+    expect(finalBody.items).toHaveLength(1);
+    expect(finalBody.hasMore).toBe(false);
+  });
+
   async function clearNotificationData(): Promise<void> {
     await prisma.client.notification.deleteMany();
     await prisma.client.securityEvent.deleteMany();

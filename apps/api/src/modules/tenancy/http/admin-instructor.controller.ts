@@ -5,17 +5,14 @@ import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { setNoStore } from '../../auth/http/no-store';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { CreateInstructorDto } from '../dto/create-instructor.dto';
 import { InstructorIdParamDto } from '../dto/uuid-param.dto';
 import { PaginationQueryDto } from '../dto/pagination-query.dto';
 import { InstructorOnboardingService } from '../services/instructor-onboarding.service';
 import type { CreatedInstructorResult, InstructorSummary } from '../types/tenancy.types';
 
-type InstructorListResponse = {
-  items: InstructorSummary[];
-  limit: number;
-  offset: number;
-};
+type InstructorListResponse = OffsetPage<InstructorSummary>;
 
 const TENANCY_THROTTLE = {
   tenancy: {
@@ -55,11 +52,8 @@ export class AdminInstructorController {
   ): Promise<InstructorListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.instructors.listInstructors(principal, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.instructors.listInstructors(principal, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get(':instructorId')

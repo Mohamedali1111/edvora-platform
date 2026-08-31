@@ -4,6 +4,7 @@ import {
   type QuizRevealAnswersPolicy,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -65,17 +66,18 @@ export class QuizService {
     tenantId: string,
     limit: number,
     offset: number,
-  ): Promise<QuizSummary[]> {
+  ): Promise<{ items: QuizSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(principal, tenantId);
 
-    const quizzes = await this.prismaService.client.quiz.findMany({
+    const rows = await this.prismaService.client.quiz.findMany({
       where: { tenantId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return quizzes.map(toQuizSummary);
+    return { items: items.map(toQuizSummary), hasMore };
   }
 
   async getQuiz(principal: AuthenticatedPrincipal, tenantId: string, quizId: string): Promise<QuizSummary> {

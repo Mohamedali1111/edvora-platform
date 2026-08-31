@@ -3,17 +3,14 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { CreateEnrollmentDto } from '../dto/create-enrollment.dto';
 import { ListEnrollmentsQueryDto } from '../dto/list-enrollments-query.dto';
 import { EnrollmentIdParamDto, TenantIdParamDto } from '../dto/uuid-param.dto';
 import { EnrollmentService } from '../services/enrollment.service';
 import type { EnrollmentSummary, InstructorEnrollmentSummary } from '../types/tenancy.types';
 
-type InstructorEnrollmentListResponse = {
-  items: InstructorEnrollmentSummary[];
-  limit: number;
-  offset: number;
-};
+type InstructorEnrollmentListResponse = OffsetPage<InstructorEnrollmentSummary>;
 
 const TENANCY_THROTTLE = {
   tenancy: {
@@ -37,19 +34,16 @@ export class InstructorEnrollmentController {
   ): Promise<InstructorEnrollmentListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.enrollments.listEnrollments({
-        principal,
-        tenantId: params.tenantId,
-        courseId: query.courseId,
-        studentUserId: query.studentUserId,
-        status: query.status,
-        limit,
-        offset,
-      }),
+    const { items, hasMore } = await this.enrollments.listEnrollments({
+      principal,
+      tenantId: params.tenantId,
+      courseId: query.courseId,
+      studentUserId: query.studentUserId,
+      status: query.status,
       limit,
       offset,
-    };
+    });
+    return { items, limit, offset, hasMore };
   }
 
   @Post()

@@ -10,6 +10,7 @@ import {
   type StudentDevice,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { SecurityEventService } from '../../auth/services/security-event.service';
@@ -431,29 +432,33 @@ export class StudentDeviceService {
     adminPrincipal: AuthenticatedPrincipal;
     limit?: number;
     offset?: number;
-  }): Promise<DeviceChangeRequestSummary[]> {
+  }): Promise<{ items: DeviceChangeRequestSummary[]; hasMore: boolean }> {
     await this.assertActivePlatformAdmin(this.prismaService.client, input.adminPrincipal.userId);
     const limit = input.limit ?? 25;
     const offset = input.offset ?? 0;
 
-    const requests = await this.prismaService.client.deviceChangeRequest.findMany({
+    const rows = await this.prismaService.client.deviceChangeRequest.findMany({
       where: { status: DeviceChangeRequestStatus.PENDING },
       orderBy: { requestedAt: 'asc' },
       skip: offset,
-      take: limit,
+      take: limit + 1,
       include: { requestedDevice: true },
     });
+    const { items: requests, hasMore } = trimToOffsetPage(rows, limit);
 
-    return requests.map((request) => ({
-      id: request.id,
-      studentUserId: request.studentUserId,
-      requestedAt: request.requestedAt,
-      requestedPlatform: request.requestedDevice?.platform ?? null,
-      requestedDeviceModel: request.requestedDevice?.deviceModel ?? null,
-      requestedOsVersion: request.requestedDevice?.osVersion ?? null,
-      requestedAppVersion: request.requestedDevice?.appVersion ?? null,
-      currentDeviceId: request.currentDeviceId,
-    }));
+    return {
+      items: requests.map((request) => ({
+        id: request.id,
+        studentUserId: request.studentUserId,
+        requestedAt: request.requestedAt,
+        requestedPlatform: request.requestedDevice?.platform ?? null,
+        requestedDeviceModel: request.requestedDevice?.deviceModel ?? null,
+        requestedOsVersion: request.requestedDevice?.osVersion ?? null,
+        requestedAppVersion: request.requestedDevice?.appVersion ?? null,
+        currentDeviceId: request.currentDeviceId,
+      })),
+      hasMore,
+    };
   }
 
   async assertAuthorizedStudentDevice(input: {

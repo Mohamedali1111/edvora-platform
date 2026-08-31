@@ -126,7 +126,7 @@ Each item is an `InstructorEnrollmentSummary`: `enrollmentId`, `tenantId`, `cour
 
 Lists persisted rows as-is by default, `REVOKED`/`EXPIRED` history included — an Enrollment row is never deleted or hidden. A student re-enrolled after revocation legitimately has multiple durable rows for the same (student, Course): the partial unique index `enrollments_one_active_per_student_course_key` only forbids two simultaneously `ACTIVE` rows for the same (student, course), never multiple historical ones, and this endpoint never collapses them.
 
-Pagination uses the repository's current bounded `limit`/`offset` contract (`PaginationQueryDto`: `limit` 1–100, default 25; `offset` ≥ 0, default 0) with deterministic `createdAt` descending, `id` ascending ordering — newest enrollment first, stable tie-break — matching every other instructor list route in this codebase. This endpoint does not add the `hasMore` pagination-contract change; that is reserved for a dedicated API-readiness slice so every list contract changes together.
+Pagination uses the repository's bounded `limit`/`offset` contract (`PaginationQueryDto`: `limit` 1–100, default 25; `offset` ≥ 0, default 0) with deterministic `createdAt` descending, `id` ascending ordering — newest enrollment first, stable tie-break — matching every other instructor list route in this codebase. The response also includes `hasMore` (see `docs/BACKEND-DOMAIN.md`'s "API Boundary Implications" for the shared `{ items, limit, offset, hasMore }` contract and `take: limit + 1` algorithm), added additively by the API Readiness Slice.
 
 Existing indexes (`enrollments_tenant_id_course_id_status_idx` on `(tenantId, courseId, status)`; `enrollments_student_user_id_status_idx` on `(studentUserId, status)`; `enrollments_student_user_id_course_id_status_idx` on `(studentUserId, courseId, status)`) are sufficient for V1 scale: the course-roster query is a direct prefix match on the first index, and the student-history query narrows on `studentUserId` (already a highly selective equality match, then re-checked against `tenantId`) via the second or third. No migration was needed or added.
 
@@ -240,9 +240,12 @@ Lesson set (skipped entirely when `totalLessons` is 0), one grouped `LessonProgr
 aggregate, and one grouped `QuizAttempt` max-`updatedAt` aggregate. Every aggregate is a single
 `groupBy` keyed on the page's bounded `enrollmentId` list — none scale per student or per Lesson.
 
-**Pagination/ordering.** The existing bounded `limit`/`offset` contract, `createdAt` descending /
+**Pagination/ordering.** The bounded `limit`/`offset` contract, `createdAt` descending /
 `id` ascending — newest Enrollment first, stable tie-break, matching every other instructor list
-route. No `hasMore` change here, reserved for a future API-readiness slice.
+route — plus `hasMore`, computed via `take: limit + 1` and trimmed to the real page *before* the
+follow-up `LessonProgress`/`QuizAttempt` aggregate queries below are built from the page's
+Enrollment IDs, so the sentinel row can never contribute to a returned row's `completedLessons`
+or `lastActivityAt`.
 
 ## Concurrency And Integrity
 

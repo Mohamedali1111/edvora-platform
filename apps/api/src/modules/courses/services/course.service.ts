@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { CourseStatus, type CourseVisibility } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -59,17 +60,18 @@ export class CourseService {
     tenantId: string,
     limit: number,
     offset: number,
-  ): Promise<CourseSummary[]> {
+  ): Promise<{ items: CourseSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(principal, tenantId);
 
-    const courses = await this.prismaService.client.course.findMany({
+    const rows = await this.prismaService.client.course.findMany({
       where: { tenantId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return courses.map(toCourseSummary);
+    return { items: items.map(toCourseSummary), hasMore };
   }
 
   async getCourse(

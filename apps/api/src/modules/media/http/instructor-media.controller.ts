@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
 import { CreateDocumentUploadIntentDto } from '../dto/document-upload.dto';
@@ -17,17 +18,9 @@ import type {
   VideoUploadIntent,
 } from '../types/media.types';
 
-type VideoAssetListResponse = {
-  items: VideoAssetSummary[];
-  limit: number;
-  offset: number;
-};
+type VideoAssetListResponse = OffsetPage<VideoAssetSummary>;
 
-type DocumentAssetListResponse = {
-  items: DocumentAssetSummary[];
-  limit: number;
-  offset: number;
-};
+type DocumentAssetListResponse = OffsetPage<DocumentAssetSummary>;
 
 const MEDIA_THROTTLE = {
   media: {
@@ -51,11 +44,8 @@ export class InstructorMediaController {
   ): Promise<VideoAssetListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.media.listVideoAssets(principal, params.tenantId, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.media.listVideoAssets(principal, params.tenantId, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get('videos/:videoAssetId')
@@ -76,11 +66,8 @@ export class InstructorMediaController {
   ): Promise<DocumentAssetListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.media.listDocumentAssets(principal, params.tenantId, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.media.listDocumentAssets(principal, params.tenantId, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get('documents/:documentAssetId')

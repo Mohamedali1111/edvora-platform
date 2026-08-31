@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
 import { ListQuizAttemptsQueryDto } from '../dto/list-quiz-attempts-query.dto';
@@ -13,17 +14,9 @@ import { QuizService } from '../services/quiz.service';
 import type { InstructorQuizAttemptSummary } from '../types/instructor-quiz-attempt.types';
 import type { QuizSummary } from '../types/quiz.types';
 
-type QuizListResponse = {
-  items: QuizSummary[];
-  limit: number;
-  offset: number;
-};
+type QuizListResponse = OffsetPage<QuizSummary>;
 
-type InstructorQuizAttemptListResponse = {
-  items: InstructorQuizAttemptSummary[];
-  limit: number;
-  offset: number;
-};
+type InstructorQuizAttemptListResponse = OffsetPage<InstructorQuizAttemptSummary>;
 
 const QUIZ_THROTTLE = {
   quiz: {
@@ -68,11 +61,8 @@ export class InstructorQuizController {
   ): Promise<QuizListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.quizzes.listQuizzes(principal, params.tenantId, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.quizzes.listQuizzes(principal, params.tenantId, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get(':quizId')
@@ -130,18 +120,15 @@ export class InstructorQuizController {
   ): Promise<InstructorQuizAttemptListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.attempts.listAttempts({
-        principal,
-        tenantId: params.tenantId,
-        quizId: params.quizId,
-        studentUserId: query.studentUserId,
-        passed: query.passed,
-        limit,
-        offset,
-      }),
+    const { items, hasMore } = await this.attempts.listAttempts({
+      principal,
+      tenantId: params.tenantId,
+      quizId: params.quizId,
+      studentUserId: query.studentUserId,
+      passed: query.passed,
       limit,
       offset,
-    };
+    });
+    return { items, limit, offset, hasMore };
   }
 }

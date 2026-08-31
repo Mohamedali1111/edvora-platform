@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { TenantAuthorizationService } from '../../tenancy/services/tenant-authorization.service';
 import { QuizNotFoundError } from '../errors/quiz.errors';
@@ -70,7 +71,7 @@ export class InstructorQuizAttemptService {
    * empty page (no existence leakage risk, since it reveals nothing not already implied by "zero
    * attempts").
    */
-  async listAttempts(input: ListQuizAttemptsInput): Promise<InstructorQuizAttemptSummary[]> {
+  async listAttempts(input: ListQuizAttemptsInput): Promise<{ items: InstructorQuizAttemptSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
 
     const quiz = await this.prismaService.client.quiz.findUnique({
@@ -91,11 +92,12 @@ export class InstructorQuizAttemptService {
       },
       select: ATTEMPT_REPORT_SELECT,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      take: input.limit,
+      take: input.limit + 1,
       skip: input.offset,
     });
+    const { items, hasMore } = trimToOffsetPage(rows, input.limit);
 
-    return rows.map(toInstructorQuizAttemptSummary);
+    return { items: items.map(toInstructorQuizAttemptSummary), hasMore };
   }
 }
 

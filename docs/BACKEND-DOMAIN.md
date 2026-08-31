@@ -283,6 +283,15 @@ Important backend boundaries:
 
 Internal fields such as password hashes, refresh/session secrets, provider asset references, security metadata, deletion markers, and raw audit metadata must not be exposed directly to clients.
 
+Every bounded offset-paginated list response across the API shares one standard shape:
+`{ items, limit, offset, hasMore }`. `hasMore` is computed from a `take: limit + 1` fetch (one row
+beyond the page) rather than a second `COUNT(*)` query: `hasMore = rows.length > limit`, and the
+sentinel row is trimmed off before it reaches `items` — never `items.length === limit`, which
+misreports a next page when the result set ends exactly on a page boundary. For a list endpoint
+whose page feeds a further page-scoped query (e.g. a reporting endpoint that aggregates by the
+returned rows' IDs), the sentinel row must be trimmed before that follow-up query is built, so it
+can never contribute to an aggregate for the returned page. `total` is not part of this contract.
+
 ## Failure-Case Review
 
 - Same student studies with two instructors: supported through canonical `User` plus one `TenantStudent` association per tenant and tenant-scoped enrollments.

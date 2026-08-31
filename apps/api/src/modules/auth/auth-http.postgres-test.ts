@@ -7,6 +7,7 @@ import {
   AccountActivationPurpose,
   AccountStatus,
   CredentialType,
+  LanguagePreference,
   PlatformRole,
   RefreshSessionStatus,
 } from '../../../.generated/prisma/client';
@@ -314,6 +315,116 @@ maybeDescribe('auth HTTP PostgreSQL integration', () => {
     ).resolves.toBe(1);
   });
 
+  it('GET /auth/me returns fresh DB-resolved identity for STUDENT, INSTRUCTOR, and PLATFORM_ADMIN, with no sensitive fields and no device requirement', async () => {
+    const studentId = '20000000-0000-7000-8000-000000000010';
+    const instructorId = '20000000-0000-7000-8000-000000000011';
+    const adminId = '20000000-0000-7000-8000-000000000012';
+
+    await createUser(studentId, 'me-student@example.test', PlatformRole.STUDENT, {
+      displayName: 'Me Student',
+      preferredLanguage: LanguagePreference.AR,
+    });
+    await createCredential(studentId, 'me student password');
+    await createUser(instructorId, 'me-instructor@example.test', PlatformRole.INSTRUCTOR, {
+      displayName: 'Me Instructor',
+    });
+    await createCredential(instructorId, 'me instructor password');
+    await createUser(adminId, 'me-admin@example.test', PlatformRole.PLATFORM_ADMIN);
+    await createCredential(adminId, 'me admin password');
+
+    const studentLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: 'me-student@example.test', password: 'me student password', channel: 'MOBILE' })
+      .expect(HttpStatus.OK);
+
+    // No StudentDeviceGuard, no installation header sent at all — the account/session identity
+    // read must never require an approved device.
+    const studentMe = await request(server)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${sessionBody(studentLogin).accessToken}`)
+      .expect(HttpStatus.OK);
+    expect(studentMe.body).toEqual({
+      userId: studentId,
+      role: PlatformRole.STUDENT,
+      email: 'me-student@example.test',
+      displayName: 'Me Student',
+      preferredLanguage: LanguagePreference.AR,
+    });
+    await expect(prisma.client.studentDevice.count()).resolves.toBe(0);
+
+    const instructorLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: 'me-instructor@example.test', password: 'me instructor password', channel: 'MOBILE' })
+      .expect(HttpStatus.OK);
+    const instructorMe = await request(server)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${sessionBody(instructorLogin).accessToken}`)
+      .expect(HttpStatus.OK);
+    expect(instructorMe.body).toEqual({
+      userId: instructorId,
+      role: PlatformRole.INSTRUCTOR,
+      email: 'me-instructor@example.test',
+      displayName: 'Me Instructor',
+      preferredLanguage: LanguagePreference.EN,
+    });
+
+    const adminLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: 'me-admin@example.test', password: 'me admin password', channel: 'MOBILE' })
+      .expect(HttpStatus.OK);
+    const adminMe = await request(server)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${sessionBody(adminLogin).accessToken}`)
+      .expect(HttpStatus.OK);
+    expect(adminMe.body).toEqual({
+      userId: adminId,
+      role: PlatformRole.PLATFORM_ADMIN,
+      email: 'me-admin@example.test',
+      displayName: null,
+      preferredLanguage: LanguagePreference.EN,
+    });
+
+    // No auth/session/device/security-event internals in the raw response, for any role.
+    const raw = JSON.stringify([studentMe.body, instructorMe.body, adminMe.body]);
+    for (const forbidden of [
+      'passwordHash',
+      'accessToken',
+      'refreshToken',
+      'sessionId',
+      'tokenHash',
+      'clientDeviceIdHash',
+      'accountStatus',
+      'tenantId',
+      'membership',
+    ]) {
+      expect(raw).not.toContain(forbidden);
+    }
+  });
+
+  it('GET /auth/me rejects a missing token, a malformed token, and an account that has since become inactive', async () => {
+    await request(server).get('/auth/me').expect(HttpStatus.UNAUTHORIZED);
+    await request(server).get('/auth/me').set('Authorization', 'Bearer not-a-real-token').expect(HttpStatus.UNAUTHORIZED);
+
+    const userId = '20000000-0000-7000-8000-000000000013';
+    await createUser(userId, 'me-inactive@example.test', PlatformRole.STUDENT);
+    await createCredential(userId, 'me inactive password');
+    const login = await request(server)
+      .post('/auth/login')
+      .send({ email: 'me-inactive@example.test', password: 'me inactive password', channel: 'MOBILE' })
+      .expect(HttpStatus.OK);
+
+    // Still a validly-signed, unexpired access token — the account is deactivated afterward, out
+    // of band, the same way an admin action or a deletion request would. `/auth/me` must resolve
+    // this fresh from the database, not merely accept a still-valid token.
+    await prisma.client.user.update({ where: { id: userId }, data: { accountStatus: AccountStatus.SUSPENDED } });
+
+    const rejected = await request(server)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${sessionBody(login).accessToken}`)
+      .expect(HttpStatus.FORBIDDEN);
+    expect(rejected.body).toMatchObject({ error: { code: 'ACCOUNT_UNAVAILABLE' } });
+  });
+
   async function clearAuthData(): Promise<void> {
     await prisma.client.securityEvent.deleteMany();
     await prisma.client.refreshSession.deleteMany();
@@ -337,7 +448,12 @@ maybeDescribe('auth HTTP PostgreSQL integration', () => {
     });
   }
 
-  async function createUser(id: string, email: string, platformRole: PlatformRole): Promise<void> {
+  async function createUser(
+    id: string,
+    email: string,
+    platformRole: PlatformRole,
+    overrides?: { displayName?: string; preferredLanguage?: LanguagePreference },
+  ): Promise<void> {
     await prisma.client.user.create({
       data: {
         id,
@@ -345,6 +461,8 @@ maybeDescribe('auth HTTP PostgreSQL integration', () => {
         normalizedEmail: email.toLowerCase(),
         accountStatus: AccountStatus.ACTIVE,
         platformRole,
+        displayName: overrides?.displayName ?? null,
+        ...(overrides?.preferredLanguage ? { preferredLanguage: overrides.preferredLanguage } : {}),
       },
     });
   }

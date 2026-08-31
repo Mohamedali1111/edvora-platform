@@ -359,6 +359,7 @@ existence check (`QUIZ_NOT_FOUND` otherwise, non-leaking — a random UUID and a
 to a different tenant both collapse to the same error). The Attempt query's own `WHERE` always
 includes both `tenantId` and `quizId`.
 
-**Pagination/ordering.** The existing bounded `limit`/`offset` contract, `createdAt` descending /
-`id` ascending — newest Attempt first, stable tie-break. One `select`-projected, bounded query for
-the page itself; no N+1.
+**Pagination/ordering.** The bounded `limit`/`offset` contract plus `hasMore`, `createdAt`
+descending / `id` ascending — newest Attempt first, stable tie-break. One `select`-projected,
+bounded query for the page itself (`take: limit + 1`, trimmed to the real page); no N+1, no second
+`COUNT(*)`.

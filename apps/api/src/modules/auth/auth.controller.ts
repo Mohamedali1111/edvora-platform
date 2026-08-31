@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ActivateAccountDto } from './dto/activate-account.dto';
@@ -7,7 +7,7 @@ import { CompletePasswordResetDto } from './dto/complete-password-reset.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshSessionDto } from './dto/refresh-session.dto';
 import { SessionChannelDto } from './dto/session-channel.dto';
-import type { AuthenticatedSessionResult, SessionChannel } from './types/auth.types';
+import type { AuthenticatedSessionResult, CurrentUserSummary, SessionChannel } from './types/auth.types';
 import { AuthOrchestrationService } from './services/auth-orchestration.service';
 import { ClockService } from './services/clock.service';
 import { AccessTokenGuard } from './http/access-token.guard';
@@ -68,6 +68,24 @@ export class AuthController {
     }
 
     return this.toSessionResponse(result, 'MOBILE');
+  }
+
+  // Account/session identity only — deliberately no `StudentDeviceGuard`. Device authorization
+  // gates protected student product/domain routes; it must never block a client from learning its
+  // own authenticated account identity while it is still resolving device-authorization UX (e.g.
+  // right after login, before the first device is approved). This does not weaken device gating
+  // anywhere else — every existing protected student route keeps its own `StudentDeviceGuard`.
+  @Get('me')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard, AccessTokenGuard)
+  @Throttle(AUTH_THROTTLE)
+  async me(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<CurrentUserSummary> {
+    setNoStore(response);
+
+    return this.auth.getCurrentUser(principal.userId);
   }
 
   @Post('refresh')

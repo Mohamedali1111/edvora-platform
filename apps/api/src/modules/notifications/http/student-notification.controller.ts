@@ -4,16 +4,13 @@ import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { StudentDeviceGuard } from '../../devices/http/student-device.guard';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { NotificationService } from '../services/notification.service';
 import type { NotificationSummary } from '../types/notification.types';
 import { NotificationIdParamDto } from './notification-params.dto';
 
-type NotificationListResponse = {
-  items: NotificationSummary[];
-  limit: number;
-  offset: number;
-};
+type NotificationListResponse = OffsetPage<NotificationSummary>;
 
 const NOTIFICATION_THROTTLE = {
   notifications: {
@@ -36,11 +33,8 @@ export class StudentNotificationController {
   ): Promise<NotificationListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.notifications.listStudentNotifications(principal, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.notifications.listStudentNotifications(principal, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get('unread-count')

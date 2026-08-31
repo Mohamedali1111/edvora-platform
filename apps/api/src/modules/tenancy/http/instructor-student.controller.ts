@@ -5,17 +5,14 @@ import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { setNoStore } from '../../auth/http/no-store';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { AddStudentDto } from '../dto/add-student.dto';
 import { PaginationQueryDto } from '../dto/pagination-query.dto';
 import { TenantIdParamDto, TenantStudentParamDto } from '../dto/uuid-param.dto';
 import { StudentAssociationService } from '../services/student-association.service';
 import type { AddTenantStudentResult, TenantStudentSummary } from '../types/tenancy.types';
 
-type TenantStudentListResponse = {
-  items: TenantStudentSummary[];
-  limit: number;
-  offset: number;
-};
+type TenantStudentListResponse = OffsetPage<TenantStudentSummary>;
 
 const TENANCY_THROTTLE = {
   tenancy: {
@@ -56,11 +53,8 @@ export class InstructorStudentController {
   ): Promise<TenantStudentListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.students.listStudents(principal, params.tenantId, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.students.listStudents(principal, params.tenantId, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get(':studentUserId')

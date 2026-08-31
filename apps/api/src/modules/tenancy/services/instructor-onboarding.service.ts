@@ -15,6 +15,7 @@ import { ClockService } from '../../auth/services/clock.service';
 import { SecurityEventService } from '../../auth/services/security-event.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import {
   IdentityRoleConflictError,
   InstructorAlreadyExistsError,
@@ -193,11 +194,34 @@ export class InstructorOnboardingService {
     principal: AuthenticatedPrincipal,
     limit: number,
     offset: number,
-  ): Promise<InstructorSummary[]> {
+  ): Promise<{ items: InstructorSummary[]; hasMore: boolean }> {
     await this.authorization.assertActivePlatformAdmin(principal);
 
+    // Eligibility is enforced in the query itself, not after fetching: only an `InstructorProfile`
+    // whose `User` has an applicable OWNER `TenantMembership` can ever become a returned item, so
+    // `take`/`skip` here operate on the exact same ordered set `items` is built from — `take: limit
+    // + 1` fetches one row past the page, and the `where` guarantees every one of those rows,
+    // sentinel included, is a genuine candidate.
+    //
+    // `createInstructor` above always creates the `InstructorProfile`, `Tenant`, and its OWNER
+    // `TenantMembership` together in one transaction, and no code anywhere in this codebase ever
+    // updates or deletes a `TenantMembership` afterward — so an `InstructorProfile` with no OWNER
+    // membership cannot occur through any reachable production code path today; the prior version
+    // of this method's post-fetch drop was purely defensive against a data anomaly that has never
+    // actually been possible to produce. It was still a real pagination bug: fetching an unfiltered
+    // page and dropping ineligible rows afterward in application code (`flatMap`) let `hasMore` and
+    // `items.length` reflect a broader candidate set than the actual result set, could hide a real
+    // next page, and could make `offset` skip past genuinely eligible instructors sitting behind an
+    // ineligible row — all reachable the moment such a row ever existed, however it got there (a
+    // manual data fix, a future admin action, direct DB access). Pushing the condition into `where`
+    // closes all three regardless of how or whether that data state can arise.
     const rows = await this.prismaService.client.instructorProfile.findMany({
-      take: limit,
+      where: {
+        user: {
+          tenantMemberships: { some: { role: TenantMembershipRole.OWNER } },
+        },
+      },
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       include: {
@@ -212,27 +236,34 @@ export class InstructorOnboardingService {
         },
       },
     });
+    const { items: pageRows, hasMore } = trimToOffsetPage(rows, limit);
 
-    return rows.flatMap((profile) => {
+    const items = pageRows.map((profile) => {
+      // Guaranteed by the query's own `where` above — every row reaching this point has at least
+      // one OWNER `TenantMembership`, so `tenantMemberships[0]` can never be empty in practice.
+      // Asserted explicitly (never silently dropped) so a genuine data/query inconsistency fails
+      // loudly instead of silently shrinking the page — the exact defect this replaces.
       const membership = profile.user.tenantMemberships[0];
       if (!membership) {
-        return [];
+        throw new Error(
+          'InstructorProfile matched the OWNER-membership eligibility filter but returned no OWNER membership',
+        );
       }
 
-      return [
-        {
-          userId: profile.user.id,
-          email: profile.user.email,
-          displayName: profile.user.displayName,
-          accountStatus: profile.user.accountStatus,
-          tenantId: membership.tenant.id,
-          tenantName: membership.tenant.name,
-          tenantSlug: membership.tenant.slug,
-          membershipRole: membership.role,
-          createdAt: profile.createdAt,
-        },
-      ];
+      return {
+        userId: profile.user.id,
+        email: profile.user.email,
+        displayName: profile.user.displayName,
+        accountStatus: profile.user.accountStatus,
+        tenantId: membership.tenant.id,
+        tenantName: membership.tenant.name,
+        tenantSlug: membership.tenant.slug,
+        membershipRole: membership.role,
+        createdAt: profile.createdAt,
+      };
     });
+
+    return { items, hasMore };
   }
 
   async getInstructorDetails(

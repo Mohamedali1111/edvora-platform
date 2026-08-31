@@ -8,6 +8,7 @@ import {
   TenantStudentStatus,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { SecurityEventService } from '../../auth/services/security-event.service';
@@ -250,7 +251,7 @@ export class EnrollmentService {
    * key lookups), then the list itself filters/orders/paginates entirely at the database level
    * with a `select` projecting only the fields this response actually needs.
    */
-  async listEnrollments(input: ListEnrollmentsInput): Promise<InstructorEnrollmentSummary[]> {
+  async listEnrollments(input: ListEnrollmentsInput): Promise<{ items: InstructorEnrollmentSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(input.principal, input.tenantId);
 
     if (!input.courseId && !input.studentUserId) {
@@ -301,33 +302,35 @@ export class EnrollmentService {
         course: { select: { title: true, status: true } },
         student: { select: { email: true, displayName: true, accountStatus: true } },
       },
-      take: input.limit,
+      take: input.limit + 1,
       skip: input.offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, input.limit);
 
     const now = this.clock.now();
-    return rows.map((row) => toInstructorEnrollmentSummary(row, now));
+    return { items: items.map((row) => toInstructorEnrollmentSummary(row, now)), hasMore };
   }
 
   async listStudentEnrollments(
     principal: AuthenticatedPrincipal,
     limit: number,
     offset: number,
-  ): Promise<StudentEnrollmentSummary[]> {
+  ): Promise<{ items: StudentEnrollmentSummary[]; hasMore: boolean }> {
     await this.authorization.assertActiveStudent(principal);
 
     const rows = await this.prismaService.client.enrollment.findMany({
       where: {
         studentUserId: principal.userId,
       },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       include: { course: true },
     });
+    const { items: pageRows, hasMore } = trimToOffsetPage(rows, limit);
 
-    return rows.map((row) => {
+    const items = pageRows.map((row) => {
       const summary = toEnrollmentSummary(row);
       return {
         enrollmentId: summary.enrollmentId,
@@ -342,6 +345,8 @@ export class EnrollmentService {
         createdAt: summary.createdAt,
       };
     });
+
+    return { items, hasMore };
   }
 }
 

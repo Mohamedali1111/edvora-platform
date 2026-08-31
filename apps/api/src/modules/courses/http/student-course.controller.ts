@@ -4,6 +4,7 @@ import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import { StudentDeviceGuard } from '../../devices/http/student-device.guard';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { StudentCourseIdParamDto, StudentLessonIdParamDto } from '../dto/course-params.dto';
 import { StudentCourseAccessService } from '../services/student-course-access.service';
@@ -13,11 +14,7 @@ import type {
   StudentLessonProgressSummary,
 } from '../types/student-course.types';
 
-type StudentCourseListResponse = {
-  items: StudentCourseSummary[];
-  limit: number;
-  offset: number;
-};
+type StudentCourseListResponse = OffsetPage<StudentCourseSummary>;
 
 const STUDENT_COURSE_THROTTLE = {
   course: {
@@ -40,11 +37,8 @@ export class StudentCourseController {
   ): Promise<StudentCourseListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.access.listEntitledCourses(principal, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.access.listEntitledCourses(principal, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get(':courseId')

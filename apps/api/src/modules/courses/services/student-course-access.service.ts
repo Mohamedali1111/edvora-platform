@@ -13,6 +13,7 @@ import {
   TenantStudentStatus,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -85,19 +86,20 @@ export class StudentCourseAccessService {
     principal: AuthenticatedPrincipal,
     limit: number,
     offset: number,
-  ): Promise<StudentCourseSummary[]> {
+  ): Promise<{ items: StudentCourseSummary[]; hasMore: boolean }> {
     await this.authorization.assertActiveStudent(principal);
 
     const now = this.clock.now();
-    const enrollments = await this.prismaService.client.enrollment.findMany({
+    const rows = await this.prismaService.client.enrollment.findMany({
       where: this.entitlementWhere(principal.userId, now),
       select: { course: true },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return enrollments.map((row) => toStudentCourseSummary(row.course));
+    return { items: items.map((row) => toStudentCourseSummary(row.course)), hasMore };
   }
 
   async getCourseStructure(

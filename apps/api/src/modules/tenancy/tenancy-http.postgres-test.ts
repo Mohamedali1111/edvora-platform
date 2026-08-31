@@ -709,6 +709,185 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
     ).toEqual([target]);
   });
 
+  // --- API Readiness Slice: pagination `hasMore` ---
+
+  it('reports hasMore correctly for the admin instructor list: fewer than limit, exactly limit, and a real next/final page split', async () => {
+    const adminId = await createUser('tenancy-admin-haspage', PlatformRole.PLATFORM_ADMIN);
+    const adminToken = await issueAccessToken(adminId, PlatformRole.PLATFORM_ADMIN);
+
+    // The admin instructor list is platform-wide, not tenant-scoped, so this measures against the
+    // live baseline rather than an assumed-empty table — robust to any instructor rows left by
+    // other suites/tests in the same database.
+    const baseline = await prisma.client.instructorProfile.count();
+
+    await createInstructorTenant('haspage-fewer');
+    const fewerThanLimit = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: baseline + 5, offset: 0 })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const fewerBody = responseBody<{ items: unknown[]; hasMore: boolean }>(fewerThanLimit);
+    expect(fewerBody.items).toHaveLength(baseline + 1);
+    expect(fewerBody.hasMore).toBe(false);
+
+    await createInstructorTenant('haspage-b');
+    await createInstructorTenant('haspage-c');
+    // Now exactly `baseline + 3` instructors exist. A limit equal to that exact total must report
+    // hasMore: false (not an off-by-one true) — the case a naive `items.length === limit` check
+    // gets wrong.
+    const exactlyLimit = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: baseline + 3, offset: 0 })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const exactBody = responseBody<{ items: unknown[]; hasMore: boolean }>(exactlyLimit);
+    expect(exactBody.items).toHaveLength(baseline + 3);
+    expect(exactBody.hasMore).toBe(false);
+
+    // One fewer than the total: a genuine next page exists.
+    const firstPage = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: baseline + 2, offset: 0 })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<{ items: unknown[]; hasMore: boolean }>(firstPage);
+    expect(firstBody.items).toHaveLength(baseline + 2);
+    expect(firstBody.hasMore).toBe(true);
+
+    const finalPage = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: baseline + 2, offset: baseline + 2 })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const finalBody = responseBody<{ items: unknown[]; hasMore: boolean }>(finalPage);
+    expect(finalBody.items).toHaveLength(1);
+    expect(finalBody.hasMore).toBe(false);
+  });
+
+  it('never lets an InstructorProfile with no OWNER membership consume a page slot, an offset position, or influence hasMore', async () => {
+    const adminId = await createUser('tenancy-admin-ghost', PlatformRole.PLATFORM_ADMIN);
+    const adminToken = await issueAccessToken(adminId, PlatformRole.PLATFORM_ADMIN);
+    const nonAdminId = await createUser('tenancy-nonadmin-ghost', PlatformRole.INSTRUCTOR);
+    const nonAdminToken = await issueAccessToken(nonAdminId, PlatformRole.INSTRUCTOR);
+
+    const baseline = await prisma.client.instructorProfile.count();
+
+    // Three genuinely eligible instructors (real InstructorProfile + Tenant + OWNER
+    // TenantMembership), deliberately spaced in `createdAt` so a "ghost" row can be interleaved
+    // between the newest and the middle one — squarely inside the first page's raw fetch window.
+    const { instructorId: instructorA } = await createInstructorTenantAt('ghost-a', new Date('2026-05-01T00:00:00.000Z'));
+    const { instructorId: instructorB } = await createInstructorTenantAt('ghost-b', new Date('2026-05-02T00:00:00.000Z'));
+    const { instructorId: instructorC } = await createInstructorTenantAt('ghost-c', new Date('2026-05-04T00:00:00.000Z'));
+
+    // The ineligible row: an InstructorProfile with NO TenantMembership at all — a data anomaly
+    // that cannot arise through `createInstructor` (which always creates the OWNER membership in
+    // the same transaction) or any other reachable production code path, seeded directly here to
+    // prove the query-level eligibility guarantee rather than assuming it. Its `createdAt` sits
+    // strictly between instructor C (newest) and instructor B, so in raw (unfiltered,
+    // `createdAt` desc) order it would occupy the (limit + 1)-th position for `limit=2, offset=0`
+    // — exactly where an unfiltered `take: limit + 1` would fetch it as part of the page, not the
+    // sentinel, if eligibility were only checked after the query.
+    const ghostId = await createUser('ghost-instructor', PlatformRole.INSTRUCTOR);
+    await prisma.client.instructorProfile.create({
+      data: { id: uuid.create(), userId: ghostId, createdAt: new Date('2026-05-03T00:00:00.000Z') },
+    });
+
+    type Row = { userId: string };
+    type Page = { items: Row[]; hasMore: boolean };
+
+    // Raw (unfiltered) createdAt-desc order is: C, ghost, B, A. The eligible-only order must be:
+    // C, B, A. With limit=2, offset=0, the first page must return exactly [C, B] — a full page of
+    // 2 genuinely eligible instructors — never a short page caused by the ghost silently
+    // consuming a slot and then being dropped.
+    const firstPage = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: 2, offset: baseline })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<Page>(firstPage);
+    expect(firstBody.items.map((item) => item.userId)).toEqual([instructorC, instructorB]);
+    expect(firstBody.items.some((item) => item.userId === ghostId)).toBe(false);
+    // A genuine third eligible instructor (A) remains — hasMore must be true for the right reason
+    // (a real next eligible row), not merely because the ghost row happened to exist.
+    expect(firstBody.hasMore).toBe(true);
+
+    // Second page: offset advances over the *eligible* set only. If the ghost row had consumed an
+    // offset position (the old bug), this page would incorrectly skip or duplicate an instructor.
+    const secondPage = await request(server)
+      .get('/admin/instructors')
+      .query({ limit: 2, offset: baseline + 2 })
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(HttpStatus.OK);
+    const secondBody = responseBody<Page>(secondPage);
+    expect(secondBody.items.map((item) => item.userId)).toEqual([instructorA]);
+    expect(secondBody.hasMore).toBe(false);
+
+    // The union of every page is exactly the three eligible instructors — no omission, no
+    // duplicate, and the ghost never appears anywhere.
+    const allReturned = [...firstBody.items, ...secondBody.items].map((item) => item.userId);
+    expect(new Set(allReturned)).toEqual(new Set([instructorC, instructorB, instructorA]));
+    expect(allReturned).toHaveLength(3);
+
+    // Existing admin-only authorization is unchanged by this repair.
+    await request(server).get('/admin/instructors').set('Authorization', `Bearer ${nonAdminToken}`).expect(HttpStatus.FORBIDDEN);
+  });
+
+  it('reports hasMore correctly for the tenant-scoped, filtered Enrollment Visibility list, unaffected by another tenant', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('haspage-enroll');
+    const { tenantId: otherTenantId, instructorId: otherInstructorId } = await createInstructorTenant('haspage-enroll-other');
+    const courseId = await createCourse(tenantId, instructorId, 'HasMore course');
+    const otherCourse = await createCourse(otherTenantId, otherInstructorId, 'Other tenant course');
+    const otherStudent = await createStudentWithTenant('haspage-other-student', otherTenantId, otherInstructorId);
+
+    // Three enrollments in the scoped tenant/course, plus two extra rows that must never
+    // influence this course's hasMore: one ACTIVE enrollment for a different course in the SAME
+    // tenant, and one enrollment entirely in a DIFFERENT tenant.
+    for (let i = 0; i < 3; i += 1) {
+      const studentId = await createStudentWithTenant(`haspage-enroll-student-${i}`, tenantId, instructorId);
+      await createEnrollmentDirect({
+        tenantId,
+        studentUserId: studentId,
+        courseId,
+        grantedByUserId: instructorId,
+        createdAt: new Date(2026, 0, i + 1),
+      });
+    }
+    const sibling = await createStudentWithTenant('haspage-enroll-sibling', tenantId, instructorId);
+    const otherCourseInSameTenant = await createCourse(tenantId, instructorId, 'Sibling course');
+    await createEnrollmentDirect({ tenantId, studentUserId: sibling, courseId: otherCourseInSameTenant, grantedByUserId: instructorId });
+    await createEnrollmentDirect({ tenantId: otherTenantId, studentUserId: otherStudent, courseId: otherCourse, grantedByUserId: otherInstructorId });
+
+    type Row = { enrollmentId: string };
+    const firstPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId, limit: 2, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<{ items: Row[]; hasMore: boolean }>(firstPage);
+    expect(firstBody.items).toHaveLength(2);
+    expect(firstBody.hasMore).toBe(true);
+
+    const secondPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId, limit: 2, offset: 2 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const secondBody = responseBody<{ items: Row[]; hasMore: boolean }>(secondPage);
+    expect(secondBody.items).toHaveLength(1);
+    expect(secondBody.hasMore).toBe(false);
+
+    // A `status` filter narrowing to zero matches within this scope must report hasMore: false,
+    // not leak the unfiltered/foreign-tenant row count.
+    const filtered = await request(server)
+      .get(`/instructor/tenants/${tenantId}/enrollments`)
+      .query({ courseId, status: EnrollmentStatus.REVOKED, limit: 25, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const filteredBody = responseBody<{ items: Row[]; hasMore: boolean }>(filtered);
+    expect(filteredBody.items).toHaveLength(0);
+    expect(filteredBody.hasMore).toBe(false);
+  });
+
   async function clearTenancyData(): Promise<void> {
     await prisma.client.notification.deleteMany();
     await prisma.client.securityEvent.deleteMany();
@@ -762,6 +941,42 @@ maybeDescribe('tenancy and enrollment HTTP PostgreSQL integration', () => {
     const instructorId = await createUser(`instructor-${slugSuffix}`, PlatformRole.INSTRUCTOR);
     await prisma.client.instructorProfile.create({
       data: { id: uuid.create(), userId: instructorId },
+    });
+    const tenant = await prisma.client.tenant.create({
+      data: {
+        id: uuid.create(),
+        name: `Tenant ${slugSuffix}`,
+        slug: `tenancy-test-${slugSuffix}`,
+        status: TenantStatus.ACTIVE,
+      },
+    });
+    await prisma.client.tenantMembership.create({
+      data: {
+        id: uuid.create(),
+        tenantId: tenant.id,
+        userId: instructorId,
+        role: TenantMembershipRole.OWNER,
+        status: TenantMembershipStatus.ACTIVE,
+      },
+    });
+    return {
+      instructorId,
+      tenantId: tenant.id,
+      token: await issueAccessToken(instructorId, PlatformRole.INSTRUCTOR),
+    };
+  }
+
+  // Same as `createInstructorTenant`, but with explicit control over the `InstructorProfile`'s
+  // `createdAt` — needed to deterministically interleave a genuine (eligible) instructor with an
+  // ineligible "ghost" row at a specific position in the admin list's `createdAt`-descending
+  // ordering.
+  async function createInstructorTenantAt(
+    slugSuffix: string,
+    createdAt: Date,
+  ): Promise<{ instructorId: string; tenantId: string; token: string }> {
+    const instructorId = await createUser(`instructor-${slugSuffix}`, PlatformRole.INSTRUCTOR);
+    await prisma.client.instructorProfile.create({
+      data: { id: uuid.create(), userId: instructorId, createdAt },
     });
     const tenant = await prisma.client.tenant.create({
       data: {

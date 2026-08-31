@@ -3,16 +3,13 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { DeviceListQueryDto } from '../dto/device-list-query.dto';
 import { ReviewDeviceChangeDto } from '../dto/review-device-change.dto';
 import type { DeviceChangeRequestSummary } from '../types/device.types';
 import { StudentDeviceService } from '../services/student-device.service';
 
-type DeviceChangeRequestListResponse = {
-  items: DeviceChangeRequestSummary[];
-  limit: number;
-  offset: number;
-};
+type DeviceChangeRequestListResponse = OffsetPage<DeviceChangeRequestSummary>;
 
 const DEVICE_THROTTLE = {
   device: {
@@ -35,13 +32,13 @@ export class AdminDeviceController {
   ): Promise<DeviceChangeRequestListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    const items = await this.devices.listPendingDeviceChangeRequests({
+    const { items, hasMore } = await this.devices.listPendingDeviceChangeRequests({
       adminPrincipal: principal,
       limit,
       offset,
     });
 
-    return { items, limit, offset };
+    return { items, limit, offset, hasMore };
   }
 
   @Post(':id/approve')

@@ -1,4 +1,4 @@
-import type { AccountActivationPurpose, PlatformRole } from '../../../../.generated/prisma/client';
+import type { AccountActivationPurpose, LanguagePreference, PlatformRole } from '../../../../.generated/prisma/client';
 
 export type SessionChannel = 'MOBILE' | 'WEB';
 
@@ -63,6 +63,18 @@ export type AuthenticatedSessionResult = {
   refreshToken: string;
   accessTokenTtlSeconds: number;
   refreshTokenExpiresAt: Date;
+};
+
+// The `/auth/me` self-read contract. Deliberately minimal — only what web/mobile need to bootstrap
+// the signed-in user's identity. No tenant context (existing tenant-context APIs remain
+// authoritative for that), no session/token/device/security-event data, no `accountStatus` (a
+// successful response already implies `ACTIVE` — see `AuthOrchestrationService.getCurrentUser`).
+export type CurrentUserSummary = {
+  userId: string;
+  role: PlatformRole;
+  email: string;
+  displayName: string | null;
+  preferredLanguage: LanguagePreference;
 };
 
 export type LoginInput = {

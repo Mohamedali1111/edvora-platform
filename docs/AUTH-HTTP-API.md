@@ -7,6 +7,7 @@ This document records the V1 public authentication HTTP boundary for Edvora's sh
 Implemented routes:
 
 - `POST /auth/login`
+- `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `POST /auth/logout-all`
@@ -166,6 +167,33 @@ The guard verifies the access token through the internal `AccessTokenService` an
 Request body, query parameters, or custom client headers cannot override the authenticated user/session/role.
 
 The guard does not perform device authorization, tenant authorization, or course entitlement checks.
+
+## Current User
+
+`GET /auth/me`
+
+Requires Bearer access token (`AccessTokenGuard`) only — deliberately **no** `StudentDeviceGuard`. This is an account/session identity read, not a protected student product/domain route: a client (especially mobile) may need to learn its own authenticated identity while it is still resolving device-authorization UX (e.g. immediately after login, before a device has been approved), and gating that on an approved device would create a bootstrapping deadlock. This does not weaken device gating anywhere else — every existing protected student content/domain route keeps its own `StudentDeviceGuard` unchanged.
+
+The current user is resolved fresh from the database by the authenticated principal's `userId` on every call — the response is never built from JWT claims alone. A short-lived access token can remain validly signed after the underlying account is suspended, deletion-requested, or deleted; this route reuses the exact same account-active gate (`AccountStatus === ACTIVE`) every other authenticated flow (login, refresh, activation, password change) already applies, so a now-inactive account gets the same `403 ACCOUNT_UNAVAILABLE` response as it would if it tried to log in fresh, not a stale success built from token claims. No parallel account-status policy exists.
+
+Response (identical shape for `STUDENT`, `INSTRUCTOR`, and `PLATFORM_ADMIN` — no per-role variants):
+
+```json
+{
+  "userId": "…",
+  "role": "STUDENT",
+  "email": "student@example.test",
+  "displayName": "Jane Student",
+  "preferredLanguage": "EN"
+}
+```
+
+Deliberately minimal — only what web/mobile need to bootstrap the signed-in user:
+
+- No tenant context. Existing tenant-context APIs (`GET /instructor/tenants`, `GET /instructor/tenants/:tenantId/context`) remain the authoritative source for that; `/auth/me` never returns tenant/membership data.
+- No `accountStatus` field. A successful response already implies `ACTIVE` — a non-`ACTIVE` account never reaches a successful response at all (see above).
+- No password hash, activation/reset token data, refresh/session token data, device hashes, or `SecurityEvent` data.
+- No mutation capability. This route is read-only; profile/language editing is explicitly out of scope for this slice.
 
 ## Logout
 

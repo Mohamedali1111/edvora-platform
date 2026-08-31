@@ -23,6 +23,7 @@ import type {
   AuthenticatedSessionResult,
   ChangePasswordInput,
   CompletePasswordResetInput,
+  CurrentUserSummary,
   LoginInput,
   RefreshAuthenticatedSessionInput,
 } from '../types/auth.types';
@@ -121,6 +122,45 @@ export class AuthOrchestrationService {
     });
 
     return result;
+  }
+
+  /**
+   * `/auth/me`: resolves the current user fresh from the database by the authenticated
+   * principal's ID — never echoes JWT claims directly, since a short-lived access token can
+   * outlive an account being suspended/deletion-requested/deleted in the meantime. Reuses the
+   * exact same `assertActiveAccount` gate every other authenticated flow (login, refresh,
+   * activate, change-password) already applies — no parallel account-status policy. A missing row
+   * is treated identically to an inactive one (`AccountInactiveError`, mapped to the same generic
+   * `403 ACCOUNT_UNAVAILABLE` the client already handles elsewhere) rather than a distinct
+   * "not found," since a valid signed token resolving to no row and one resolving to a suspended
+   * account carry no legitimate distinction worth exposing.
+   */
+  async getCurrentUser(userId: string): Promise<CurrentUserSummary> {
+    const user = await this.prismaService.client.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        platformRole: true,
+        preferredLanguage: true,
+        accountStatus: true,
+      },
+    });
+
+    if (!user) {
+      throw new AccountInactiveError();
+    }
+
+    this.assertActiveAccount(user.accountStatus);
+
+    return {
+      userId: user.id,
+      role: user.platformRole,
+      email: user.email,
+      displayName: user.displayName,
+      preferredLanguage: user.preferredLanguage,
+    };
   }
 
   async activateAccount(input: ActivateAccountInput): Promise<{ userId: string; platformRole: PlatformRole }> {

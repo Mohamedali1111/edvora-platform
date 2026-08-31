@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../../auth/http/access-token.guard';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { CurrentAuth } from '../../auth/http/current-auth.decorator';
+import type { OffsetPage } from '../../../infrastructure/http/pagination';
 import { PaginationQueryDto } from '../../tenancy/dto/pagination-query.dto';
 import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
 import { CourseProgressQueryDto } from '../dto/course-progress-query.dto';
@@ -13,17 +14,9 @@ import { CourseService } from '../services/course.service';
 import type { CourseProgressRow } from '../types/course-progress.types';
 import type { CourseSummary } from '../types/course.types';
 
-type CourseListResponse = {
-  items: CourseSummary[];
-  limit: number;
-  offset: number;
-};
+type CourseListResponse = OffsetPage<CourseSummary>;
 
-type CourseProgressListResponse = {
-  items: CourseProgressRow[];
-  limit: number;
-  offset: number;
-};
+type CourseProgressListResponse = OffsetPage<CourseProgressRow>;
 
 const COURSE_THROTTLE = {
   course: {
@@ -67,11 +60,8 @@ export class InstructorCourseController {
   ): Promise<CourseListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.courses.listCourses(principal, params.tenantId, limit, offset),
-      limit,
-      offset,
-    };
+    const { items, hasMore } = await this.courses.listCourses(principal, params.tenantId, limit, offset);
+    return { items, limit, offset, hasMore };
   }
 
   @Get(':courseId')
@@ -128,17 +118,14 @@ export class InstructorCourseController {
   ): Promise<CourseProgressListResponse> {
     const limit = query.limit ?? 25;
     const offset = query.offset ?? 0;
-    return {
-      items: await this.progress.listCourseProgress({
-        principal,
-        tenantId: params.tenantId,
-        courseId: params.courseId,
-        status: query.status,
-        limit,
-        offset,
-      }),
+    const { items, hasMore } = await this.progress.listCourseProgress({
+      principal,
+      tenantId: params.tenantId,
+      courseId: params.courseId,
+      status: query.status,
       limit,
       offset,
-    };
+    });
+    return { items, limit, offset, hasMore };
   }
 }

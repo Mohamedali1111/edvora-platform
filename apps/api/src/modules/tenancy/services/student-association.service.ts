@@ -8,6 +8,7 @@ import {
   TenantStudentStatus,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import { normalizeEmailForLookup } from '../../auth/email-normalization';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { AccountActivationTokenService } from '../../auth/services/account-activation-token.service';
@@ -49,18 +50,19 @@ export class StudentAssociationService {
     tenantId: string,
     limit: number,
     offset: number,
-  ): Promise<TenantStudentSummary[]> {
+  ): Promise<{ items: TenantStudentSummary[]; hasMore: boolean }> {
     await this.authorization.assertInstructorTenantAccess(principal, tenantId);
 
     const rows = await this.prismaService.client.tenantStudent.findMany({
       where: { tenantId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       include: { student: true },
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return rows.map(toTenantStudentSummary);
+    return { items: items.map(toTenantStudentSummary), hasMore };
   }
 
   async getStudent(

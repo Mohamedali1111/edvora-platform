@@ -263,40 +263,45 @@ maybeDescribe('instructor quiz attempts reporting HTTP PostgreSQL integration', 
     });
 
     type Row = { attemptId: string };
+    type Page = { items: Row[]; hasMore: boolean };
 
     const firstPage = await request(server)
       .get(`/instructor/tenants/${tenantId}/quizzes/${quizId}/attempts`)
       .query({ limit: 2, offset: 0 })
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.OK);
-    expect(responseBody<{ items: Row[] }>(firstPage).items.map((item) => item.attemptId)).toEqual([
-      otherStudentAttempt, failedAttempt,
-    ]);
+    const firstBody = responseBody<Page>(firstPage);
+    expect(firstBody.items.map((item) => item.attemptId)).toEqual([otherStudentAttempt, failedAttempt]);
+    // Three Attempts exist, limit is 2 — a real next page exists.
+    expect(firstBody.hasMore).toBe(true);
 
     const secondPage = await request(server)
       .get(`/instructor/tenants/${tenantId}/quizzes/${quizId}/attempts`)
       .query({ limit: 2, offset: 2 })
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.OK);
-    expect(responseBody<{ items: Row[] }>(secondPage).items.map((item) => item.attemptId)).toEqual([passedAttempt]);
+    const secondBody = responseBody<Page>(secondPage);
+    expect(secondBody.items.map((item) => item.attemptId)).toEqual([passedAttempt]);
+    expect(secondBody.hasMore).toBe(false);
 
     const byStudent = await request(server)
       .get(`/instructor/tenants/${tenantId}/quizzes/${quizId}/attempts`)
       .query({ studentUserId: studentX })
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.OK);
-    expect(
-      responseBody<{ items: Row[] }>(byStudent).items.map((item) => item.attemptId).sort(),
-    ).toEqual([passedAttempt, failedAttempt].sort());
+    const byStudentBody = responseBody<Page>(byStudent);
+    expect(byStudentBody.items.map((item) => item.attemptId).sort()).toEqual([passedAttempt, failedAttempt].sort());
+    // `hasMore` must reflect the filtered (2-row) result set, not the unfiltered 3-row table.
+    expect(byStudentBody.hasMore).toBe(false);
 
     const byPassed = await request(server)
       .get(`/instructor/tenants/${tenantId}/quizzes/${quizId}/attempts`)
       .query({ passed: 'true' })
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.OK);
-    expect(
-      responseBody<{ items: Row[] }>(byPassed).items.map((item) => item.attemptId).sort(),
-    ).toEqual([passedAttempt, otherStudentAttempt].sort());
+    const byPassedBody = responseBody<Page>(byPassed);
+    expect(byPassedBody.items.map((item) => item.attemptId).sort()).toEqual([passedAttempt, otherStudentAttempt].sort());
+    expect(byPassedBody.hasMore).toBe(false);
   });
 
   it('denies a foreign/random Quiz and a foreign instructor without leaking existence', async () => {

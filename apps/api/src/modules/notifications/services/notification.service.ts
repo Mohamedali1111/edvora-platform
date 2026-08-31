@@ -9,6 +9,7 @@ import {
   type Notification,
 } from '../../../../.generated/prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { trimToOffsetPage } from '../../../infrastructure/http/pagination';
 import type { AuthenticatedPrincipal } from '../../auth/http/authenticated-principal';
 import { ClockService } from '../../auth/services/clock.service';
 import { UuidV7Service } from '../../auth/services/uuid-v7.service';
@@ -44,7 +45,7 @@ export class NotificationService {
     principal: AuthenticatedPrincipal,
     limit: number,
     offset: number,
-  ): Promise<NotificationSummary[]> {
+  ): Promise<{ items: NotificationSummary[]; hasMore: boolean }> {
     await this.assertActiveRole(principal, PlatformRole.STUDENT);
     return this.listForRecipient(principal.userId, limit, offset);
   }
@@ -71,7 +72,7 @@ export class NotificationService {
     principal: AuthenticatedPrincipal,
     limit: number,
     offset: number,
-  ): Promise<NotificationSummary[]> {
+  ): Promise<{ items: NotificationSummary[]; hasMore: boolean }> {
     await this.assertActiveRole(principal, PlatformRole.INSTRUCTOR);
     return this.listForRecipient(principal.userId, limit, offset);
   }
@@ -135,15 +136,16 @@ export class NotificationService {
     recipientUserId: string,
     limit: number,
     offset: number,
-  ): Promise<NotificationSummary[]> {
+  ): Promise<{ items: NotificationSummary[]; hasMore: boolean }> {
     const rows = await this.prismaService.client.notification.findMany({
       where: { recipientUserId },
-      take: limit,
+      take: limit + 1,
       skip: offset,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    const { items, hasMore } = trimToOffsetPage(rows, limit);
 
-    return rows.map(toNotificationSummary);
+    return { items: items.map(toNotificationSummary), hasMore };
   }
 
   private async countUnreadForRecipient(recipientUserId: string): Promise<{ unreadCount: number }> {

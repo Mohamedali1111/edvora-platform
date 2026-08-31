@@ -367,6 +367,64 @@ maybeDescribe('instructor course progress HTTP PostgreSQL integration', () => {
       .expect(HttpStatus.FORBIDDEN);
   });
 
+  it('reports hasMore correctly and never lets the sentinel (limit+1)th Enrollment leak into items or the returned page aggregates', async () => {
+    const { instructorId, tenantId, token } = await createInstructorTenant('haspage-progress');
+    const courseId = await createCourseDirect(tenantId, instructorId, 'HasMore progress course', CourseStatus.PUBLISHED);
+    const sectionId = await createSectionDirect(tenantId, courseId, 'Section', 1, SectionStatus.PUBLISHED);
+    const lessonA = await createLessonDirect(tenantId, courseId, sectionId, { title: 'A', position: 1, status: LessonStatus.PUBLISHED });
+    const lessonB = await createLessonDirect(tenantId, courseId, sectionId, { title: 'B', position: 2, status: LessonStatus.PUBLISHED });
+    // totalLessons = 2.
+
+    // Oldest first (ascending createdAt), so newest-first response order is: newest, middle,
+    // oldest — the sentinel row `take: limit + 1` fetches beyond `limit=2` is this oldest one.
+    const oldestStudent = await createStudentWithTenant('haspage-progress-oldest', tenantId, instructorId);
+    const oldestEnrollment = await createEnrollmentDirect(tenantId, oldestStudent, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    await prisma.client.enrollment.update({ where: { id: oldestEnrollment }, data: { createdAt: new Date('2026-01-01T00:00:00.000Z') } });
+    // The sentinel student completes BOTH lessons — a distinctly different (100%) signal from
+    // the two real-page students, so if it ever leaked into the page or its aggregates the test
+    // would visibly fail rather than coincidentally pass.
+    await completeLessonDirect(tenantId, courseId, lessonA, oldestStudent, oldestEnrollment, new Date('2026-01-01T00:00:00.000Z'));
+    await completeLessonDirect(tenantId, courseId, lessonB, oldestStudent, oldestEnrollment, new Date('2026-01-01T00:00:00.000Z'));
+
+    const middleStudent = await createStudentWithTenant('haspage-progress-middle', tenantId, instructorId);
+    const middleEnrollment = await createEnrollmentDirect(tenantId, middleStudent, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    await prisma.client.enrollment.update({ where: { id: middleEnrollment }, data: { createdAt: new Date('2026-01-02T00:00:00.000Z') } });
+    await completeLessonDirect(tenantId, courseId, lessonA, middleStudent, middleEnrollment, new Date('2026-01-02T00:00:00.000Z'));
+
+    const newestStudent = await createStudentWithTenant('haspage-progress-newest', tenantId, instructorId);
+    const newestEnrollment = await createEnrollmentDirect(tenantId, newestStudent, courseId, instructorId, EnrollmentStatus.ACTIVE);
+    await prisma.client.enrollment.update({ where: { id: newestEnrollment }, data: { createdAt: new Date('2026-01-03T00:00:00.000Z') } });
+    // No completions for the newest student — 0/2.
+
+    type Row = { enrollmentId: string; completedLessons: number; totalLessons: number; progressPercent: number };
+    const firstPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/courses/${courseId}/progress`)
+      .query({ limit: 2, offset: 0 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const firstBody = responseBody<{ items: Row[]; hasMore: boolean }>(firstPage);
+
+    expect(firstBody.hasMore).toBe(true);
+    expect(firstBody.items).toHaveLength(2);
+    expect(firstBody.items.map((row) => row.enrollmentId)).toEqual([newestEnrollment, middleEnrollment]);
+    expect(firstBody.items.some((row) => row.enrollmentId === oldestEnrollment)).toBe(false);
+
+    const newestRow = firstBody.items.find((row) => row.enrollmentId === newestEnrollment) as Row;
+    expect(newestRow).toMatchObject({ completedLessons: 0, totalLessons: 2, progressPercent: 0 });
+    const middleRow = firstBody.items.find((row) => row.enrollmentId === middleEnrollment) as Row;
+    expect(middleRow).toMatchObject({ completedLessons: 1, totalLessons: 2, progressPercent: 50 });
+
+    const secondPage = await request(server)
+      .get(`/instructor/tenants/${tenantId}/courses/${courseId}/progress`)
+      .query({ limit: 2, offset: 2 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    const secondBody = responseBody<{ items: Row[]; hasMore: boolean }>(secondPage);
+    expect(secondBody.hasMore).toBe(false);
+    expect(secondBody.items).toHaveLength(1);
+    expect(secondBody.items[0]).toMatchObject({ enrollmentId: oldestEnrollment, completedLessons: 2, totalLessons: 2, progressPercent: 100 });
+  });
+
   async function clearData(): Promise<void> {
     await prisma.client.quizAttemptAnswer.deleteMany();
     await prisma.client.quizAttempt.deleteMany();
