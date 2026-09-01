@@ -29,7 +29,11 @@ import { TenancyModule } from '../tenancy/tenancy.module';
 import type { MediaRuntimeConfig } from './media.config';
 import { DOCUMENT_STORAGE_PROVIDER, MEDIA_RUNTIME_CONFIG, VIDEO_PROVIDER } from './media.constants';
 import { MediaModule } from './media.module';
-import { InvalidVideoProviderWebhookError, VideoProviderCreateFailedError } from './errors/media.errors';
+import {
+  InvalidVideoProviderWebhookError,
+  VideoProviderCreateFailedError,
+  VideoProviderMetadataFetchFailedError,
+} from './errors/media.errors';
 import type {
   DocumentObjectMetadata,
   DocumentStorageProvider,
@@ -38,6 +42,7 @@ import type {
 } from './storage/document-storage.provider';
 import type {
   BunnyStreamWebhookEvent,
+  ProviderVideoMetadata,
   ProviderVideoResource,
   TusUploadCapability,
   VideoProvider,
@@ -420,6 +425,136 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       processingStatus: AssetProcessingStatus.READY,
       durationSeconds: 120,
     });
+  });
+
+  it('does not call the provider metadata fetch when the READY webhook already carries a valid duration', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-duration-present');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-duration-present' },
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-duration-present', Status: 3, Length: 91 }).expect(
+      HttpStatus.OK,
+    );
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 91,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual([]);
+  });
+
+  it('hydrates duration from an authoritative provider metadata fetch when the READY webhook omits it', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-duration-hydrate');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-hydrate' },
+    });
+    videoProvider.metadataFetchResult = { durationSeconds: 5 };
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-hydrate', Status: 3 }).expect(HttpStatus.OK);
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 5,
+      failureCode: null,
+      failureReason: null,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-hydrate']);
+  });
+
+  it('persists a null duration, without failing the READY transition, when provider metadata has no usable duration', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-duration-malformed');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-malformed' },
+    });
+    videoProvider.metadataFetchResult = { durationSeconds: null };
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-malformed', Status: 3, Length: -5 }).expect(
+      HttpStatus.OK,
+    );
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: null,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-malformed']);
+  });
+
+  it('still reaches READY with a null duration, not corrupted state, when the provider metadata fetch itself fails', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-duration-fetch-fails');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-fetch-fails' },
+    });
+    videoProvider.metadataFetchResult = 'fail';
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-fetch-fails', Status: 3 }).expect(HttpStatus.OK);
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: null,
+      failureCode: null,
+      failureReason: null,
+    });
+  });
+
+  it('never calls the provider metadata fetch for a webhook whose identity does not match any tracked asset', async () => {
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'no-such-video', Status: 3 }).expect(HttpStatus.OK);
+    await postBunnyWebhook({ VideoLibraryId: 654321, VideoGuid: 'no-such-video', Status: 3 }).expect(HttpStatus.OK);
+
+    expect(videoProvider.metadataFetchRequests).toEqual([]);
+  });
+
+  it('never calls the provider metadata fetch when webhook signature verification itself fails', async () => {
+    const raw = JSON.stringify({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-invalid-sig', Status: 3 });
+
+    await request(server)
+      .post('/provider-webhooks/bunny/stream')
+      .set('Content-Type', 'application/json')
+      .set('X-BunnyStream-Signature-Version', 'v1')
+      .set('X-BunnyStream-Signature-Algorithm', 'hmac-sha256')
+      .set('X-BunnyStream-Signature', '0'.repeat(64))
+      .send(raw)
+      .expect(HttpStatus.UNAUTHORIZED);
+
+    expect(videoProvider.metadataFetchRequests).toEqual([]);
+  });
+
+  it('does not re-fetch or regress an already-READY hydrated duration on a duplicate READY webhook, a later status-4 callback, or a stale PROCESSING callback', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-webhook-duration-idempotent');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-idempotent' },
+    });
+    videoProvider.metadataFetchResult = { durationSeconds: 5 };
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 3 }).expect(HttpStatus.OK);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 5,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-idempotent']);
+
+    // Duplicate READY redelivery: already READY, so no second fetch and no state change.
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 3 }).expect(HttpStatus.OK);
+    // Later Bunny status 4 (maps to PROCESSING) must not regress the already-READY asset.
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 4 }).expect(HttpStatus.OK);
+    // A stale in-flight status 1 (PROCESSING) arriving after READY must not regress it either.
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 1 }).expect(HttpStatus.OK);
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 5,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-idempotent']);
   });
 
   it('creates an authorized direct R2 document upload intent with server-owned asset state and key', async () => {
@@ -1103,8 +1238,12 @@ function signBunnyWebhook(rawBody: string): string {
 class FakeVideoProvider implements VideoProvider {
   readonly providerKey = '123456';
   readonly createRequests: Array<{ title: string }> = [];
+  readonly metadataFetchRequests: string[] = [];
   failCreate = false;
   failTusSigning = false;
+  // Controls `fetchVideoMetadata`'s result for the duration-hydration fallback path: an object
+  // resolves with that metadata, the literal `'fail'` rejects (simulating a network/non-OK failure).
+  metadataFetchResult: ProviderVideoMetadata | 'fail' = { durationSeconds: null };
   private nextVideoNumber = 1;
 
   createVideoResource(input: { title: string }): Promise<ProviderVideoResource> {
@@ -1143,6 +1282,16 @@ class FakeVideoProvider implements VideoProvider {
 
   createPlaybackCapability(): never {
     throw new Error('not used by instructor media tests');
+  }
+
+  fetchVideoMetadata(input: { videoId: string }): Promise<ProviderVideoMetadata> {
+    this.metadataFetchRequests.push(input.videoId);
+
+    if (this.metadataFetchResult === 'fail') {
+      return Promise.reject(new VideoProviderMetadataFetchFailedError());
+    }
+
+    return Promise.resolve(this.metadataFetchResult);
   }
 
   verifyAndParseWebhook(input: {

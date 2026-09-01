@@ -1,5 +1,9 @@
 import { createHash, createHmac } from 'node:crypto';
-import { InvalidVideoProviderWebhookError, VideoPlaybackSigningFailedError } from '../errors/media.errors';
+import {
+  InvalidVideoProviderWebhookError,
+  VideoPlaybackSigningFailedError,
+  VideoProviderMetadataFetchFailedError,
+} from '../errors/media.errors';
 import type { MediaRuntimeConfig } from '../media.config';
 import { BunnyStreamVideoProvider } from './bunny-stream-video.provider';
 
@@ -261,5 +265,82 @@ describe('BunnyStreamVideoProvider', () => {
         VideoPlaybackSigningFailedError,
       );
     }
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // fetchVideoMetadata — the authoritative server-to-server duration-hydration fallback used only
+  // when a real Bunny READY webhook's own `Length` field is absent/invalid (proven to actually
+  // happen against the real Bunny library — see docs/MEDIA.md). Uses the same host/AccessKey
+  // pattern as `createVideoResource` above, against Bunny's "Get Video" endpoint.
+  // -----------------------------------------------------------------------------------------------
+  describe('fetchVideoMetadata', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('requests the video by this provider’s own configured library and API key, and returns its duration', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ guid: 'bunny-video-guid', length: 91 }),
+      });
+      global.fetch = fetchSpy as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      const metadata = await provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' });
+
+      expect(metadata).toEqual({ durationSeconds: 91 });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
+      expect(url).toBe('https://video.bunnycdn.com/library/123456/videos/bunny-video-guid');
+      expect(init.method).toBe('GET');
+      expect(init.headers.AccessKey).toBe('test-bunny-api-key');
+      expect(JSON.stringify(init)).not.toContain('test-bunny-webhook-secret');
+    });
+
+    it('resolves with a null duration, not an error, when Bunny reports no usable length', async () => {
+      for (const length of [undefined, null, -5, 'not-a-number', 0.5]) {
+        global.fetch = jest.fn().mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({ guid: 'bunny-video-guid', length }),
+        }) as unknown as typeof fetch;
+
+        const provider = new BunnyStreamVideoProvider(config);
+        await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).resolves.toEqual({
+          durationSeconds: null,
+        });
+      }
+    });
+
+    it('rejects with a typed error on a non-OK response, without inventing a duration', async () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, json: () => Promise.resolve({}) }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).rejects.toThrow(
+        VideoProviderMetadataFetchFailedError,
+      );
+    });
+
+    it('rejects with a typed error on a network failure', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).rejects.toThrow(
+        VideoProviderMetadataFetchFailedError,
+      );
+    });
+
+    it('rejects with a typed error when the response body is not valid JSON', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.reject(new Error('invalid JSON')),
+      }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).rejects.toThrow(
+        VideoProviderMetadataFetchFailedError,
+      );
+    });
   });
 });

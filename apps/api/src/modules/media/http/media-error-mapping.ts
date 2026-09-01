@@ -14,6 +14,7 @@ const ERROR_STATUS: Record<MediaErrorCode, HttpStatus> = {
   INVALID_VIDEO_PROVIDER_WEBHOOK: HttpStatus.UNAUTHORIZED,
   VIDEO_ASSET_PROVIDER_INVARIANT_VIOLATION: HttpStatus.BAD_GATEWAY,
   VIDEO_PLAYBACK_SIGNING_FAILED: HttpStatus.BAD_GATEWAY,
+  VIDEO_PROVIDER_METADATA_FETCH_FAILED: HttpStatus.BAD_GATEWAY,
 };
 
 const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
@@ -29,6 +30,7 @@ const ERROR_MESSAGES: Record<MediaErrorCode, string> = {
   INVALID_VIDEO_PROVIDER_WEBHOOK: 'Video provider webhook signature is invalid.',
   VIDEO_ASSET_PROVIDER_INVARIANT_VIOLATION: 'Video asset provider identity is invalid.',
   VIDEO_PLAYBACK_SIGNING_FAILED: 'Video playback authorization could not be created.',
+  VIDEO_PROVIDER_METADATA_FETCH_FAILED: 'Video provider metadata could not be retrieved.',
 };
 
 type ErrorResponseBody = {

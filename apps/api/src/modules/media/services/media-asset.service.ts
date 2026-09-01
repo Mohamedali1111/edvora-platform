@@ -273,6 +273,8 @@ export class MediaAssetService {
     }
 
     if (next.status === AssetProcessingStatus.READY) {
+      const durationSeconds = await this.resolveReadyDurationSeconds(event);
+
       await this.prismaService.client.videoAsset.updateMany({
         where: {
           providerKey: event.libraryId,
@@ -283,7 +285,7 @@ export class MediaAssetService {
         },
         data: {
           processingStatus: AssetProcessingStatus.READY,
-          durationSeconds: event.durationSeconds,
+          durationSeconds,
           failureCode: null,
           failureReason: null,
         },
@@ -304,6 +306,58 @@ export class MediaAssetService {
           failureReason: next.failureReason,
         },
       });
+    }
+  }
+
+  /**
+   * A real Bunny READY webhook cannot be assumed to carry a usable `Length` — proven directly
+   * against the real Bunny library (see `docs/MEDIA.md`). When the webhook's own duration is
+   * missing/invalid, this makes one authoritative server-to-server metadata lookup — through the
+   * provider adapter, using its own configured library identity, never a raw value taken verbatim
+   * from the webhook body — so `StudentVideoAccessService`'s duration-aware playback TTL can engage
+   * instead of permanently falling back to its 7200-second "unknown duration" TTL.
+   *
+   * Only fires when a currently-eligible row actually exists for this event's identity: a webhook
+   * whose `(libraryId, videoId)` does not match any tracked asset (unknown video, foreign library)
+   * must never trigger an outbound Bunny API call. This pre-check is purely an efficiency/hygiene
+   * guard, not a correctness dependency — the caller's own `updateMany` `where` clause remains the
+   * single source of truth for whether the READY transition actually applies, so a race between this
+   * read and that write (e.g. a duplicate concurrent READY webhook) can only make this lookup
+   * redundant, never unsafe: the loser's write simply matches zero rows, exactly as it already does
+   * today for an already-READY asset.
+   *
+   * A metadata-fetch failure (network error, non-OK response, or Bunny still reporting no duration)
+   * is deliberately swallowed here rather than propagated: Bunny's webhook already authoritatively
+   * reported READY, and failing to enrich the duration is a soft degradation — not a reason to
+   * withhold, delay, or corrupt the state transition Bunny told us already happened. This is exactly
+   * the pre-existing behavior whenever a webhook simply omitted `Length` (silently accepted as
+   * `null`), so a fetch failure is not a regression — only a missed best-effort improvement.
+   */
+  private async resolveReadyDurationSeconds(event: BunnyStreamWebhookEvent): Promise<number | null> {
+    if (isValidDurationSeconds(event.durationSeconds)) {
+      return event.durationSeconds;
+    }
+
+    const eligible = await this.prismaService.client.videoAsset.findFirst({
+      where: {
+        providerKey: event.libraryId,
+        externalAssetRef: event.videoId,
+        processingStatus: {
+          in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING, AssetProcessingStatus.FAILED],
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!eligible) {
+      return null;
+    }
+
+    try {
+      const metadata = await this.videoProvider.fetchVideoMetadata({ videoId: event.videoId });
+      return isValidDurationSeconds(metadata.durationSeconds) ? metadata.durationSeconds : null;
+    } catch {
+      return null;
     }
   }
 
@@ -514,6 +568,14 @@ type VideoAssetUpdate =
       failureCode: string;
       failureReason: string;
     };
+
+// Mirrors `StudentVideoAccessService.computePlaybackTtlSeconds`'s own definition of "usable
+// duration" exactly (a non-positive value is treated as unknown there too, e.g. Bunny's `0` before
+// encoding has measured anything) — reused here so a duration this service persists and the TTL
+// logic that later reads it agree on the same validity rule.
+function isValidDurationSeconds(value: number | null): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
 
 function mapBunnyStatusToAssetUpdate(event: BunnyStreamWebhookEvent): VideoAssetUpdate {
   switch (event.status) {

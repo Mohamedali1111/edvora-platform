@@ -6,10 +6,12 @@ import {
   InvalidVideoProviderWebhookError,
   VideoPlaybackSigningFailedError,
   VideoProviderCreateFailedError,
+  VideoProviderMetadataFetchFailedError,
 } from '../errors/media.errors';
 import type {
   BunnyStreamWebhookEvent,
   BunnyStreamWebhookStatus,
+  ProviderVideoMetadata,
   ProviderVideoResource,
   TusUploadCapability,
   VideoPlaybackCapability,
@@ -18,6 +20,13 @@ import type {
 
 type BunnyCreateVideoResponse = {
   guid?: unknown;
+};
+
+// Bunny's "Get Video" response — deliberately typed as `unknown` field-by-field and read
+// defensively (see `fetchVideoMetadata`): this is a real third-party payload, not a value this
+// codebase controls the shape of.
+type BunnyGetVideoResponse = {
+  length?: unknown;
 };
 
 // Bunny Stream video GUIDs are standard GUIDs (see Bunny's Create Video response). This is
@@ -68,6 +77,52 @@ export class BunnyStreamVideoProvider implements VideoProvider {
     }
 
     return { videoId: body.guid };
+  }
+
+  /**
+   * Authoritative server-to-server fallback for `MediaAssetService.handleVideoProviderWebhook`:
+   * called only when a real Bunny READY webhook's own `Length` field was absent/invalid (see
+   * `docs/MEDIA.md` and the real-provider test that proved this happens — Bunny's status webhook
+   * cannot be assumed to carry usable duration). Uses this same provider's own configured
+   * `libraryId`/`apiKey` — never a caller-supplied library — against Bunny's existing "Get Video"
+   * Stream endpoint (`GET /library/{id}/videos/{videoId}`), the same host/credential already used by
+   * `createVideoResource` above.
+   *
+   * A non-OK response or network failure rejects with a typed error so the caller can choose how to
+   * degrade (see the READY-webhook handler: it does not let this failure block or corrupt the
+   * already-authoritative READY transition). A reachable response with no usable `length` resolves
+   * with `durationSeconds: null` — not an error, just "still unknown" — reusing the exact same
+   * `readNullableNonNegativeInteger` normalization the webhook body parser below already applies to
+   * `Length`, so both duration sources are held to one identical validity rule.
+   */
+  async fetchVideoMetadata(input: { videoId: string }): Promise<ProviderVideoMetadata> {
+    let response: Response;
+
+    try {
+      response = await fetch(`https://video.bunnycdn.com/library/${this.libraryId}/videos/${input.videoId}`, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          AccessKey: this.apiKey,
+        },
+      });
+    } catch {
+      throw new VideoProviderMetadataFetchFailedError();
+    }
+
+    if (!response.ok) {
+      throw new VideoProviderMetadataFetchFailedError();
+    }
+
+    let body: BunnyGetVideoResponse;
+
+    try {
+      body = (await response.json()) as BunnyGetVideoResponse;
+    } catch {
+      throw new VideoProviderMetadataFetchFailedError();
+    }
+
+    return { durationSeconds: readNullableNonNegativeInteger(body.length) };
   }
 
   createTusUploadCapability(input: { videoId: string; expiresInSeconds: number; now: Date }): TusUploadCapability {

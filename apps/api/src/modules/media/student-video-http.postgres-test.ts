@@ -48,6 +48,7 @@ import type {
 } from './storage/document-storage.provider';
 import type {
   BunnyStreamWebhookEvent,
+  ProviderVideoMetadata,
   ProviderVideoResource,
   TusUploadCapability,
   VideoPlaybackCapability,
@@ -1159,6 +1160,13 @@ class FakeVideoProvider implements VideoProvider {
       playbackUrl: `https://vz-test-123.b-cdn.net/bcdn_token=fake-token&expires=${expiresUnixSeconds}/${input.videoId}/playlist.m3u8`,
       expiresAt: new Date(expiresUnixSeconds * 1000),
     };
+  }
+
+  // Not exercised by these student-video-access tests (they don't post webhooks) — only present to
+  // satisfy `VideoProvider`. See `FakeVideoProvider.fetchVideoMetadata` in
+  // `media-http.postgres-test.ts` for the version that actually drives duration-hydration coverage.
+  fetchVideoMetadata(): Promise<ProviderVideoMetadata> {
+    return Promise.reject(new Error('fetchVideoMetadata is not used by student-video-access tests'));
   }
 
   createTusUploadCapability(input: {
