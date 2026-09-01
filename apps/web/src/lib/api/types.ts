@@ -418,6 +418,33 @@ export type NotificationsUnreadCount = {
   unreadCount: number;
 };
 
+export type NotificationCategory = "SYSTEM" | "COURSE" | "SECURITY" | "ADMIN";
+
+/**
+ * Row shape for GET /instructor/notifications and the response of PATCH
+ * /instructor/notifications/:notificationId/read (Slice H, frozen
+ * `NotificationSummary` - see notification.types.ts). `type` is a free-form
+ * backend identifier (e.g. `COURSE_ENROLLMENT_CREATED`) - never rendered
+ * directly as UI copy; `category` is the closed, safe-to-map enum used for
+ * the product-facing type indicator instead. `read`/`readAt` are backend
+ * truth: `read` is exactly `readAt !== null`, and `readAt` is the real
+ * first-read timestamp, set once and preserved by the frozen mark-read
+ * endpoint's idempotent `WHERE readAt IS NULL` update - the frontend must
+ * never invent or locally overwrite either field.
+ */
+export type NotificationSummary = {
+  notificationId: string;
+  type: string;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  domainEntityType: string | null;
+  domainEntityId: string | null;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+};
+
 /** Body for POST /instructor/tenants/:tenantId/students. */
 export type AddStudentRequest = {
   email: string;

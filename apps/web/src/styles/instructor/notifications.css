@@ -1,0 +1,95 @@
+/**
+ * Instructor Notifications inbox only (`features/instructor/notifications`)
+ * - the notification list/row chrome and the unread/read and category
+ * badge variants this feature needs beyond the base `.status-badge`.
+ * Depends on `../components.css`/`../forms.css` loading first for the
+ * shared page chrome and base `.status-badge` this feature otherwise
+ * reuses unchanged.
+ */
+.notifications-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.notifications-list {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification-row {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1rem 1.1rem;
+}
+
+.notification-row-unread {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.notification-row-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.notification-title {
+  margin: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.notification-body {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.notification-row-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.notification-timestamp {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.status-badge-unread {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.status-badge-read {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.status-badge-notification-system,
+.status-badge-notification-admin {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.status-badge-notification-security {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .notification-row-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

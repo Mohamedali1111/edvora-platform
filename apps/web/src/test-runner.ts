@@ -36,3 +36,6 @@ import "./features/instructor/quizzes/quizzes-service.test";
 import "./features/instructor/progress/format.test";
 import "./features/instructor/progress/error-mapping.test";
 import "./features/instructor/progress/progress-service.test";
+import "./features/instructor/notifications/format.test";
+import "./features/instructor/notifications/error-mapping.test";
+import "./features/instructor/notifications/notifications-service.test";
