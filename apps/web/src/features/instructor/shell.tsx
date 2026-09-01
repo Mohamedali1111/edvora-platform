@@ -27,13 +27,13 @@ export function InstructorShell({ children }: { children: ReactNode }) {
     : t("shell.notFoundTitle");
 
   if (session.status === "bootstrapping") {
-    return <CenteredState title={t("shell.loading")} />;
+    return <CenteredState title={t("shell.loading")} loading />;
   }
 
   if (session.status !== "authenticated") {
     if (session.status === "api-unavailable") {
       return (
-        <CenteredState title={t("shell.apiUnavailable")}>
+        <CenteredState title={t("shell.apiUnavailable")} alert>
           <button className="primary-button compact-action" type="button" onClick={retry}>
             {t("shell.retry")}
           </button>
@@ -44,7 +44,7 @@ export function InstructorShell({ children }: { children: ReactNode }) {
     const messageKey = session.status === "expired" ? "shell.expired" : "shell.forbidden";
 
     return (
-      <CenteredState title={t(messageKey)}>
+      <CenteredState title={t(messageKey)} alert>
         <button className="primary-button compact-action" type="button" onClick={() => router.replace("/auth/login")}>
           {t("shell.goToLogin")}
         </button>
@@ -146,10 +146,29 @@ function Navigation({ active, onNavigate }: { active: InstructorSection | null; 
   );
 }
 
-function CenteredState({ title, children }: { title: string; children?: ReactNode }) {
+/**
+ * The pre-shell gate every instructor session passes through: a genuine
+ * in-progress bootstrap (`loading`, spinner shown, `role="status"` so
+ * screen readers hear it), or a terminal outcome the instructor must act on
+ * (`alert`, no spinner - a spinner next to a "try again"/"go to sign in"
+ * button falsely implies the app is still retrying on its own, and
+ * `role="alert"` announces the failure proactively instead of relying on
+ * the instructor to discover it visually).
+ */
+function CenteredState({
+  title,
+  children,
+  loading = false,
+  alert = false,
+}: {
+  title: string;
+  children?: ReactNode;
+  loading?: boolean;
+  alert?: boolean;
+}) {
   return (
-    <main className="centered-state">
-      <div className="loading-mark" aria-hidden="true" />
+    <main className="centered-state" role={loading ? "status" : alert ? "alert" : undefined}>
+      {loading ? <div className="loading-mark" aria-hidden="true" /> : null}
       <h1>{title}</h1>
       {children}
     </main>

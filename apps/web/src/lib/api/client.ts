@@ -44,7 +44,17 @@ export class ApiClient {
     this.baseUrl = normalizeBaseUrl(
       options.baseUrl ?? process.env.NEXT_PUBLIC_EDVORA_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     );
-    this.fetchFn = options.fetchFn ?? fetch;
+    // `fetch` must be invoked with `this === window` (or another Window-like
+    // receiver) - browsers enforce this via a WebIDL branding check. Storing
+    // the bare global reference and later calling it as `this.fetchFn(...)`
+    // (`this` bound to this ApiClient instance) throws "Illegal invocation"
+    // in every real browser, silently caught below and surfaced as a
+    // generic "API unavailable" network error - this broke every request
+    // the app makes outside of unit tests, which always inject their own
+    // `fetchFn` and never exercise this default. `.bind(globalThis)` fixes
+    // the receiver once, here, without affecting callers that pass their
+    // own `fetchFn` (e.g. every existing test).
+    this.fetchFn = options.fetchFn ?? fetch.bind(globalThis);
     this.getAccessToken = options.getAccessToken ?? (() => null);
     this.setAccessToken = options.setAccessToken ?? (() => undefined);
     this.refresh = options.refresh;

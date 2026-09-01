@@ -56,9 +56,13 @@ export function CreateQuizDialog({ tenantId, onClose }: { tenantId: string; onCl
   }
 
   return (
-    <Modal titleId="create-quiz-title" onClose={onClose}>
+    <Modal titleId="create-quiz-dialog-title" onClose={onClose}>
       <form className="auth-form" onSubmit={submit} noValidate>
-        <h2 id="create-quiz-title">{t("quizzes.createDialogTitle")}</h2>
+        {/* Deliberately not "create-quiz-title" - QuizMetadataFields below (prefix="create") already
+            owns that id for the Title <input>/<label> pair; reusing it here for the dialog heading
+            would collide (duplicate id), breaking the label's for/id association and leaving
+            `getElementById` to arbitrarily resolve one of the two elements. */}
+        <h2 id="create-quiz-dialog-title">{t("quizzes.createDialogTitle")}</h2>
         <p className="form-note">{t("quizzes.createDialogCopy")}</p>
 
         <QuizMetadataFields
