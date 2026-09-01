@@ -40,3 +40,4 @@ import "./features/instructor/progress/progress-service.test";
 import "./features/instructor/notifications/format.test";
 import "./features/instructor/notifications/error-mapping.test";
 import "./features/instructor/notifications/notifications-service.test";
+import "./features/admin/instructors/validation.test";

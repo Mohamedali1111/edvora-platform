@@ -42,9 +42,21 @@ function DeviceRequestsIcon() {
   );
 }
 
+function InstructorsIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="7.4" cy="6.3" r="2.55" />
+      <path d="M2.6 17c0-2.9 2.15-4.7 4.8-4.7s4.8 1.8 4.8 4.7" />
+      <circle cx="14.1" cy="5.2" r="1.9" />
+      <path d="M13.1 12.55c2.1.2 3.9 1.85 3.9 4.45" />
+    </svg>
+  );
+}
+
 const NAV_ICONS: Record<AdminSection, () => ReactElement> = {
   overview: OverviewIcon,
   deviceRequests: DeviceRequestsIcon,
+  instructors: InstructorsIcon,
 };
 
 export function AdminNavIcon({ section }: { section: AdminSection }) {

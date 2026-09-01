@@ -592,3 +592,50 @@ export type DeviceChangeRequestSummary = {
 export type ReviewDeviceChangeRequest = {
   reviewNote?: string;
 };
+
+/**
+ * Row shape for GET /admin/instructors and GET /admin/instructors/:instructorId
+ * (Platform Admin only). One row is always exactly one Instructor + the one
+ * Tenant/Academy they own (`membershipRole` is always `OWNER` for every row
+ * this frozen list/detail can ever return - the query itself filters to
+ * OWNER memberships only). `accountStatus` is a plain string on the frozen
+ * response, not a closed enum - createInstructor always creates `ACTIVE`
+ * accounts and no endpoint anywhere changes it, but the frontend must not
+ * assume `ACTIVE` is the only value it could ever see.
+ */
+export type InstructorSummary = {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  accountStatus: string;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  membershipRole: TenantMembershipRole;
+  createdAt: string;
+};
+
+/**
+ * Body for POST /admin/instructors. `tenantSlug` must already be trimmed/
+ * lowercased match `^[a-z0-9]+(?:-[a-z0-9]+)*$` (3-120 chars) - the backend
+ * re-validates and rejects otherwise, this is only a fast client mirror.
+ */
+export type CreateInstructorRequest = {
+  email: string;
+  displayName?: string;
+  tenantName: string;
+  tenantSlug: string;
+};
+
+/**
+ * Response for POST /admin/instructors. Unlike the analogous student-add
+ * endpoint, `activation` here is never null: `createInstructor` always
+ * creates a brand-new account (an existing email of any role is rejected
+ * outright, never silently re-associated), so a fresh one-time
+ * `INSTRUCTOR_ACTIVATION` token is always issued. Never persist
+ * `activation.rawToken` client-side beyond this one response - see
+ * AddTenantStudentResult's identical warning.
+ */
+export type CreatedInstructorResult = InstructorSummary & {
+  activation: ActivationTokenResult;
+};
