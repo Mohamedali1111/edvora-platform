@@ -113,6 +113,61 @@ export class AuthService {
     }
   }
 
+  /**
+   * Platform Admin's own login entry point - kept fully separate from
+   * `login()`/`bootstrap()` above (which are hard-coded to the INSTRUCTOR
+   * role and an instructor tenant fetch, and are exercised by tests that
+   * pin that exact behavior) rather than adding a role parameter to either.
+   * Shares the same token store, ApiClient, and refresh coalescing - only
+   * the expected role and the absence of a tenant context differ.
+   */
+  async loginAdmin(email: string, password: string): Promise<SessionSnapshot> {
+    const session = await this.api.request<LoginResponse>("/auth/login", {
+      method: "POST",
+      auth: false,
+      body: { email, password, channel: "WEB" },
+    });
+    this.tokenStore.set(session.accessToken);
+    return this.bootstrapAdmin();
+  }
+
+  async bootstrapAdmin(): Promise<SessionSnapshot> {
+    if (!this.tokenStore.get()) {
+      const refreshed = await this.refreshAccessToken();
+
+      if (!refreshed) {
+        return emptySession("anonymous");
+      }
+    }
+
+    try {
+      const user = await this.api.request<CurrentUser>("/auth/me");
+
+      if (user.role !== "PLATFORM_ADMIN") {
+        await this.logout();
+        return { ...emptySession("forbidden"), user };
+      }
+
+      return { accessToken: this.tokenStore.get(), user, tenant: null, status: "authenticated" };
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "network") {
+        return emptySession("api-unavailable");
+      }
+
+      if (error instanceof ApiError && (error.status === 401 || error.code === "INVALID_REFRESH_SESSION")) {
+        this.tokenStore.set(null);
+        return emptySession("expired");
+      }
+
+      if (error instanceof ApiError && error.status === 403) {
+        await this.logout();
+        return emptySession("forbidden");
+      }
+
+      throw error;
+    }
+  }
+
   async logout(): Promise<void> {
     try {
       if (this.tokenStore.get()) {

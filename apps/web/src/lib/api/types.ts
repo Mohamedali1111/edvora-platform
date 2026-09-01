@@ -564,3 +564,31 @@ export type InstructorQuizAttemptSummary = {
   startedAt: string;
   submittedAt: string | null;
 };
+
+export type DevicePlatform = "IOS" | "ANDROID";
+
+/**
+ * Row shape for GET /admin/device-change-requests (Platform Admin only; the
+ * frozen backend always filters this list to `PENDING` requests - there is
+ * no status field here and no endpoint to read already-resolved requests,
+ * since a resolved request simply stops appearing). `studentUserId` and
+ * `currentDeviceId` are raw identifiers - the frozen response has no
+ * student email/displayName and no model/platform/OS for the *current*
+ * device, only for the requested one. The frontend must never fabricate
+ * richer identity/device detail than this - render the raw IDs as-is.
+ */
+export type DeviceChangeRequestSummary = {
+  id: string;
+  studentUserId: string;
+  requestedAt: string;
+  requestedPlatform: DevicePlatform | null;
+  requestedDeviceModel: string | null;
+  requestedOsVersion: string | null;
+  requestedAppVersion: string | null;
+  currentDeviceId: string | null;
+};
+
+/** Body for POST /admin/device-change-requests/:id/approve and .../reject. */
+export type ReviewDeviceChangeRequest = {
+  reviewNote?: string;
+};
