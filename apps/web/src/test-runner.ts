@@ -33,3 +33,6 @@ import "./features/instructor/quizzes/ordering.test";
 import "./features/instructor/quizzes/validation.test";
 import "./features/instructor/quizzes/error-mapping.test";
 import "./features/instructor/quizzes/quizzes-service.test";
+import "./features/instructor/progress/format.test";
+import "./features/instructor/progress/error-mapping.test";
+import "./features/instructor/progress/progress-service.test";

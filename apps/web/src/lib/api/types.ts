@@ -482,3 +482,58 @@ export type CreateEnrollmentRequest = {
   startsAt?: string;
   endsAt?: string;
 };
+
+/**
+ * Row shape for GET /instructor/tenants/:tenantId/courses/:courseId/progress
+ * (Slice G, frozen `CourseProgressRow` - see `course-progress.types.ts`).
+ * `completedLessons`/`totalLessons` are derived read-time from the Course's
+ * *currently* published/available Lessons (`StudentCourseAccessService`'s
+ * exact predicate) - not a frozen historical Lesson count, so this
+ * denominator can shift as Lessons publish/unpublish. `progressPercent` is
+ * always a 0-100 number rounded server-side to 2 decimal places - never
+ * recomputed on the frontend. `lastActivityAt` is the later of this
+ * Enrollment's latest completed-lesson timestamp and latest quiz-attempt
+ * `updatedAt`, or null when neither exists yet.
+ */
+export type CourseProgressRow = {
+  enrollmentId: string;
+  status: EnrollmentStatus;
+  currentlyEffective: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+  student: StudentContactSummary;
+  completedLessons: number;
+  totalLessons: number;
+  progressPercent: number;
+  lastActivityAt: string | null;
+};
+
+export type QuizAttemptStatus = "IN_PROGRESS" | "SUBMITTED" | "GRADED" | "ABANDONED";
+
+/**
+ * Row shape for GET /instructor/tenants/:tenantId/quizzes/:quizId/attempts
+ * (Slice G, frozen `InstructorQuizAttemptSummary` - see
+ * `instructor-quiz-attempt.types.ts`). Every score/max/percentage/passed
+ * value is the exact historical snapshot the backend persisted at that
+ * attempt's own grading time - the frontend must never recompute `passed`
+ * or `percentage` from a Quiz's *current* `passingScorePercent`.
+ * `scorePoints`/`maxPoints`/`percentage` are Decimal-as-string (never
+ * parsed/re-rounded for anything but presentation) and are `null` together
+ * with `passed` until the attempt is graded (`status` is `IN_PROGRESS` or
+ * `ABANDONED` without ever having been graded).
+ */
+export type InstructorQuizAttemptSummary = {
+  attemptId: string;
+  quizId: string;
+  enrollmentId: string;
+  student: StudentContactSummary;
+  status: QuizAttemptStatus;
+  attemptNumber: number;
+  scorePoints: string | null;
+  maxPoints: string | null;
+  percentage: string | null;
+  passed: boolean | null;
+  startedAt: string;
+  submittedAt: string | null;
+};

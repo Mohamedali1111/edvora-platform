@@ -1,5 +1,5 @@
-import { Placeholder } from "@/features/instructor/placeholder";
+import { ProgressPage } from "@/features/instructor/progress/progress-page";
 
-export default function ProgressPage() {
-  return <Placeholder />;
+export default function InstructorProgressPage() {
+  return <ProgressPage />;
 }
