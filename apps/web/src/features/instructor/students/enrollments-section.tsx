@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { EnrollmentStatus, InstructorEnrollmentSummary } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
 import { ENROLLMENTS_PAGE_SIZE, useStudentEnrollments } from "./enrollments-service";
 import { EnrollmentCreateDialog } from "./enrollment-create-dialog";
 import { RevokeEnrollmentDialog } from "./revoke-enrollment-dialog";
@@ -48,7 +49,7 @@ export function EnrollmentsSection({
   }
 
   return (
-    <section className="detail-section" aria-labelledby="enrollments-heading">
+    <section className="detail-section enrollments-section" aria-labelledby="enrollments-heading">
       <div className="detail-section-header">
         <h2 id="enrollments-heading">{t("enrollments.heading")}</h2>
         <button className="primary-button compact-action" type="button" onClick={() => setCreateOpen(true)}>
@@ -83,11 +84,16 @@ export function EnrollmentsSection({
           </button>
         </div>
       ) : state.data.items.length === 0 ? (
-        <p className="overview-empty">{t("enrollments.empty")}</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NavIcon section="courses" />
+          </span>
+          <p>{t("enrollments.empty")}</p>
+        </div>
       ) : (
         <>
           <div className="table-scroll">
-            <table className="data-table">
+            <table className="data-table enrollments-table">
               <caption className="sr-only">{t("enrollments.heading")}</caption>
               <thead>
                 <tr>
@@ -104,8 +110,8 @@ export function EnrollmentsSection({
               <tbody>
                 {state.data.items.map((enrollment) => (
                   <tr key={enrollment.enrollmentId}>
-                    <td>{enrollment.courseTitle}</td>
-                    <td>
+                    <td data-label={t("enrollments.columnCourse")}>{enrollment.courseTitle}</td>
+                    <td data-label={t("enrollments.columnStatus")}>
                       <span className={`status-badge status-badge-enrollment-${enrollment.status.toLowerCase()}`}>
                         {t(ENROLLMENT_STATUS_KEY[enrollment.status])}
                       </span>
@@ -113,7 +119,7 @@ export function EnrollmentsSection({
                         <span className="status-badge status-badge-effective">{t("enrollments.currentlyEffective")}</span>
                       ) : null}
                     </td>
-                    <td className="table-col-secondary">
+                    <td className="table-col-secondary" data-label={t("enrollments.columnDates")}>
                       {enrollment.startsAt || enrollment.endsAt ? (
                         <span className="enrollment-dates">
                           {enrollment.startsAt ? (
@@ -130,8 +136,13 @@ export function EnrollmentsSection({
                       ) : (
                         t("enrollments.datesNone")
                       )}
+                      {enrollment.status === "REVOKED" && enrollment.revokedAt ? (
+                        <span className="enrollment-dates enrollment-revoked-at">
+                          {t("enrollments.revokedAtLabel")}: {formatDate(enrollment.revokedAt)}
+                        </span>
+                      ) : null}
                     </td>
-                    <td>
+                    <td data-label={t("enrollments.columnActions")}>
                       {enrollment.status === "ACTIVE" ? (
                         <button className="ghost-button compact" type="button" onClick={() => setRevokeTarget(enrollment)}>
                           {t("enrollments.revokeAction")}

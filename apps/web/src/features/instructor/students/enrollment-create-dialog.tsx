@@ -5,6 +5,7 @@ import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseStatus, EnrollmentSummary } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
 import { Modal } from "./dialog";
 import { COURSE_SELECTOR_PAGE_SIZE, createEnrollment, useCourseSelectorPage } from "./enrollments-service";
 import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
@@ -95,7 +96,12 @@ export function EnrollmentCreateDialog({
               </button>
             </div>
           ) : courseState.data.items.length === 0 ? (
-            <p className="overview-empty">{t("enrollments.courseSelectorEmpty")}</p>
+            <div className="empty-state empty-state-compact">
+              <span className="empty-state-icon" aria-hidden="true">
+                <NavIcon section="courses" />
+              </span>
+              <p>{t("enrollments.courseSelectorEmpty")}</p>
+            </div>
           ) : (
             <>
               <ul className="course-selector-list" role="radiogroup" aria-labelledby="course-selector-label">
@@ -112,7 +118,7 @@ export function EnrollmentCreateDialog({
                           setSelectError(false);
                         }}
                       />
-                      <span>{course.title}</span>
+                      <span className="course-selector-option-title">{course.title}</span>
                       <span className={`status-badge status-badge-${course.status.toLowerCase()}`}>
                         {t(COURSE_STATUS_KEY[course.status])}
                       </span>
@@ -120,24 +126,30 @@ export function EnrollmentCreateDialog({
                   </li>
                 ))}
               </ul>
-              <div className="pagination-controls" aria-label={t("pagination.pageLabel")}>
-                <button
-                  className="secondary-button compact"
-                  type="button"
-                  onClick={() => setCourseOffset((value) => previousOffset(value, COURSE_SELECTOR_PAGE_SIZE))}
-                  disabled={!canGoPrevious(courseOffset)}
-                >
-                  {t("pagination.previous")}
-                </button>
-                <button
-                  className="secondary-button compact"
-                  type="button"
-                  onClick={() => setCourseOffset((value) => nextOffset(value, COURSE_SELECTOR_PAGE_SIZE))}
-                  disabled={!canGoNext(courseState.data.hasMore)}
-                >
-                  {t("pagination.next")}
-                </button>
+              <div className="course-selector-pagination">
+                <span className="course-selector-page-label">
+                  {t("enrollments.courseSelectorPageLabel").replace("{page}", String(courseOffset / COURSE_SELECTOR_PAGE_SIZE + 1))}
+                </span>
+                <div className="pagination-controls" aria-label={t("pagination.pageLabel")}>
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    onClick={() => setCourseOffset((value) => previousOffset(value, COURSE_SELECTOR_PAGE_SIZE))}
+                    disabled={!canGoPrevious(courseOffset)}
+                  >
+                    {t("pagination.previous")}
+                  </button>
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    onClick={() => setCourseOffset((value) => nextOffset(value, COURSE_SELECTOR_PAGE_SIZE))}
+                    disabled={!canGoNext(courseState.data.hasMore)}
+                  >
+                    {t("pagination.next")}
+                  </button>
+                </div>
               </div>
+              {courseState.data.hasMore ? <p className="course-selector-more-note">{t("enrollments.courseSelectorMoreNote")}</p> : null}
             </>
           )}
           {selectError ? (

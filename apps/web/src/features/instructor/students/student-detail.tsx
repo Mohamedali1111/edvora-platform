@@ -52,33 +52,32 @@ export function StudentDetail({ studentId }: { studentId: string }) {
         </div>
       ) : (
         <>
-          <header className="detail-header">
-            <h2>{state.data.displayName ?? state.data.email}</h2>
-            <span className={`status-badge status-badge-${state.data.status.toLowerCase()}`}>
-              {t(STUDENT_STATUS_KEY[state.data.status])}
+          <header className="student-hero">
+            <span className="student-hero-avatar" aria-hidden="true">
+              {(state.data.displayName ?? state.data.email).trim().charAt(0).toUpperCase()}
             </span>
-          </header>
-
-          <dl className="detail-grid">
-            <div>
-              <dt>{t("students.detailAccountLabel")}</dt>
-              <dd>{state.data.email}</dd>
-            </div>
-            <div>
-              <dt>{t("students.detailStatusLabel")}</dt>
-              <dd>{t(STUDENT_STATUS_KEY[state.data.status])}</dd>
-            </div>
-            <div>
-              <dt>{t("students.detailJoinedLabel")}</dt>
-              <dd>{formatDate(state.data.createdAt)}</dd>
-            </div>
-            {state.data.activatedAt ? (
-              <div>
-                <dt>{t("students.detailActivatedLabel")}</dt>
-                <dd>{formatDate(state.data.activatedAt)}</dd>
+            <div className="student-hero-identity">
+              <div className="student-hero-name-row">
+                <h2>{state.data.displayName ?? state.data.email}</h2>
+                <span className={`status-badge status-badge-${state.data.status.toLowerCase()}`}>
+                  {t(STUDENT_STATUS_KEY[state.data.status])}
+                </span>
               </div>
-            ) : null}
-          </dl>
+              {state.data.displayName ? <p className="student-hero-email">{state.data.email}</p> : null}
+              <dl className="student-hero-meta">
+                <div>
+                  <dt>{t("students.detailJoinedLabel")}</dt>
+                  <dd>{formatDate(state.data.createdAt)}</dd>
+                </div>
+                {state.data.activatedAt ? (
+                  <div>
+                    <dt>{t("students.detailActivatedLabel")}</dt>
+                    <dd>{formatDate(state.data.activatedAt)}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </div>
+          </header>
 
           <EnrollmentsSection tenantId={tenant.tenantId} studentUserId={state.data.userId} />
         </>

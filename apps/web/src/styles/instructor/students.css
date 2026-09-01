@@ -3,6 +3,12 @@
  * Depends on `../components.css` loading first for the base `.status-badge`
  * these enrollment variants override, and on `../tables.css`/`../dialogs.css`
  * for the table/dialog chrome the Students pages otherwise reuse unchanged.
+ * The responsive card transform below (`.students-table`/`.enrollments-table`)
+ * is deliberately scoped to those two explicit classes rather than to
+ * `.data-table` generally or to the shared `.detail-page`/`.detail-section`
+ * wrappers - Course/Quiz detail also render inside those same shared
+ * wrappers, and must not be affected by a Students/Enrollments-only layout
+ * change.
  */
 .enrollment-filter {
   max-width: 220px;
@@ -13,6 +19,10 @@
   gap: 0.15rem;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.enrollment-revoked-at {
+  color: var(--danger);
 }
 
 .status-badge-enrollment-inactive {
@@ -31,17 +41,145 @@
   color: #ffffff;
 }
 
+/**
+ * Compact icon-chip empty state, matching the Overview pattern established
+ * in J1 - reusing the shell's own nav iconography rather than duplicating
+ * the pattern's CSS from `instructor/overview.css` (the two files stay
+ * independent so neither milestone's approved page depends on the other's
+ * internals).
+ */
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.empty-state-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}
+
+.empty-state-compact {
+  padding-block: var(--space-1);
+}
+
+.empty-state-compact .empty-state-icon {
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+/* ---- Student Detail hero ---- */
+.student-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
+}
+
+.student-hero-avatar {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.student-hero-identity {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+}
+
+.student-hero-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.student-hero-name-row h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-page-title);
+  font-weight: 800;
+}
+
+.student-hero-email {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}
+
+.student-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-5);
+  margin: var(--space-2) 0 0;
+}
+
+.student-hero-meta div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.student-hero-meta dt {
+  color: var(--muted);
+  font-size: var(--fs-metadata);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.student-hero-meta dd {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+}
+
+.enrollments-section .detail-section-header {
+  align-items: center;
+}
+
+/* ---- One-time activation surface: visually set apart from ordinary page
+   data using the warning token (its first real use in the product) rather
+   than the neutral surface every other form field sits on. ---- */
 .activation-token-box {
   display: grid;
   gap: 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border-strong));
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  padding: var(--space-4);
 }
 
 .activation-token-label {
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -54,4 +192,176 @@
   font-size: 0.95rem;
   font-weight: 700;
   user-select: all;
+}
+
+/* ---- Course selector pagination clarity (enrollment-create-dialog) ---- */
+.course-selector-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.course-selector-page-label {
+  color: var(--muted);
+  font-size: var(--fs-metadata);
+  font-weight: 700;
+}
+
+.course-selector-more-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-metadata);
+}
+
+/* View link chevron (Students table). */
+.row-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.row-link-arrow {
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-block-start: 2px solid currentColor;
+  border-inline-end: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+:dir(rtl) .row-link-arrow {
+  transform: rotate(-135deg);
+}
+
+/* ---- Responsive card transform for dense management tables ----
+   Below the breakpoint, each row becomes its own bordered card instead of
+   forcing a cramped horizontal table: the identity/course-title cell reads
+   as the card's title, the status cell follows as a labelled sub-row, then
+   the remaining cells each carry a `data-label` (set in JSX) shown via
+   `content: attr()` so the meaning of every value stays clear without the
+   column headers being visible. `<thead>` is kept in the DOM (still a real
+   table for assistive tech) but visually hidden the same way `.sr-only`
+   hides text elsewhere. */
+@media (max-width: 640px) {
+  .students-table thead,
+  .enrollments-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    margin: -1px;
+    border: 0;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .students-table,
+  .students-table tbody,
+  .students-table tr,
+  .students-table td,
+  .enrollments-table,
+  .enrollments-table tbody,
+  .enrollments-table tr,
+  .enrollments-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-scroll:has(.students-table),
+  .table-scroll:has(.enrollments-table) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow-x: visible;
+  }
+
+  .students-table tr,
+  .enrollments-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    padding: var(--space-3);
+    margin-block-end: var(--space-3);
+  }
+
+  .students-table tr:last-child,
+  .enrollments-table tr:last-child {
+    margin-block-end: 0;
+  }
+
+  .students-table td,
+  .enrollments-table td {
+    border: 0 !important;
+    padding: 0.35rem 0 !important;
+  }
+
+  .students-table .table-col-secondary,
+  .enrollments-table .table-col-secondary {
+    display: block !important;
+  }
+
+  /* First cell (identity / course title) reads as the card's own title. */
+  .students-table td:first-child,
+  .enrollments-table td:first-child {
+    padding-block-start: 0 !important;
+    font-size: var(--fs-secondary);
+  }
+
+  /* Status cell sits directly under the title with a light divider closing
+     off the "header" portion of the card. */
+  .students-table td:nth-child(2),
+  .enrollments-table td:nth-child(2) {
+    padding-block-end: 0.6rem !important;
+    border-block-end: 1px solid var(--border) !important;
+    margin-block-end: 0.35rem;
+  }
+
+  .students-table td:last-child,
+  .enrollments-table td:last-child {
+    padding-block-end: 0 !important;
+  }
+
+  .students-table td:last-child:empty,
+  .enrollments-table td:last-child:empty {
+    display: none;
+  }
+
+  /* Labelled meta row (Joined / Dates) only - the identity and status cells
+     opt out since a "Student:"/"Course:" label in front of the card's own
+     title would be noise, and the trailing actions cell is self-explanatory
+     (a single View/Revoke control, or the whole card is already tappable). */
+  .students-table td[data-label]:nth-child(3)::before,
+  .enrollments-table td[data-label]:nth-child(3)::before {
+    display: block;
+    margin-block-end: 0.15rem;
+    color: var(--muted);
+    font-size: var(--fs-metadata);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    content: attr(data-label);
+  }
+
+  .row-link {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .student-hero {
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  .student-hero-avatar {
+    width: 44px;
+    height: 44px;
+    font-size: 1.05rem;
+  }
+
+  .student-hero-meta {
+    gap: var(--space-3);
+  }
 }

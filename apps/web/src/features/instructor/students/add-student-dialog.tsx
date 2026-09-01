@@ -112,7 +112,10 @@ export function AddStudentDialog({
               <p className="form-note">{t("students.activationExplain")}</p>
 
               <div className="activation-token-box">
-                <span className="activation-token-label">{t("students.activationTokenLabel")}</span>
+                <span className="activation-token-label">
+                  <ActivationIcon />
+                  {t("students.activationTokenLabel")}
+                </span>
                 <code className="activation-token-value">{result.activation.rawToken}</code>
                 <button className="ghost-button compact" type="button" onClick={copyToken}>
                   {copied ? t("students.activationCopiedConfirmation") : t("students.activationCopyAction")}
@@ -204,5 +207,14 @@ export function AddStudentDialog({
         </div>
       </form>
     </Modal>
+  );
+}
+
+function ActivationIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 2.5 3.5 5.5v4.6c0 4.15 2.75 6.9 6.5 7.9 3.75-1 6.5-3.75 6.5-7.9V5.5Z" />
+      <path d="M7.4 10.2l1.8 1.8 3.4-3.6" />
+    </svg>
   );
 }

@@ -6,6 +6,7 @@ import { useAuthenticatedInstructorSession } from "@/features/instructor/session
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { AddTenantStudentResult, TenantStudentStatus } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
 import { AddStudentDialog } from "./add-student-dialog";
 import { STUDENTS_PAGE_SIZE, useStudentsList } from "./students-service";
 import { isNetworkError } from "./error-mapping";
@@ -66,11 +67,16 @@ export function StudentsList() {
           </button>
         </div>
       ) : state.data.items.length === 0 ? (
-        <p className="overview-empty">{t("students.empty")}</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NavIcon section="students" />
+          </span>
+          <p>{t("students.empty")}</p>
+        </div>
       ) : (
         <>
           <div className="table-scroll">
-            <table className="data-table">
+            <table className="data-table students-table">
               <caption className="sr-only">{t("nav.students")}</caption>
               <thead>
                 <tr>
@@ -85,25 +91,35 @@ export function StudentsList() {
                 </tr>
               </thead>
               <tbody>
-                {state.data.items.map((student) => (
-                  <tr key={student.associationId}>
-                    <td>
-                      <strong>{student.displayName ?? student.email}</strong>
-                      {student.displayName ? <span className="table-secondary-text">{student.email}</span> : null}
-                    </td>
-                    <td>
-                      <span className={`status-badge status-badge-${student.status.toLowerCase()}`}>
-                        {t(STUDENT_STATUS_KEY[student.status])}
-                      </span>
-                    </td>
-                    <td className="table-col-secondary">{formatDate(student.createdAt)}</td>
-                    <td>
-                      <Link className="ghost-button compact" href={`/instructor/students/${student.userId}`}>
-                        {t("students.viewAction")}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {state.data.items.map((student) => {
+                  const name = student.displayName ?? student.email;
+                  return (
+                    <tr key={student.associationId}>
+                      <td data-label={t("students.columnStudent")}>
+                        <strong>{name}</strong>
+                        {student.displayName ? <span className="table-secondary-text">{student.email}</span> : null}
+                      </td>
+                      <td data-label={t("students.columnStatus")}>
+                        <span className={`status-badge status-badge-${student.status.toLowerCase()}`}>
+                          {t(STUDENT_STATUS_KEY[student.status])}
+                        </span>
+                      </td>
+                      <td className="table-col-secondary" data-label={t("students.columnJoined")}>
+                        {formatDate(student.createdAt)}
+                      </td>
+                      <td data-label={t("students.columnActions")}>
+                        <Link
+                          className="ghost-button compact row-link"
+                          href={`/instructor/students/${student.userId}`}
+                          aria-label={t("students.viewActionLabel").replace("{student}", name)}
+                        >
+                          {t("students.viewAction")}
+                          <span className="row-link-arrow" aria-hidden="true" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
