@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useAuthenticatedInstructorSession } from "@/features/instructor/session-context";
+import { NavIcon } from "@/features/instructor/nav-icons";
 import { formatDate } from "@/features/instructor/students/format";
 import { canGoNext, canGoPrevious, nextOffset, previousOffset } from "@/features/instructor/students/pagination";
 import { useI18n } from "@/lib/i18n/i18n";
@@ -49,11 +50,16 @@ export function CoursesList() {
           </button>
         </div>
       ) : state.data.items.length === 0 ? (
-        <p className="overview-empty">{t("courses.empty")}</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NavIcon section="courses" />
+          </span>
+          <p>{t("courses.empty")}</p>
+        </div>
       ) : (
         <>
           <div className="table-scroll">
-            <table className="data-table">
+            <table className="data-table courses-table">
               <caption className="sr-only">{t("nav.courses")}</caption>
               <thead>
                 <tr>
@@ -70,18 +76,25 @@ export function CoursesList() {
               <tbody>
                 {state.data.items.map((course) => (
                   <tr key={course.courseId}>
-                    <td>
+                    <td data-label={t("courses.columnTitle")}>
                       <strong>{course.title}</strong>
                     </td>
-                    <td>
+                    <td data-label={t("courses.columnStatus")}>
                       <span className={`status-badge status-badge-${course.status.toLowerCase()}`}>
                         {t(COURSE_STATUS_KEY[course.status])}
                       </span>
                     </td>
-                    <td className="table-col-secondary">{formatDate(course.updatedAt)}</td>
-                    <td>
-                      <Link className="ghost-button compact" href={`/instructor/courses/${course.courseId}`}>
+                    <td className="table-col-secondary" data-label={t("courses.columnUpdated")}>
+                      {formatDate(course.updatedAt)}
+                    </td>
+                    <td data-label={t("courses.columnActions")}>
+                      <Link
+                        className="ghost-button compact row-link"
+                        href={`/instructor/courses/${course.courseId}`}
+                        aria-label={t("courses.viewActionLabel").replace("{course}", course.title)}
+                      >
                         {t("courses.viewAction")}
+                        <span className="row-link-arrow" aria-hidden="true" />
                       </Link>
                     </td>
                   </tr>

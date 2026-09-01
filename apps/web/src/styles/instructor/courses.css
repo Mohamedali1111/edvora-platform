@@ -144,9 +144,107 @@
   font-weight: 700;
 }
 
+/* Move-earlier/move-later buttons (Sections and Lessons): icon + label,
+   matching the same small-icon-plus-text treatment already established for
+   other secondary actions (e.g. the Overview "view all" links). */
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 @media (max-width: 480px) {
   .section-lessons-area {
     margin-inline-start: 0.5rem;
     padding-inline-start: 0.5rem;
+  }
+}
+
+/* ---- Responsive card transform for the Courses table ----
+   Same pattern as `.students-table`/`.enrollments-table` in
+   `instructor/students.css` (kept as a separate declaration here rather
+   than extending that file's selector list, matching this codebase's
+   convention of one feature owning its own table/row treatment) - below
+   the breakpoint each row becomes its own bordered card instead of a
+   cramped horizontal table. `<thead>` stays in the DOM (real table
+   semantics for assistive tech), just visually hidden. */
+@media (max-width: 640px) {
+  .courses-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    margin: -1px;
+    border: 0;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .courses-table,
+  .courses-table tbody,
+  .courses-table tr,
+  .courses-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-scroll:has(.courses-table) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow-x: visible;
+  }
+
+  .courses-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    padding: var(--space-3);
+    margin-block-end: var(--space-3);
+  }
+
+  .courses-table tr:last-child {
+    margin-block-end: 0;
+  }
+
+  .courses-table td {
+    border: 0 !important;
+    padding: 0.35rem 0 !important;
+  }
+
+  .courses-table .table-col-secondary {
+    display: block !important;
+  }
+
+  .courses-table td:first-child {
+    padding-block-start: 0 !important;
+    font-size: var(--fs-secondary);
+  }
+
+  .courses-table td:nth-child(2) {
+    padding-block-end: 0.6rem !important;
+    border-block-end: 1px solid var(--border) !important;
+    margin-block-end: 0.35rem;
+  }
+
+  .courses-table td:last-child {
+    padding-block-end: 0 !important;
+  }
+
+  .courses-table td[data-label]:nth-child(3)::before {
+    display: block;
+    margin-block-end: 0.15rem;
+    color: var(--muted);
+    font-size: var(--fs-metadata);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    content: attr(data-label);
+  }
+
+  .courses-table .row-link {
+    width: 100%;
+    justify-content: center;
   }
 }

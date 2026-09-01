@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
+import { NavIcon } from "@/features/instructor/nav-icons";
+import type { InstructorSection } from "@/features/instructor/navigation";
 import { Modal } from "@/features/instructor/students/dialog";
 import { formatDate } from "@/features/instructor/students/format";
 import { canGoNext, canGoPrevious, nextOffset, previousOffset } from "@/features/instructor/students/pagination";
@@ -40,6 +42,12 @@ const CONTENT_PICKER_EMPTY_KEY: Record<LessonType, TranslationKey> = {
   VIDEO: "lessons.noVideosAvailable",
   DOCUMENT: "lessons.noDocumentsAvailable",
   QUIZ: "lessons.noQuizzesAvailable",
+};
+
+const CONTENT_PICKER_ICON_SECTION: Record<LessonType, InstructorSection> = {
+  VIDEO: "media",
+  DOCUMENT: "media",
+  QUIZ: "quizzes",
 };
 
 const ASSET_STATUS_KEY: Record<AssetProcessingStatus, TranslationKey> = {
@@ -218,7 +226,12 @@ export function CreateLessonDialog({
               </button>
             </div>
           ) : contentState.data.items.length === 0 ? (
-            <p className="overview-empty">{t(CONTENT_PICKER_EMPTY_KEY[type])}</p>
+            <div className="empty-state empty-state-compact">
+              <span className="empty-state-icon" aria-hidden="true">
+                <NavIcon section={CONTENT_PICKER_ICON_SECTION[type]} />
+              </span>
+              <p>{t(CONTENT_PICKER_EMPTY_KEY[type])}</p>
+            </div>
           ) : (
             <>
               <ul className="course-selector-list" role="radiogroup" aria-labelledby="content-selector-label">
@@ -235,24 +248,30 @@ export function CreateLessonDialog({
                   />
                 ))}
               </ul>
-              <div className="pagination-controls" aria-label={t("pagination.pageLabel")}>
-                <button
-                  className="secondary-button compact"
-                  type="button"
-                  onClick={() => setContentOffset((value) => previousOffset(value, CONTENT_PICKER_PAGE_SIZE))}
-                  disabled={!canGoPrevious(contentOffset)}
-                >
-                  {t("pagination.previous")}
-                </button>
-                <button
-                  className="secondary-button compact"
-                  type="button"
-                  onClick={() => setContentOffset((value) => nextOffset(value, CONTENT_PICKER_PAGE_SIZE))}
-                  disabled={!canGoNext(contentState.data.hasMore)}
-                >
-                  {t("pagination.next")}
-                </button>
+              <div className="course-selector-pagination">
+                <span className="course-selector-page-label">
+                  {t("lessons.contentPickerPageLabel").replace("{page}", String(contentOffset / CONTENT_PICKER_PAGE_SIZE + 1))}
+                </span>
+                <div className="pagination-controls" aria-label={t("pagination.pageLabel")}>
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    onClick={() => setContentOffset((value) => previousOffset(value, CONTENT_PICKER_PAGE_SIZE))}
+                    disabled={!canGoPrevious(contentOffset)}
+                  >
+                    {t("pagination.previous")}
+                  </button>
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    onClick={() => setContentOffset((value) => nextOffset(value, CONTENT_PICKER_PAGE_SIZE))}
+                    disabled={!canGoNext(contentState.data.hasMore)}
+                  >
+                    {t("pagination.next")}
+                  </button>
+                </div>
               </div>
+              {contentState.data.hasMore ? <p className="course-selector-more-note">{t("lessons.contentPickerMoreNote")}</p> : null}
             </>
           )}
           {selectError ? (

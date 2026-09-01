@@ -5,6 +5,8 @@ import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { LessonStatus, LessonSummary, LessonType } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
+import { MoveEarlierIcon, MoveLaterIcon } from "@/features/instructor/courses/ordering-icons";
 import { reorderLessons, useLessonsList } from "./lessons-service";
 import { formatDateTime } from "./format";
 import { canArchiveLesson, canEditLessonMetadata, canPublishLesson, canReorderLesson } from "./lifecycle";
@@ -107,7 +109,12 @@ export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: stri
           </button>
         </div>
       ) : state.data.length === 0 ? (
-        <p className="overview-empty">{t("lessons.empty")}</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NavIcon section="courses" />
+          </span>
+          <p>{t("lessons.empty")}</p>
+        </div>
       ) : (
         <ol className="lesson-list">
           {state.data.map((lesson) => {
@@ -127,9 +134,9 @@ export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: stri
                   {lesson.description ? <span className="table-secondary-text">{lesson.description}</span> : null}
                   {lesson.availableFrom || lesson.availableUntil ? (
                     <span className="table-secondary-text">
-                      {lesson.availableFrom ? `${t("lessons.availableFromLabel")}: ${formatDateTime(lesson.availableFrom)}` : null}
+                      {lesson.availableFrom ? `${t("lessons.availableFromDisplayLabel")}: ${formatDateTime(lesson.availableFrom)}` : null}
                       {lesson.availableFrom && lesson.availableUntil ? " · " : null}
-                      {lesson.availableUntil ? `${t("lessons.availableUntilLabel")}: ${formatDateTime(lesson.availableUntil)}` : null}
+                      {lesson.availableUntil ? `${t("lessons.availableUntilDisplayLabel")}: ${formatDateTime(lesson.availableUntil)}` : null}
                     </span>
                   ) : null}
                 </div>
@@ -142,21 +149,23 @@ export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: stri
                   {canReorderLesson(lesson.status) ? (
                     <>
                       <button
-                        className="ghost-button compact"
+                        className="ghost-button compact icon-text-button"
                         type="button"
                         onClick={() => handleMove(lesson, "earlier")}
                         disabled={reordering || !canMoveEarlier}
                         aria-label={`${t("sections.moveEarlierAction")}: ${lesson.title}`}
                       >
+                        <MoveEarlierIcon />
                         {t("sections.moveEarlierAction")}
                       </button>
                       <button
-                        className="ghost-button compact"
+                        className="ghost-button compact icon-text-button"
                         type="button"
                         onClick={() => handleMove(lesson, "later")}
                         disabled={reordering || !canMoveLater}
                         aria-label={`${t("sections.moveLaterAction")}: ${lesson.title}`}
                       >
+                        <MoveLaterIcon />
                         {t("sections.moveLaterAction")}
                       </button>
                     </>

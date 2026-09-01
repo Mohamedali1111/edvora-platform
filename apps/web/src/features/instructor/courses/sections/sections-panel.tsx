@@ -5,6 +5,8 @@ import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseSectionSummary, SectionStatus } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
+import { MoveEarlierIcon, MoveLaterIcon } from "@/features/instructor/courses/ordering-icons";
 import { reorderSections, useSectionsList } from "./sections-service";
 import { canArchiveSection, canEditSectionMetadata, canPublishSection, canReorderSection } from "./lifecycle";
 import { moveEarlier, moveLater, reorderableSectionIds } from "./ordering";
@@ -103,7 +105,12 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
           </button>
         </div>
       ) : state.data.length === 0 ? (
-        <p className="overview-empty">{t("sections.empty")}</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NavIcon section="courses" />
+          </span>
+          <p>{t("sections.empty")}</p>
+        </div>
       ) : (
         <ol className="section-list">
           {state.data.map((section) => {
@@ -129,21 +136,23 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
                     {canReorderSection(section.status) ? (
                       <>
                         <button
-                          className="ghost-button compact"
+                          className="ghost-button compact icon-text-button"
                           type="button"
                           onClick={() => handleMove(section, "earlier")}
                           disabled={reordering || !canMoveEarlier}
                           aria-label={`${t("sections.moveEarlierAction")}: ${section.title}`}
                         >
+                          <MoveEarlierIcon />
                           {t("sections.moveEarlierAction")}
                         </button>
                         <button
-                          className="ghost-button compact"
+                          className="ghost-button compact icon-text-button"
                           type="button"
                           onClick={() => handleMove(section, "later")}
                           disabled={reordering || !canMoveLater}
                           aria-label={`${t("sections.moveLaterAction")}: ${section.title}`}
                         >
+                          <MoveLaterIcon />
                           {t("sections.moveLaterAction")}
                         </button>
                       </>
