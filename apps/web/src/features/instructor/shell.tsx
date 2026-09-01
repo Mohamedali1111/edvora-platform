@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "@/lib/i18n/i18n";
+import { NavIcon } from "./nav-icons";
 import { instructorSections, resolveInstructorSection, type InstructorSection } from "./navigation";
 import { useInstructorSession } from "./session-context";
+import { ThemeControl } from "./theme-control";
 
 /**
  * Owns the persistent instructor chrome (sidebar, topbar, mobile drawer) and
@@ -52,8 +54,47 @@ export function InstructorShell({ children }: { children: ReactNode }) {
     );
   }
 
+  const identityInitial = (session.user.displayName ?? session.user.email).trim().charAt(0).toUpperCase();
+
   const navigation = (
     <Navigation active={activeSection} onNavigate={() => setDrawerOpen(false)} />
+  );
+
+  const identityRow = (
+    <div className="sidebar-identity">
+      <span className="identity-avatar" aria-hidden="true">
+        {identityInitial}
+      </span>
+      <div className="identity-text">
+        <strong>{session.user.displayName ?? session.user.email}</strong>
+        <span>{session.tenant.name}</span>
+      </div>
+    </div>
+  );
+
+  // Logout lives in the desktop topbar (always visible there) and, on
+  // mobile - where the topbar drops it to keep the first row compact - as
+  // a real action right next to the identity it belongs to in the drawer.
+  // It's never removed, only relocated to the one place that already shows
+  // "who am I" on that breakpoint.
+  const drawerFooter = (
+    <div className="sidebar-footer">
+      {identityRow}
+      <button className="drawer-logout-button" type="button" onClick={logout}>
+        <LogoutIcon />
+        {t("shell.logout")}
+      </button>
+    </div>
+  );
+
+  const languageControl = (
+    <label className="language-control">
+      <span className="sr-only">{t("shell.language")}</span>
+      <select value={locale} onChange={(event) => setLocale(event.target.value === "ar" ? "ar" : "en")}>
+        <option value="en">EN</option>
+        <option value="ar">AR</option>
+      </select>
+    </label>
   );
 
   return (
@@ -63,9 +104,12 @@ export function InstructorShell({ children }: { children: ReactNode }) {
           <div className="brand-mark small" aria-hidden="true">
             E
           </div>
-          <span>{t("brand.name")}</span>
+          <span className="brand-name">{t("brand.name")}</span>
         </div>
+
         {navigation}
+
+        <div className="sidebar-footer">{identityRow}</div>
       </aside>
 
       <div className="shell-main">
@@ -73,36 +117,24 @@ export function InstructorShell({ children }: { children: ReactNode }) {
           <button className="icon-button mobile-only" type="button" onClick={() => setDrawerOpen(true)} aria-label={t("shell.openMenu")}>
             <span className="menu-bars" aria-hidden="true" />
           </button>
+
           <div className="title-area">
-            <p>{session.tenant.name}</p>
             <h1>{activeTitle}</h1>
           </div>
+
           <div className="header-actions">
-            <label className="language-control">
-              <span>{t("shell.language")}</span>
-              <select value={locale} onChange={(event) => setLocale(event.target.value === "ar" ? "ar" : "en")}>
-                <option value="en">English</option>
-                <option value="ar">العربية</option>
-              </select>
-            </label>
-            <button className="secondary-button" type="button" onClick={logout}>
+            <div className="topbar-utility">
+              <ThemeControl />
+              {languageControl}
+            </div>
+
+            <button className="secondary-button compact-action logout-button" type="button" onClick={logout}>
               {t("shell.logout")}
             </button>
           </div>
         </header>
 
         <main className="content" tabIndex={-1}>
-          <div className="context-strip" aria-label={t("shell.tenant")}>
-            <div>
-              <span>{t("shell.account")}</span>
-              <strong>{session.user.displayName ?? session.user.email}</strong>
-            </div>
-            <div>
-              <span>{t("shell.tenant")}</span>
-              <strong>{session.tenant.name}</strong>
-            </div>
-          </div>
-
           {children}
         </main>
       </div>
@@ -112,16 +144,34 @@ export function InstructorShell({ children }: { children: ReactNode }) {
           <button className="drawer-scrim" type="button" aria-label={t("shell.closeMenu")} onClick={() => setDrawerOpen(false)} />
           <nav className="drawer-panel">
             <div className="drawer-header">
-              <span>{t("brand.name")}</span>
-              <button className="ghost-button compact" type="button" onClick={() => setDrawerOpen(false)}>
-                {t("shell.closeMenu")}
+              <div className="sidebar-brand">
+                <div className="brand-mark small" aria-hidden="true">
+                  E
+                </div>
+                <span className="brand-name">{t("brand.name")}</span>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setDrawerOpen(false)} aria-label={t("shell.closeMenu")}>
+                <span className="close-mark" aria-hidden="true" />
               </button>
             </div>
+
             {navigation}
+
+            {drawerFooter}
           </nav>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 17H4.75A1.75 1.75 0 0 1 3 15.25v-10.5C3 3.784 3.784 3 4.75 3H8" />
+      <path d="M13.5 14 17 10.5 13.5 7" />
+      <path d="M17 10.5H8" />
+    </svg>
   );
 }
 
@@ -138,7 +188,9 @@ function Navigation({ active, onNavigate }: { active: InstructorSection | null; 
           onClick={onNavigate}
           aria-current={item.id === active ? "page" : undefined}
         >
-          <span aria-hidden="true" className="nav-dot" />
+          <span className="nav-icon" aria-hidden="true">
+            <NavIcon section={item.id} />
+          </span>
           <span>{t(item.labelKey)}</span>
         </Link>
       ))}

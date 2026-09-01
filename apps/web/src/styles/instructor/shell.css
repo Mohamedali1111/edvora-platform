@@ -1,18 +1,18 @@
 /**
- * The persistent instructor shell: sidebar, topbar, mobile drawer, and the
- * brand mark it shares with the login screen. Also owns the generic
- * placeholder/loading page-state treatment (`.overview-panel`/
- * `.placeholder-panel`/`.centered-state`) used by the not-yet-built stub
+ * The persistent instructor shell: sidebar, topbar, mobile drawer, the
+ * theme switch, and the brand mark it shares with the login screen. Also
+ * owns the generic placeholder/loading page-state treatment
+ * (`.placeholder-panel`/`.centered-state`) used by the not-yet-built stub
  * pages and the auth-bootstrap loading screen, since several of those rules
  * are declared together with `.title-area`/`.centered-state` below and
  * splitting them into a separate file would duplicate the shared
- * declarations. Changing sidebar/topbar/drawer behavior, the brand mark, or
- * a stub page's empty-state look all belong here.
+ * declarations. Changing sidebar/topbar/drawer/theme-control behavior, the
+ * brand mark, or a stub page's empty-state look all belong here.
  */
 .app-shell {
   display: grid;
   min-height: 100svh;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 272px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -20,11 +20,11 @@
   top: 0;
   display: grid;
   height: 100svh;
-  grid-template-rows: auto 1fr;
-  gap: 1.2rem;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-2);
   border-inline-end: 1px solid var(--border);
-  background: #fffbf4;
-  padding: 1.1rem;
+  background: var(--sidebar-bg);
+  padding: var(--space-4) var(--space-3) var(--space-3);
 }
 
 .sidebar-brand,
@@ -32,76 +32,178 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.8rem;
-  font-weight: 900;
+  gap: var(--space-3);
 }
 
 .sidebar-brand {
   justify-content: flex-start;
+  padding: var(--space-2) var(--space-2) var(--space-4);
 }
 
 /* Reused by the login screen (instructor/../auth.css owns login layout,
-   not this mark itself). */
+   not this mark itself). A solid-fill monogram rather than an outlined
+   box - reads as a deliberate brand mark instead of a generic bordered
+   placeholder square. */
 .brand-mark {
   display: grid;
   width: 54px;
   height: 54px;
   place-items: center;
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: var(--surface-strong);
-  color: var(--accent-strong);
+  background: var(--accent);
+  color: #ffffff;
   font-size: 1.45rem;
   font-weight: 800;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-md);
 }
 
 .brand-mark.small {
-  width: 36px;
-  height: 36px;
-  font-size: 1rem;
+  width: 34px;
+  height: 34px;
+  font-size: 0.95rem;
   box-shadow: none;
 }
 
 .brand-name {
   margin: 0;
-  color: var(--accent-strong);
-  font-size: 0.86rem;
+  color: var(--text);
+  font-size: 0.95rem;
   font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .nav-list {
   display: grid;
   align-content: start;
-  gap: 0.25rem;
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
 }
 
 .nav-link {
+  position: relative;
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
   border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-weight: 800;
-  padding: 0.75rem 0.85rem;
+  color: var(--text-secondary);
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+  padding: 0.65rem var(--space-3);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
-.nav-link:hover,
+.nav-link::before {
+  position: absolute;
+  inset-block: 0.4rem;
+  inset-inline-start: -0.35rem;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: "";
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.nav-link:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
 .nav-link.active {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
-.nav-dot {
-  width: 0.5rem;
-  height: 0.5rem;
+.nav-link.active::before {
+  opacity: 1;
+}
+
+.nav-icon {
+  display: grid;
   flex: 0 0 auto;
+  place-items: center;
+  opacity: 0.85;
+}
+
+.nav-link.active .nav-icon,
+.nav-link:hover .nav-icon {
+  opacity: 1;
+}
+
+.sidebar-footer {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--space-3);
+}
+
+.sidebar-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.identity-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
   border-radius: 999px;
-  background: currentColor;
-  opacity: 0.55;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.identity-text {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+  font-size: var(--fs-metadata);
+}
+
+.identity-text strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-text span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drawer-only (mobile) logout action, placed right under the identity it
+   belongs to - the desktop topbar's own logout button covers every other
+   breakpoint, see `.logout-button` below. */
+.drawer-logout-button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+  padding: var(--space-2);
+  margin-block-start: var(--space-1);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.drawer-logout-button:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .shell-main {
@@ -113,13 +215,13 @@
   top: 0;
   z-index: 5;
   display: flex;
-  min-height: 76px;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--background) 92%, transparent);
-  padding: 0.9rem var(--space-page);
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+  padding: var(--space-3) var(--space-page);
   backdrop-filter: blur(16px);
 }
 
@@ -128,68 +230,104 @@
   overflow-wrap: anywhere;
 }
 
-/* Also styles the generic panel "eyebrow" paragraph on `.overview-panel`/
-   `.placeholder-panel` below - kept as one rule since all three share this
-   exact treatment. */
-.title-area p,
-.overview-panel > p,
+/* Also styles the generic panel "eyebrow" paragraph on `.placeholder-panel`
+   below - kept as one rule since both share this exact treatment. */
 .placeholder-panel > p {
   margin: 0 0 0.25rem;
   color: var(--accent-strong);
-  font-size: 0.8rem;
-  font-weight: 900;
+  font-size: var(--fs-label);
+  font-weight: 800;
 }
 
 .title-area h1 {
   margin: 0;
-  font-size: clamp(1.35rem, 2.5vw, 2rem);
-  line-height: 1.15;
+  font-size: var(--fs-page-title);
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .header-actions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
-.language-control {
+/* Groups theme + language into one visual unit - a shared pill rather than
+   two unrelated boxes sitting next to each other - with logout kept as its
+   own clearly separate action outside the group. */
+.topbar-utility {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  padding: 0.2rem;
+}
+
+.theme-control {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.theme-control-option {
   display: grid;
-  min-width: 142px;
-  gap: 0.25rem;
+  place-items: center;
+  width: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--muted);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.theme-control-option:hover {
+  color: var(--text);
+}
+
+.theme-control-option.active {
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent-strong);
+}
+
+/* The border-inline-start below doubles as the divider between the theme
+   trio and the language select inside the shared utility pill. */
+.language-control {
+  position: relative;
+  padding-inline-start: 0.3rem;
+  border-inline-start: 1px solid var(--border);
 }
 
 .language-control select {
-  min-height: 40px;
-  padding-block: 0.55rem;
+  min-height: 30px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-metadata);
+  font-weight: 700;
+  padding: 0.3rem 0.4rem;
+}
+
+.language-control select:hover {
+  color: var(--text);
+}
+
+.logout-button {
+  flex: 0 0 auto;
 }
 
 .content {
   display: grid;
-  gap: 1rem;
-  max-width: 1180px;
+  gap: var(--space-5);
+  max-width: 1240px;
   padding: var(--space-page);
 }
 
-.context-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 1rem;
-}
-
-.context-strip div {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.context-strip strong {
-  overflow-wrap: anywhere;
-}
-
-.overview-panel,
 .placeholder-panel,
 .centered-state {
   border: 1px solid var(--border);
@@ -197,14 +335,12 @@
   background: var(--surface-strong);
 }
 
-.overview-panel,
 .placeholder-panel {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
   padding: clamp(1.25rem, 3vw, 2rem);
 }
 
-.overview-panel h2,
 .placeholder-panel h2,
 .centered-state h1 {
   margin: 0;
@@ -212,7 +348,6 @@
   line-height: 1.15;
 }
 
-.overview-panel p,
 .placeholder-panel p {
   max-width: 62rem;
   margin: 0;
@@ -225,8 +360,8 @@
   min-height: 100svh;
   place-content: center;
   justify-items: center;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: var(--space-4);
+  padding: var(--space-5);
   text-align: center;
 }
 
@@ -245,26 +380,38 @@
   }
 }
 
-.mobile-only,
 .drawer-layer {
   display: none;
 }
 
-/* Icon-button shape for the mobile menu toggle - loads after forms.css's
-   generic button-family base so `border-color`/`background` here win. */
+/* Higher specificity than the plain `.icon-button` rule below (two classes
+   beat one) so this reliably wins regardless of source order - a bare
+   `.mobile-only { display: none }` here would lose to `.icon-button`'s own
+   `display: grid` at every viewport, since that rule loads after this one
+   in the same file. */
+.icon-button.mobile-only {
+  display: none;
+}
+
+/* Icon-button shape for the mobile menu/close toggles - loads after
+   forms.css's generic button-family base so `border-color`/`background`
+   here win. */
 .icon-button {
   display: grid;
-  width: 44px;
+  width: 40px;
   place-items: center;
-  border-color: var(--border-strong);
+  border-color: var(--border);
   background: var(--surface-strong);
 }
 
 .menu-bars,
 .menu-bars::before,
-.menu-bars::after {
+.menu-bars::after,
+.close-mark,
+.close-mark::before,
+.close-mark::after {
   display: block;
-  width: 18px;
+  width: 16px;
   height: 2px;
   border-radius: 999px;
   background: currentColor;
@@ -282,11 +429,40 @@
 }
 
 .menu-bars::before {
-  top: -6px;
+  top: -5px;
 }
 
 .menu-bars::after {
-  top: 6px;
+  top: 5px;
+}
+
+.close-mark {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+}
+
+.close-mark::before,
+.close-mark::after {
+  position: absolute;
+  top: 7px;
+  inset-inline-start: 0;
+  content: "";
+}
+
+.close-mark::before {
+  transform: rotate(45deg);
+}
+
+.close-mark::after {
+  transform: rotate(-45deg);
+}
+
+@media (max-width: 1024px) {
+  .app-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 900px) {
@@ -298,17 +474,50 @@
     display: none;
   }
 
-  .mobile-only {
+  .icon-button.mobile-only {
     display: grid;
   }
 
+  /* Compact, single-row mobile topbar: logout moves into the drawer (see
+     `.drawer-logout-button`) so this row only ever holds the menu trigger,
+     a quiet page label, and the theme/language utility pill - the page's
+     own heading (e.g. Overview's "Welcome back...") carries the visual
+     weight instead, so the two never compete for attention. */
   .topbar {
-    align-items: flex-start;
+    min-height: 56px;
+    gap: var(--space-2);
+    padding-block: var(--space-2);
+  }
+
+  .title-area h1 {
+    overflow: hidden;
+    font-size: 1rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .header-actions {
-    display: grid;
-    justify-items: end;
+    gap: var(--space-2);
+  }
+
+  .logout-button {
+    display: none;
+  }
+
+  .theme-control-option {
+    width: 26px;
+    min-height: 26px;
+  }
+
+  .language-control select {
+    min-height: 26px;
+    font-size: var(--fs-small);
+    padding: 0.25rem 0.35rem;
+  }
+
+  .content {
+    gap: var(--space-4);
   }
 
   .drawer-layer {
@@ -322,7 +531,8 @@
     position: absolute;
     inset: 0;
     border: 0;
-    background: rgb(31 37 35 / 42%);
+    background: rgb(10 12 11 / 46%);
+    animation: fade-in var(--duration-base) var(--ease-standard);
   }
 
   .drawer-panel {
@@ -330,30 +540,55 @@
     inset-block: 0;
     inset-inline-start: 0;
     display: grid;
-    width: min(320px, calc(100vw - 2rem));
-    align-content: start;
-    gap: 1rem;
-    background: var(--surface-strong);
-    padding: 1rem;
-    box-shadow: var(--shadow);
+    width: min(300px, calc(100vw - 2.5rem));
+    grid-template-rows: auto 1fr auto;
+    gap: var(--space-2);
+    background: var(--sidebar-bg);
+    padding: var(--space-4) var(--space-3) var(--space-3);
+    box-shadow: var(--shadow-lg);
+    animation: slide-in var(--duration-base) var(--ease-standard);
+    border-start-end-radius: var(--radius-md);
+    border-end-end-radius: var(--radius-md);
+  }
+
+  .drawer-header {
+    padding-inline: var(--space-2);
+    padding-block-end: var(--space-3);
+  }
+
+  .drawer-header .sidebar-brand {
+    padding: 0;
   }
 }
 
-@media (max-width: 620px) {
-  .topbar {
-    flex-wrap: wrap;
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
+}
 
-  .title-area {
-    flex: 1 1 calc(100% - 58px);
+@keyframes slide-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
   }
+}
 
-  .header-actions {
-    width: 100%;
-    grid-template-columns: minmax(0, 1fr) auto;
+@media (max-width: 900px) {
+  :dir(rtl) .drawer-panel {
+    animation-name: slide-in-rtl;
   }
+}
 
-  .language-control {
-    min-width: 0;
+@keyframes slide-in-rtl {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .language-control select {
+    padding-inline: 0.25rem;
   }
 }

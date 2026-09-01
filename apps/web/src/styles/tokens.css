@@ -1,26 +1,185 @@
 /**
  * Design tokens - the single source of truth for color, surface, border,
- * radius, and spacing values used across Instructor Web. Feature
- * stylesheets should reference these custom properties (`var(--token)`)
- * rather than hardcoding literal color/radius/spacing values.
+ * radius, spacing, typography, and motion values used across Instructor
+ * Web. Feature stylesheets should reference these custom properties
+ * (`var(--token)`) rather than hardcoding literal values.
+ *
+ * Theme model: `:root` below is the light palette (the default, and what
+ * unauthenticated/pre-hydration markup renders). A system-dark visitor gets
+ * the dark palette via `prefers-color-scheme` as long as they have not made
+ * an explicit choice; an explicit choice is recorded as `data-theme="light"`
+ * or `data-theme="dark"` on `<html>` (see `src/lib/theme/theme.tsx`) and
+ * always wins over the system preference. The dark values are intentionally
+ * repeated once per selector rather than factored out - CSS custom
+ * properties have no mixin/include mechanism, and duplicating a handful of
+ * `--token: value;` lines is far cheaper to maintain than reimplementing
+ * this cascade with a preprocessor this project deliberately doesn't use.
  */
 :root {
   color-scheme: light;
-  --background: #f7f4ef;
-  --surface: #fffdf9;
+
+  /* Surfaces - four steps of elevation from the app canvas up. */
+  --background: #f6f4ef;
+  --sidebar-bg: #fbf9f4;
+  --surface: #fffefb;
   --surface-strong: #ffffff;
-  --text: #1f2523;
-  --muted: #65716d;
-  --border: #ded8cf;
-  --border-strong: #bfb6aa;
+  --surface-secondary: #f1ede4;
+  --surface-subtle: #eceee9;
+
+  /* Back-compat alias: some early call sites read `--surface-strong` for
+     "the elevated card surface". Keep both names pointed at one value. */
+  --surface-elevated: var(--surface-strong);
+
+  /* Text */
+  --text: #1c211e;
+  --text-secondary: #48524d;
+  --muted: #6a746f;
+
+  /* Borders */
+  --border: #e2dccf;
+  --border-strong: #c6bcab;
+  --border-subtle: var(--border);
+
+  /* Brand accent. --accent-strong is the "emphasis" role: foreground text/
+     icons sitting on --accent-soft or the page background (darker than
+     --accent here, since it's dark-on-light). --accent-hover is the
+     distinct "pressed/hover fill" role for solid accent buttons - in light
+     mode darkening happens to move in the same direction as --accent-strong,
+     but the two invert relative to each other in dark mode (see below), so
+     they're kept as separate tokens rather than one aliasing the other. */
   --accent: #0f766e;
-  --accent-strong: #115e59;
-  --accent-soft: #d9f1ec;
-  --danger: #b42318;
-  --danger-soft: #fff1f0;
+  --accent-strong: #0b5c56;
+  --accent-hover: #0b5c56;
+  --accent-soft: #ddf1eb;
+  --accent-subtle: var(--accent-soft);
+
+  /* Status */
+  --success: #157a3d;
+  --success-soft: #e3f5e8;
+  --warning: #a45607;
+  --warning-soft: #fbeed9;
+  --danger: #b3261a;
+  --danger-soft: #fbe9e7;
+  --info: #1d4ed8;
+  --info-soft: #e6edfd;
+
   --focus: #2563eb;
-  --shadow: 0 18px 50px rgb(31 37 35 / 12%);
+
+  /* Shape */
   --radius-sm: 6px;
-  --radius-md: 8px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgb(20 24 22 / 6%);
+  --shadow-md: 0 12px 28px rgb(20 24 22 / 9%);
+  --shadow-lg: 0 24px 56px rgb(20 24 22 / 14%);
+  --shadow: var(--shadow-lg);
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
   --space-page: clamp(1rem, 2vw, 1.75rem);
+
+  /* Typography scale - font sizes only; weight/case stay with the rule
+     that uses them so this file doesn't have to encode layout intent. */
+  --fs-page-title: clamp(1.35rem, 2.2vw, 1.75rem);
+  --fs-section-title: 1.05rem;
+  --fs-card-title: 0.98rem;
+  --fs-body: 0.95rem;
+  --fs-secondary: 0.875rem;
+  --fs-label: 0.8rem;
+  --fs-metadata: 0.78rem;
+  --fs-small: 0.75rem;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --background: #101312;
+    --sidebar-bg: #0c0f0e;
+    --surface: #171b1a;
+    --surface-strong: #1c211f;
+    --surface-secondary: #212725;
+    --surface-subtle: #262c2a;
+
+    --text: #eef1ef;
+    --text-secondary: #b7c0bc;
+    --muted: #8b968f;
+
+    --border: #2a302d;
+    --border-strong: #3c443f;
+
+    --accent: #0c8177;
+    --accent-strong: #6ee7d8;
+    --accent-hover: #0a6a61;
+    --accent-soft: #103330;
+    --accent-subtle: var(--accent-soft);
+
+    --success: #4ade80;
+    --success-soft: #0f2f1c;
+    --warning: #fbbf24;
+    --warning-soft: #332508;
+    --danger: #f87171;
+    --danger-soft: #33130f;
+    --info: #7fa8ff;
+    --info-soft: #131f38;
+
+    --focus: #7fa8ff;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 32%);
+    --shadow-md: 0 14px 32px rgb(0 0 0 / 40%);
+    --shadow-lg: 0 28px 64px rgb(0 0 0 / 52%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #101312;
+  --sidebar-bg: #0c0f0e;
+  --surface: #171b1a;
+  --surface-strong: #1c211f;
+  --surface-secondary: #212725;
+  --surface-subtle: #262c2a;
+
+  --text: #eef1ef;
+  --text-secondary: #b7c0bc;
+  --muted: #8b968f;
+
+  --border: #2a302d;
+  --border-strong: #3c443f;
+
+  --accent: #0c8177;
+  --accent-strong: #6ee7d8;
+  --accent-hover: #0a6a61;
+  --accent-soft: #103330;
+  --accent-subtle: var(--accent-soft);
+
+  --success: #4ade80;
+  --success-soft: #0f2f1c;
+  --warning: #fbbf24;
+  --warning-soft: #332508;
+  --danger: #f87171;
+  --danger-soft: #33130f;
+  --info: #7fa8ff;
+  --info-soft: #131f38;
+
+  --focus: #7fa8ff;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 32%);
+  --shadow-md: 0 14px 32px rgb(0 0 0 / 40%);
+  --shadow-lg: 0 28px 64px rgb(0 0 0 / 52%);
 }

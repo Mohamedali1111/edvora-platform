@@ -16,14 +16,12 @@
   gap: 1.05rem;
 }
 
-/* Also styles `.language-control span` / `.context-strip span` in
-   instructor/shell.css - kept as one rule (not duplicated) since all three
-   share this exact label treatment. */
+/* Also styles `.language-control span` in instructor/shell.css - kept as
+   one rule (not duplicated) since both share this exact label treatment. */
 .field label,
-.language-control span,
-.context-strip span {
+.language-control span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: var(--fs-label);
   font-weight: 700;
 }
 
@@ -36,6 +34,19 @@ textarea {
   background: var(--surface);
   color: var(--text);
   padding: 0.8rem 0.9rem;
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent);
 }
 
 input,
@@ -72,7 +83,9 @@ textarea[aria-invalid="true"] {
   min-height: 44px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
+  font-size: var(--fs-secondary);
   font-weight: 800;
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
 .primary-button {
@@ -82,7 +95,7 @@ textarea[aria-invalid="true"] {
 }
 
 .primary-button:hover {
-  background: var(--accent-strong);
+  background: var(--accent-hover);
 }
 
 .secondary-button {
@@ -92,11 +105,19 @@ textarea[aria-invalid="true"] {
   padding: 0.75rem 1rem;
 }
 
+.secondary-button:hover {
+  border-color: var(--text-secondary);
+}
+
 .ghost-button {
   border-color: transparent;
   background: var(--accent-soft);
   color: var(--accent-strong);
   padding: 0.75rem 0.9rem;
+}
+
+.ghost-button:hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 30%);
 }
 
 .compact,
@@ -130,11 +151,7 @@ textarea[aria-invalid="true"] {
 }
 
 @media (max-width: 620px) {
-  /* Also styles instructor/shell.css's `.context-strip` at the same
-     breakpoint - kept as one rule since both collapse to a single column
-     together. */
-  .password-control,
-  .context-strip {
+  .password-control {
     grid-template-columns: 1fr;
   }
 }

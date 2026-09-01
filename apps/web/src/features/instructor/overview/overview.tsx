@@ -6,6 +6,7 @@ import { useAuthenticatedInstructorSession } from "@/features/instructor/session
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseStatus, CourseSummary, TenantStudentStatus, TenantStudentSummary } from "@/lib/api/types";
+import { NavIcon } from "@/features/instructor/nav-icons";
 import { useInstructorOverview, type OverviewSnapshot } from "./overview-service";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
@@ -42,8 +43,6 @@ export function Overview() {
       ) : (
         <OverviewBody data={state.data} onRetry={retry} />
       )}
-
-      <div className="security-note">{t("overview.security")}</div>
     </div>
   );
 }
@@ -66,6 +65,9 @@ function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () =
   return (
     <>
       <section className="notification-status" aria-label={t("overview.notificationsHeading")}>
+        <span className="notification-bell" aria-hidden="true">
+          <NotificationBellIcon />
+        </span>
         {data.unreadNotifications === null ? (
           <UnavailableNote label={t("overview.notificationsUnavailable")} onRetry={onRetry} />
         ) : (
@@ -93,7 +95,7 @@ function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () =
           {data.courses === null ? (
             <UnavailableNote label={t("overview.coursesUnavailable")} onRetry={onRetry} />
           ) : data.courses.items.length === 0 ? (
-            <p className="overview-empty">{t("overview.coursesEmpty")}</p>
+            <EmptyPreview label={t("overview.coursesEmpty")} section="courses" />
           ) : (
             <>
               <ul className="overview-list">
@@ -115,7 +117,7 @@ function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () =
           {data.students === null ? (
             <UnavailableNote label={t("overview.studentsUnavailable")} onRetry={onRetry} />
           ) : data.students.items.length === 0 ? (
-            <p className="overview-empty">{t("overview.studentsEmpty")}</p>
+            <EmptyPreview label={t("overview.studentsEmpty")} section="students" />
           ) : (
             <>
               <ul className="overview-list">
@@ -198,6 +200,29 @@ function UnavailableNote({ label, onRetry }: { label: string; onRetry: () => voi
   );
 }
 
+/** Compact, tasteful empty state for a preview card - no illustration, just
+    a quiet icon chip (reusing the shell's own nav iconography, not a new
+    asset) paired with a clear answer to "what's empty here". */
+function EmptyPreview({ label, section }: { label: string; section: "courses" | "students" }) {
+  return (
+    <div className="overview-empty">
+      <span className="overview-empty-icon" aria-hidden="true">
+        <NavIcon section={section} />
+      </span>
+      <p>{label}</p>
+    </div>
+  );
+}
+
 function ViewAllArrow() {
   return <span className="view-all-arrow" aria-hidden="true" />;
+}
+
+function NotificationBellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8.1a4 4 0 0 1 8 0c0 3.65 1.15 4.75 1.15 4.75H4.85S6 11.75 6 8.1Z" />
+      <path d="M8.35 15.6a1.75 1.75 0 0 0 3.3 0" />
+    </svg>
+  );
 }

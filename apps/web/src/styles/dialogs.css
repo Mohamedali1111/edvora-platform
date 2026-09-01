@@ -19,7 +19,8 @@
   position: absolute;
   inset: 0;
   border: 0;
-  background: rgb(31 37 35 / 48%);
+  background: rgb(10 12 11 / 46%);
+  animation: modal-fade-in var(--duration-base) var(--ease-standard);
 }
 
 .modal-panel {
@@ -27,18 +28,33 @@
   display: grid;
   max-height: calc(100svh - 2rem);
   width: min(480px, 100%);
-  gap: 1rem;
+  gap: var(--space-4);
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--surface-strong);
   padding: clamp(1.25rem, 4vw, 1.75rem);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
+  animation: modal-rise-in var(--duration-base) var(--ease-standard);
 }
 
 .modal-panel h2 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-rise-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
 }
 
 .modal-actions {
@@ -48,12 +64,17 @@
   gap: 0.6rem;
 }
 
+/* Mixed toward black rather than using --danger directly: --danger itself
+   is tuned to stay legible as *text* on danger-soft/dark backgrounds, which
+   is brighter than is safe for white button text to sit on top of. Mixing
+   here keeps that one token honest for both roles instead of adding a
+   second danger color. */
 .danger-button {
-  background: var(--danger);
+  background: color-mix(in srgb, var(--danger) 75%, black);
 }
 
 .danger-button:hover {
-  background: color-mix(in srgb, var(--danger) 85%, black);
+  background: color-mix(in srgb, var(--danger) 60%, black);
 }
 
 .course-selector-list {
