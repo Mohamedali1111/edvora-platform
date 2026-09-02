@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { Express } from 'express';
 import * as cookieParser from 'cookie-parser';
 import { ApiExceptionFilter } from './api-exception.filter';
+import { resolveTrustProxyHops } from './trust-proxy.config';
 import { createAuthHttpConfig } from '../../modules/auth/http/auth-http.config';
 
 export function configureHttpApplication(app: INestApplication): void {
@@ -21,6 +22,9 @@ export function configureHttpApplication(app: INestApplication): void {
   );
   app.useGlobalFilters(new ApiExceptionFilter());
   const expressApp = app.getHttpAdapter().getInstance() as Express;
+  // See trust-proxy.config.ts: without this, req.ip (what ThrottlerGuard keys throttling on)
+  // resolves to the Railway edge's own address for every request behind a reverse proxy.
+  expressApp.set('trust proxy', resolveTrustProxyHops());
   expressApp.disable('x-powered-by');
 }
 

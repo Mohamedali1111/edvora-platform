@@ -7,13 +7,14 @@
     "dev": "nest start --watch",
     "start": "node dist/src/main.js",
     "start:dev": "nest start --watch",
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest --runInBand",
     "test:auth:postgres": "jest --runInBand --testRegex=.*[.]postgres-test[.]ts$",
     "prisma:format": "prisma format --config prisma.config.ts",
     "prisma:validate": "prisma validate --config prisma.config.ts",
-    "prisma:generate": "prisma generate --config prisma.config.ts"
+    "prisma:generate": "prisma generate --config prisma.config.ts",
+    "admin:bootstrap": "ts-node scripts/bootstrap-platform-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",
@@ -40,6 +41,7 @@
     "@nestjs/testing": "11.2.1",
     "@types/cookie-parser": "1.4.10",
     "@types/express": "5.0.6",
+    "express": "5.2.1",
     "@types/jest": "30.0.0",
     "@types/node": "22.19.3",
     "@types/pg": "8.23.1",
