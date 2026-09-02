@@ -290,7 +290,13 @@ describe('BunnyStreamVideoProvider', () => {
       const provider = new BunnyStreamVideoProvider(config);
       const metadata = await provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' });
 
-      expect(metadata).toEqual({ durationSeconds: 91 });
+      expect(metadata).toEqual({
+        durationSeconds: 91,
+        status: null,
+        encodeProgress: null,
+        availableResolutions: null,
+        hasFailureIndication: null,
+      });
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
       expect(url).toBe('https://video.bunnycdn.com/library/123456/videos/bunny-video-guid');
@@ -309,8 +315,114 @@ describe('BunnyStreamVideoProvider', () => {
         const provider = new BunnyStreamVideoProvider(config);
         await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).resolves.toEqual({
           durationSeconds: null,
+          status: null,
+          encodeProgress: null,
+          availableResolutions: null,
+          hasFailureIndication: null,
         });
       }
+    });
+
+    // Real-provider QA (see docs/MEDIA.md's status-4 READY-promotion note) proved Bunny's real Get
+    // Video response shape for these fields — `status` as the same numeric enum as the webhook,
+    // `encodeProgress` 0-100 overall, `availableResolutions` as a COMMA-SEPARATED STRING (not an
+    // array), `transcodingMessages` as an array. This is what `MediaAssetService`'s status-4
+    // READY-promotion check consumes; see media-asset.service.spec.ts for the predicate itself.
+    it('parses status/encodeProgress/availableResolutions/failure-indication from a real-shaped fully-complete response', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            guid: 'bunny-video-guid',
+            length: 16,
+            status: 4,
+            encodeProgress: 100,
+            availableResolutions: '360p,480p,720p,240p,1080p',
+            transcodingMessages: [],
+          }),
+      }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).resolves.toEqual({
+        durationSeconds: 16,
+        status: 4,
+        encodeProgress: 100,
+        availableResolutions: ['360p', '480p', '720p', '240p', '1080p'],
+        hasFailureIndication: false,
+      });
+    });
+
+    it('parses an incomplete/still-processing real-shaped response as such', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            guid: 'bunny-video-guid',
+            length: 0,
+            status: 2,
+            encodeProgress: 0,
+            availableResolutions: null,
+            transcodingMessages: [],
+          }),
+      }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).resolves.toEqual({
+        // `0` is itself a valid non-negative integer per `readNullableNonNegativeInteger` (only
+        // negative/non-integer/non-number values parse to `null`) — Bunny genuinely reports a `0`
+        // length before any duration has been measured yet. It is a later, separate concern
+        // (`isValidDurationSeconds`/`isResolutionFinishedGenuinelyComplete`, which require `> 0`)
+        // that treats `0` as "not yet a usable duration" — this parsing step stays a faithful,
+        // unopinionated read of what Bunny actually sent.
+        durationSeconds: 0,
+        status: 2,
+        encodeProgress: 0,
+        availableResolutions: null,
+        hasFailureIndication: false,
+      });
+    });
+
+    it('reports a non-empty transcodingMessages array as a failure indication', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            guid: 'bunny-video-guid',
+            length: 16,
+            status: 4,
+            encodeProgress: 100,
+            availableResolutions: '360p,1080p',
+            transcodingMessages: [{ message: 'Encoding failed for resolution 1080p' }],
+          }),
+      }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      const metadata = await provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' });
+      expect(metadata.hasFailureIndication).toBe(true);
+    });
+
+    it('treats an out-of-range encodeProgress or an unrecognized status as unknown (null), not a guessed value', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            guid: 'bunny-video-guid',
+            length: 16,
+            status: 999,
+            encodeProgress: 150,
+            availableResolutions: '',
+            transcodingMessages: 'not-an-array',
+          }),
+      }) as unknown as typeof fetch;
+
+      const provider = new BunnyStreamVideoProvider(config);
+      await expect(provider.fetchVideoMetadata({ videoId: 'bunny-video-guid' })).resolves.toEqual({
+        durationSeconds: 16,
+        status: null,
+        encodeProgress: null,
+        availableResolutions: null,
+        hasFailureIndication: null,
+      });
     });
 
     it('rejects with a typed error on a non-OK response, without inventing a duration', async () => {

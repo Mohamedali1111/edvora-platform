@@ -453,7 +453,13 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       where: { id: videoAssetId },
       data: { providerKey: '123456', externalAssetRef: 'bunny-guid-hydrate' },
     });
-    videoProvider.metadataFetchResult = { durationSeconds: 5 };
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 5,
+      status: null,
+      encodeProgress: null,
+      availableResolutions: null,
+      hasFailureIndication: null,
+    };
 
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-hydrate', Status: 3 }).expect(HttpStatus.OK);
 
@@ -473,7 +479,13 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       where: { id: videoAssetId },
       data: { providerKey: '123456', externalAssetRef: 'bunny-guid-malformed' },
     });
-    videoProvider.metadataFetchResult = { durationSeconds: null };
+    videoProvider.metadataFetchResult = {
+      durationSeconds: null,
+      status: null,
+      encodeProgress: null,
+      availableResolutions: null,
+      hasFailureIndication: null,
+    };
 
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-malformed', Status: 3, Length: -5 }).expect(
       HttpStatus.OK,
@@ -534,7 +546,13 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       where: { id: videoAssetId },
       data: { providerKey: '123456', externalAssetRef: 'bunny-guid-idempotent' },
     });
-    videoProvider.metadataFetchResult = { durationSeconds: 5 };
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 5,
+      status: null,
+      encodeProgress: null,
+      availableResolutions: null,
+      hasFailureIndication: null,
+    };
 
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 3 }).expect(HttpStatus.OK);
     await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
@@ -545,7 +563,12 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
 
     // Duplicate READY redelivery: already READY, so no second fetch and no state change.
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 3 }).expect(HttpStatus.OK);
-    // Later Bunny status 4 (maps to PROCESSING) must not regress the already-READY asset.
+    // Later Bunny status 4: the eligibility gate in `tryPromoteResolutionFinishedToReady` sees the
+    // asset is already READY (not UPLOADING/PROCESSING/FAILED) and skips the metadata fetch entirely
+    // — asserted below via `metadataFetchRequests` staying at exactly one entry, proving the gate
+    // itself (not merely a failing predicate) is what stops this from ever re-fetching or regressing
+    // the already-READY asset. See the dedicated status-4 promotion tests below for predicate-level
+    // (rather than eligibility-gate-level) coverage of when a status-4 webhook does/does not promote.
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 4 }).expect(HttpStatus.OK);
     // A stale in-flight status 1 (PROCESSING) arriving after READY must not regress it either.
     await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-idempotent', Status: 1 }).expect(HttpStatus.OK);
@@ -555,6 +578,175 @@ maybeDescribe('instructor media HTTP PostgreSQL integration', () => {
       durationSeconds: 5,
     });
     expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-idempotent']);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Status-4 ("a resolution finished") READY promotion — the narrow repair. Real-provider QA proved
+  // a genuinely, fully-encoded video in a real Bunny library can permanently remain at webhook
+  // status 4 and never emit status 3 at all, so status 4 alone must never promote to READY; only an
+  // authoritative Get Video re-check proving the strict completed state may. See docs/MEDIA.md and
+  // `isResolutionFinishedGenuinelyComplete`'s own predicate-level tests in
+  // media-asset.service.spec.ts for the pure logic; these exercise the full webhook->DB flow.
+  // ---------------------------------------------------------------------------------------------
+
+  it('B: promotes to READY on a status-4 webhook once authoritative provider metadata proves the strict completed state', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-resolution-finished-complete');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-resolution-complete' },
+    });
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 16,
+      status: 4,
+      encodeProgress: 100,
+      availableResolutions: ['360p', '480p', '720p', '1080p'],
+      hasFailureIndication: false,
+    };
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-complete', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 16,
+      failureCode: null,
+      failureReason: null,
+    });
+    expect(videoProvider.metadataFetchRequests).toEqual(['bunny-guid-resolution-complete']);
+  });
+
+  it('C/D/E/G: a status-4 webhook for the first ResolutionFinished event (encodeProgress < 100) stays PROCESSING, and a repeated status-4 webhook after real completion still converges to READY exactly once', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-resolution-finished-repeat');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-resolution-repeat' },
+    });
+
+    // First ResolutionFinished event: Bunny's own Get Video re-check shows the encode is still only
+    // partially done (§3's explicit "the first ResolutionFinished event must not necessarily cause
+    // READY" requirement) — must not promote.
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 16,
+      status: 4,
+      encodeProgress: 40,
+      availableResolutions: ['360p'],
+      hasFailureIndication: false,
+    };
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-repeat', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.PROCESSING,
+      durationSeconds: null,
+    });
+
+    // A second, still-incomplete ResolutionFinished event — also must not promote.
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 16,
+      status: 4,
+      encodeProgress: 80,
+      availableResolutions: ['360p', '720p'],
+      hasFailureIndication: false,
+    };
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-repeat', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.PROCESSING,
+    });
+
+    // The genuinely final ResolutionFinished event: now promotes.
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 16,
+      status: 4,
+      encodeProgress: 100,
+      availableResolutions: ['360p', '480p', '720p', '1080p'],
+      hasFailureIndication: false,
+    };
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-repeat', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 16,
+    });
+
+    // A further, redundant status-4 redelivery after READY: the eligibility gate must skip the
+    // fetch entirely (idempotent — matches the "does not re-fetch or regress" test above).
+    const fetchCountAtReady = videoProvider.metadataFetchRequests.length;
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-repeat', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+    expect(videoProvider.metadataFetchRequests).toHaveLength(fetchCountAtReady);
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 16,
+    });
+  });
+
+  it('F: a status-4 webhook stays PROCESSING (not FAILED, not corrupted) when the authoritative metadata fetch itself fails', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-resolution-finished-fetch-fails');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-resolution-fetch-fails' },
+    });
+    videoProvider.metadataFetchResult = 'fail';
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-resolution-fetch-fails', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.PROCESSING,
+      durationSeconds: null,
+      failureCode: null,
+      failureReason: null,
+    });
+  });
+
+  it('I: never calls the provider metadata fetch for a status-4 webhook whose identity does not match any tracked asset', async () => {
+    videoProvider.metadataFetchResult = {
+      durationSeconds: 16,
+      status: 4,
+      encodeProgress: 100,
+      availableResolutions: ['1080p'],
+      hasFailureIndication: false,
+    };
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'no-such-resolution-finished-video', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+    await postBunnyWebhook({ VideoLibraryId: 654321, VideoGuid: 'no-such-resolution-finished-video', Status: 4 }).expect(
+      HttpStatus.OK,
+    );
+
+    expect(videoProvider.metadataFetchRequests).toEqual([]);
+    await expect(prisma.client.videoAsset.findFirst({ where: { externalAssetRef: 'no-such-resolution-finished-video' } })).resolves.toBeNull();
+  });
+
+  it('A: a status-3 webhook still promotes to READY directly, without any status-4 promotion logic engaging', async () => {
+    const { tenantId, instructorId } = await createInstructorTenant('video-status-3-unchanged');
+    const videoAssetId = await createVideoAssetDirect(tenantId, instructorId);
+    await prisma.client.videoAsset.update({
+      where: { id: videoAssetId },
+      data: { providerKey: '123456', externalAssetRef: 'bunny-guid-status-3-unchanged' },
+    });
+
+    await postBunnyWebhook({ VideoLibraryId: 123456, VideoGuid: 'bunny-guid-status-3-unchanged', Status: 3, Length: 45 }).expect(
+      HttpStatus.OK,
+    );
+
+    await expect(prisma.client.videoAsset.findUniqueOrThrow({ where: { id: videoAssetId } })).resolves.toMatchObject({
+      processingStatus: AssetProcessingStatus.READY,
+      durationSeconds: 45,
+    });
+    // The webhook carried its own Length, so the duration-hydration fetch path is not used either —
+    // status-4 promotion logic is never invoked for a status-3 event, by construction.
+    expect(videoProvider.metadataFetchRequests).toEqual([]);
   });
 
   it('creates an authorized direct R2 document upload intent with server-owned asset state and key', async () => {
@@ -1241,9 +1433,18 @@ class FakeVideoProvider implements VideoProvider {
   readonly metadataFetchRequests: string[] = [];
   failCreate = false;
   failTusSigning = false;
-  // Controls `fetchVideoMetadata`'s result for the duration-hydration fallback path: an object
-  // resolves with that metadata, the literal `'fail'` rejects (simulating a network/non-OK failure).
-  metadataFetchResult: ProviderVideoMetadata | 'fail' = { durationSeconds: null };
+  // Controls `fetchVideoMetadata`'s result for both the duration-hydration fallback path and the
+  // status-4 READY-promotion re-verification path: an object resolves with that metadata, the
+  // literal `'fail'` rejects (simulating a network/non-OK failure). The status/encodeProgress/
+  // availableResolutions/hasFailureIndication fields default to `null` ("not modeled by this test") —
+  // tests exercising the status-4 promotion path set the full shape explicitly per-test.
+  metadataFetchResult: ProviderVideoMetadata | 'fail' = {
+    durationSeconds: null,
+    status: null,
+    encodeProgress: null,
+    availableResolutions: null,
+    hasFailureIndication: null,
+  };
   private nextVideoNumber = 1;
 
   createVideoResource(input: { title: string }): Promise<ProviderVideoResource> {

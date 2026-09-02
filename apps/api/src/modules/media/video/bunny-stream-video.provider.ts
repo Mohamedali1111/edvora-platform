@@ -24,9 +24,19 @@ type BunnyCreateVideoResponse = {
 
 // Bunny's "Get Video" response — deliberately typed as `unknown` field-by-field and read
 // defensively (see `fetchVideoMetadata`): this is a real third-party payload, not a value this
-// codebase controls the shape of.
+// codebase controls the shape of. Extended (beyond the pre-existing `length`) with the fields
+// `MediaAssetService`'s status-4 READY-promotion check needs — confirmed against the real Bunny API
+// during real-provider QA: `status` (same numeric enum as the webhook `Status` field),
+// `encodeProgress` (0-100, overall across every resolution, not per-resolution),
+// `availableResolutions` (a comma-separated string, e.g. `"360p,480p,720p"`, not an array — Bunny's
+// actual wire shape), `transcodingMessages` (an array; non-empty entries are treated as a failure
+// signal).
 type BunnyGetVideoResponse = {
   length?: unknown;
+  status?: unknown;
+  encodeProgress?: unknown;
+  availableResolutions?: unknown;
+  transcodingMessages?: unknown;
 };
 
 // Bunny Stream video GUIDs are standard GUIDs (see Bunny's Create Video response). This is
@@ -80,18 +90,21 @@ export class BunnyStreamVideoProvider implements VideoProvider {
   }
 
   /**
-   * Authoritative server-to-server fallback for `MediaAssetService.handleVideoProviderWebhook`:
-   * called only when a real Bunny READY webhook's own `Length` field was absent/invalid (see
-   * `docs/MEDIA.md` and the real-provider test that proved this happens — Bunny's status webhook
-   * cannot be assumed to carry usable duration). Uses this same provider's own configured
-   * `libraryId`/`apiKey` — never a caller-supplied library — against Bunny's existing "Get Video"
-   * Stream endpoint (`GET /library/{id}/videos/{videoId}`), the same host/credential already used by
+   * Authoritative server-to-server metadata lookup, used for two purposes in
+   * `MediaAssetService.handleVideoProviderWebhook`: (1) the pre-existing duration-hydration
+   * fallback when a real Bunny READY webhook's own `Length` field was absent/invalid, and (2) the
+   * status-4 READY-promotion re-verification — real-provider QA proved a genuinely, fully-encoded
+   * Bunny video can permanently sit at webhook status 4 and never emit status 3, so status 4 alone
+   * is not trustworthy; this fetch re-confirms Bunny's *current* full state before any promotion.
+   * Uses this provider's own configured `libraryId`/`apiKey` — never a caller-supplied library —
+   * against Bunny's existing "Get Video" Stream endpoint, the same host/credential already used by
    * `createVideoResource` above.
    *
    * A non-OK response or network failure rejects with a typed error so the caller can choose how to
-   * degrade (see the READY-webhook handler: it does not let this failure block or corrupt the
-   * already-authoritative READY transition). A reachable response with no usable `length` resolves
-   * with `durationSeconds: null` — not an error, just "still unknown" — reusing the exact same
+   * degrade (neither existing caller lets this failure corrupt state — the READY-webhook duration
+   * hydration path degrades to `durationSeconds: null`, and the new status-4 promotion path degrades
+   * to staying PROCESSING; see `docs/MEDIA.md`). A reachable response missing a given field resolves
+   * with `null` for that field — not an error, just "still unknown" — reusing the same
    * `readNullableNonNegativeInteger` normalization the webhook body parser below already applies to
    * `Length`, so both duration sources are held to one identical validity rule.
    */
@@ -122,7 +135,13 @@ export class BunnyStreamVideoProvider implements VideoProvider {
       throw new VideoProviderMetadataFetchFailedError();
     }
 
-    return { durationSeconds: readNullableNonNegativeInteger(body.length) };
+    return {
+      durationSeconds: readNullableNonNegativeInteger(body.length),
+      status: readNullableStatus(body.status),
+      encodeProgress: readNullableEncodeProgress(body.encodeProgress),
+      availableResolutions: readNullableResolutionList(body.availableResolutions),
+      hasFailureIndication: readHasFailureIndication(body.transcodingMessages),
+    };
   }
 
   createTusUploadCapability(input: { videoId: string; expiresInSeconds: number; now: Date }): TusUploadCapability {
@@ -303,4 +322,48 @@ function isBunnyStreamWebhookStatus(value: unknown): value is BunnyStreamWebhook
     value === 9 ||
     value === 10
   );
+}
+
+// Bunny's Get Video `status` field uses the same numeric enumeration as the webhook `Status` field
+// (confirmed against the real API during real-provider QA) — reuses the exact same validity check
+// rather than a separate one, so the two status sources can never silently drift apart.
+function readNullableStatus(value: unknown): number | null {
+  return isBunnyStreamWebhookStatus(value) ? value : null;
+}
+
+function readNullableEncodeProgress(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    return null;
+  }
+
+  return value;
+}
+
+// Bunny's real wire shape is a comma-separated string (e.g. "360p,480p,720p"), not an array —
+// confirmed against the real API. Parsed into a clean internal list; an empty/whitespace-only
+// string or a missing field both resolve to `null` ("no resolutions reported"), never `[]`, so a
+// caller's `Array.isArray(...) && .length > 0` check needs no separate empty-string special case.
+function readNullableResolutionList(value: unknown): string[] | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const resolutions = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return resolutions.length > 0 ? resolutions : null;
+}
+
+// Bunny's `transcodingMessages` is an array of diagnostic entries when present; any non-empty array
+// is treated as a failure/warning signal worth blocking a READY promotion over — this is
+// deliberately conservative (a promotion is prevented, never caused, by this field), consistent with
+// `ProviderVideoMetadata.hasFailureIndication`'s own contract.
+function readHasFailureIndication(value: unknown): boolean | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value.length > 0;
 }

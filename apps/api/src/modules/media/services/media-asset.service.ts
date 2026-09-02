@@ -30,7 +30,7 @@ import type {
   VideoAssetSummary,
   VideoUploadIntent,
 } from '../types/media.types';
-import type { BunnyStreamWebhookEvent, VideoProvider } from '../video/video.provider';
+import type { BunnyStreamWebhookEvent, ProviderVideoMetadata, VideoProvider } from '../video/video.provider';
 
 @Injectable()
 export class MediaAssetService {
@@ -261,6 +261,14 @@ export class MediaAssetService {
     }
 
     if (next.status === AssetProcessingStatus.PROCESSING) {
+      // Bunny status 4 ("a resolution finished") is the one PROCESSING-mapped status that can also
+      // mean "genuinely, fully done" — see `tryPromoteResolutionFinishedToReady`'s doc comment for
+      // the real-provider evidence. Every other PROCESSING-mapped status (1, 2, 7) falls straight
+      // through to the plain update below, unchanged.
+      if (event.status === 4 && (await this.tryPromoteResolutionFinishedToReady(event))) {
+        return;
+      }
+
       await this.prismaService.client.videoAsset.updateMany({
         where: {
           providerKey: event.libraryId,
@@ -359,6 +367,75 @@ export class MediaAssetService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Bunny webhook status 4 ("a resolution finished") fires the first time as soon as a SINGLE
+   * resolution finishes — long before the whole encode is done (see `docs/MEDIA.md`) — and real-
+   * provider QA proved this specific Bunny library can permanently remain at status 4 and never emit
+   * status 3 ("Finished") at all, even once every resolution has genuinely, fully completed. So
+   * status 4 alone must never promote to READY; this re-verifies Bunny's *current* full state via one
+   * authoritative Get Video call (`isResolutionFinishedGenuinelyComplete`) and only promotes when
+   * that strict predicate holds.
+   *
+   * Mirrors `resolveReadyDurationSeconds`'s existing eligibility-gate pattern exactly: the metadata
+   * fetch is skipped entirely (no network call) unless a currently-eligible row exists for this
+   * event's identity — this is what keeps an already-READY asset from ever being re-fetched or
+   * regressed by a later/duplicate status-4 webhook, and keeps an unknown/foreign identity from
+   * triggering a fetch at all, exactly like the READY path already guarantees.
+   *
+   * Returns `true` only when this call itself performed the READY transition — the caller then skips
+   * its own plain PROCESSING update for this same webhook. Returns `false` for every other outcome
+   * (ineligible row, predicate not met, race lost to a concurrent update, or the metadata fetch
+   * itself failed) so the caller falls through to the existing, unchanged PROCESSING handling —
+   * exactly the same "soft enrichment failure never corrupts state" philosophy
+   * `resolveReadyDurationSeconds` already uses.
+   */
+  private async tryPromoteResolutionFinishedToReady(event: BunnyStreamWebhookEvent): Promise<boolean> {
+    const eligible = await this.prismaService.client.videoAsset.findFirst({
+      where: {
+        providerKey: event.libraryId,
+        externalAssetRef: event.videoId,
+        processingStatus: {
+          in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING, AssetProcessingStatus.FAILED],
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!eligible) {
+      return false;
+    }
+
+    let metadata: ProviderVideoMetadata;
+
+    try {
+      metadata = await this.videoProvider.fetchVideoMetadata({ videoId: event.videoId });
+    } catch {
+      return false;
+    }
+
+    if (!isResolutionFinishedGenuinelyComplete(metadata)) {
+      return false;
+    }
+
+    const updated = await this.prismaService.client.videoAsset.updateMany({
+      where: {
+        providerKey: event.libraryId,
+        externalAssetRef: event.videoId,
+        processingStatus: {
+          in: [AssetProcessingStatus.UPLOADING, AssetProcessingStatus.PROCESSING, AssetProcessingStatus.FAILED],
+        },
+      },
+      data: {
+        processingStatus: AssetProcessingStatus.READY,
+        durationSeconds: metadata.durationSeconds,
+        failureCode: null,
+        failureReason: null,
+      },
+    });
+
+    return updated.count > 0;
   }
 
   async confirmDocumentUpload(
@@ -575,6 +652,30 @@ type VideoAssetUpdate =
 // logic that later reads it agree on the same validity rule.
 function isValidDurationSeconds(value: number | null): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * The strict, real-provider-informed readiness check for a Bunny webhook status-4 ("a resolution
+ * finished") event — see `MediaAssetService.tryPromoteResolutionFinishedToReady`'s doc comment for
+ * why status 4 alone is not trustworthy (real-provider QA proved a genuinely, fully-encoded video in
+ * this Bunny library can permanently remain at status 4 and never reach status 3). Every condition
+ * below must hold; any missing/unknown/failing field fails safe — the asset stays PROCESSING, never
+ * promotes. Exported for direct, DB-free unit testing (see media-asset.service.spec.ts).
+ *
+ * Deliberately does NOT require a specific hardcoded set/count of `availableResolutions` — only
+ * non-emptiness — since instructor/library encoding settings can vary; `encodeProgress === 100`
+ * (Bunny's own overall-completion signal, not a per-resolution one) is what actually proves every
+ * targeted resolution is done, not the resolution list's size.
+ */
+export function isResolutionFinishedGenuinelyComplete(metadata: ProviderVideoMetadata): boolean {
+  return (
+    metadata.status === 4 &&
+    metadata.encodeProgress === 100 &&
+    isValidDurationSeconds(metadata.durationSeconds) &&
+    Array.isArray(metadata.availableResolutions) &&
+    metadata.availableResolutions.length > 0 &&
+    metadata.hasFailureIndication !== true
+  );
 }
 
 function mapBunnyStatusToAssetUpdate(event: BunnyStreamWebhookEvent): VideoAssetUpdate {

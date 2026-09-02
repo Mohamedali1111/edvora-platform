@@ -39,12 +39,37 @@ export type VideoPlaybackCapability = {
   expiresAt: Date;
 };
 
-// Authoritative, provider-fetched metadata for an existing video — deliberately minimal (just the
-// one field the READY-webhook hydration path in `MediaAssetService` needs), not a mirror of
-// Bunny's full video object. `durationSeconds` is `null` when Bunny has no usable duration for this
-// video yet (never guessed/invented by the caller — see `MediaAssetService.handleVideoProviderWebhook`).
+// Authoritative, provider-fetched metadata for an existing video — not a mirror of Bunny's full
+// video object, but deliberately extended (see `docs/MEDIA.md`'s status-4 READY-promotion note)
+// beyond just duration: real-provider testing proved that a real, fully-encoded Bunny video can
+// permanently remain at webhook status 4 ("a resolution finished") and never reach status 3
+// ("Finished") — Bunny's status 4 fires the first time as soon as a SINGLE resolution finishes,
+// long before the whole encode is done, so it cannot by itself distinguish "one resolution done"
+// from "genuinely, fully complete". `status`/`encodeProgress`/`availableResolutions`/
+// `hasFailureIndication` exist solely so `MediaAssetService` can authoritatively re-verify a status-4
+// webhook against Bunny's own current Get Video state before ever promoting to READY from it — see
+// `isResolutionFinishedGenuinelyComplete`. None of these fields are exposed through any public
+// (student/instructor) API; this type is internal to the media module only.
 export type ProviderVideoMetadata = {
+  // `null` when Bunny has no usable duration for this video yet (never guessed/invented by the
+  // caller — see `MediaAssetService.handleVideoProviderWebhook`).
   durationSeconds: number | null;
+  // Bunny's current numeric status for this video as of this fetch (same enumeration as
+  // `BunnyStreamWebhookStatus`), or `null` if the provider adapter has no comparable field.
+  status: number | null;
+  // 0-100, or `null` if not exposed/unknown. Reflects overall encode completion across every
+  // resolution Bunny is producing for this video — NOT per-resolution — which is exactly what makes
+  // it a meaningful signal that status 4 means "all resolutions done", not just the first one.
+  encodeProgress: number | null;
+  // Parsed list of resolution labels Bunny currently reports as available (e.g. `["720p", "1080p"]`),
+  // or `null` if not exposed/unknown. Never required to contain a specific hardcoded set/count —
+  // callers only check non-emptiness — since instructor/library encoding settings can vary.
+  availableResolutions: string[] | null;
+  // True only when the provider's own response carries an explicit, non-empty failure/error
+  // indication for this video (e.g. Bunny's `transcodingMessages`). `false`/`null` is "no failure
+  // signal seen", not "provably healthy" — callers still require the positive completion signals
+  // above too, this only ever prevents a promotion, never causes one.
+  hasFailureIndication: boolean | null;
 };
 
 export interface VideoProvider {
