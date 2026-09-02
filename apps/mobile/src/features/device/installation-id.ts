@@ -18,6 +18,12 @@ import { getSecureItem, setSecureItem } from '@/lib/storage/secure-store';
  */
 const INSTALLATION_ID_KEY = 'edvora.mobile.installationId';
 
+// Matches INSTALLATION_ID_HEADER in apps/api/src/modules/devices/types/device.types.ts.
+// Every StudentDeviceGuard-protected route needs this header, not just the
+// device-status endpoints themselves — course/section/lesson content routes are
+// guarded by it too (see apps/api/src/modules/courses/http/student-course.controller.ts).
+const INSTALLATION_ID_HEADER = 'x-edvora-installation-id';
+
 let cachedInstallationId: string | null = null;
 
 export async function getOrCreateInstallationId(): Promise<string> {
@@ -36,4 +42,16 @@ export async function getOrCreateInstallationId(): Promise<string> {
   await setSecureItem(INSTALLATION_ID_KEY, created);
   cachedInstallationId = created;
   return created;
+}
+
+/**
+ * The single shared way to attach the installation-id header. Every
+ * StudentDeviceGuard-protected fetch (device endpoints, course/section/lesson
+ * content endpoints, and any future one) must use this rather than re-deriving
+ * the header name/value per module — see device-client.ts and
+ * features/courses/course-client.ts.
+ */
+export async function buildInstallationHeaders(): Promise<Record<string, string>> {
+  const installationId = await getOrCreateInstallationId();
+  return { [INSTALLATION_ID_HEADER]: installationId };
 }

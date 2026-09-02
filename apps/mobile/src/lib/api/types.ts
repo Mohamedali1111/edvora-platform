@@ -1,3 +1,13 @@
+// Mirrors apps/api/src/infrastructure/http/pagination.ts's OffsetPage<T> exactly —
+// the one standard shape for every bounded offset-paginated list response in this
+// API. No `total` field (the backend deliberately omits it).
+export type OffsetPage<T> = {
+  items: T[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
 export type BackendErrorEnvelope = {
   error: {
     code: string;

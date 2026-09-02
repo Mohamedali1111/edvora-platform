@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { View } from 'react-native';
 import { useAuth } from '@/features/auth/auth-context';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ export function HomeScreen() {
   const { t, locale, setLocale } = useI18n();
   const { preference, setPreference } = useTheme();
   const { user, logout } = useAuth();
+  const router = useRouter();
 
   return (
     <Screen scroll>
@@ -26,7 +28,9 @@ export function HomeScreen() {
         <ThemedText variant="muted">{t('home.subtitle')}</ThemedText>
       </View>
 
-      <StatusPanel title={t('home.comingSoon')} tone="neutral" />
+      <StatusPanel title={t('home.myCourses')} body={t('home.myCoursesSubtitle')}>
+        <Button label={t('home.myCourses')} onPress={() => router.push('/courses')} />
+      </StatusPanel>
 
       <View style={{ marginTop: spacing.xl, gap: spacing.lg }}>
         <ThemedText variant="label">{t('home.settings')}</ThemedText>
