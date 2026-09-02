@@ -36,6 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# test harness build output (see tsconfig.test.json)
+.test-dist/
+
 example
 
 # generated native folders

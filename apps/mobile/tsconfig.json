@@ -16,5 +16,18 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  // The plain-Node test harness (see tsconfig.test.json) is deliberately excluded
+  // from the app's own type-check/bundle scope: those files use Node's ambient
+  // `node:test`/`node:fs` types, which must not leak into the React Native app's
+  // global type space (e.g. Node's `setTimeout`/`Buffer` types would otherwise
+  // collide with RN's). `src/test-runner.ts` itself must be excluded too, not just
+  // `**/*.test.ts` — otherwise, as the one root file that imports every `*.test.ts`
+  // file, it would transitively pull them back into this program regardless of
+  // `exclude` (`exclude` only filters `include`'s root-file globbing, not files
+  // reached via import from a file that IS included).
+  "exclude": [
+    "**/*.test.ts",
+    "src/test-runner.ts"
   ]
 }
