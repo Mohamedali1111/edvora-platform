@@ -12,6 +12,8 @@ import './features/device/device-context.source-guard.test';
 import './features/device/device-status-mapping.test';
 import './features/courses/capability-expiry.test';
 import './features/courses/capture-protection/capture-state.test';
+import './features/courses/completion/completion-error-mapping.test';
+import './features/courses/completion/completion-state.test';
 import './features/courses/content-access-recovery.test';
 import './features/courses/document/document-error-mapping.test';
 import './features/courses/document/document-mime.test';

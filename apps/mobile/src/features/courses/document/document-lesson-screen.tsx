@@ -9,6 +9,8 @@ import { useI18n } from '@/lib/i18n/i18n-context';
 import { useThemeTokens } from '@/lib/theme/theme-context';
 import { radius, spacing } from '@/lib/theme/tokens';
 import { useAsyncData } from '@/lib/use-async-data';
+import { CompletionIndicator } from '../completion/completion-indicator';
+import { useLessonCompletion } from '../completion/use-lesson-completion';
 import { useCaptureProtection } from '../capture-protection/use-capture-protection';
 import { formatFileSize } from '../format';
 import { lessonTypeLabelKey } from '../lesson-type-routing';
@@ -32,9 +34,15 @@ import { useDocumentLifecycle } from './use-document-lifecycle';
 
 /**
  * Replaces only the DOCUMENT placeholder in the lesson-type registry
- * (lesson-type-screens.tsx) — VIDEO and QUIZ are untouched. Never calls the
- * lesson-completion endpoint: opening/viewing a document does not mark it
- * complete in this milestone (progress mutation is a dedicated later slice).
+ * (lesson-type-screens.tsx) — VIDEO and QUIZ are untouched.
+ *
+ * Completion (this milestone): the V1 trigger is the viewer's own `rendered`
+ * message (see document-viewer-protocol.ts / document-viewer-html.ts) — sent
+ * only after pdf.js has finished rendering EVERY page of the document, never
+ * merely on opening the lesson route or before the signed download succeeds.
+ * `useLessonCompletion` owns the request/idempotency/error state; this
+ * component only decides *when* to call `trigger()` and how to render its
+ * result.
  *
  * Unlike VIDEO, Course Detail's `document` metadata carries no
  * `processingStatus` field (see course-types.ts), so there is no client-side
@@ -45,6 +53,14 @@ import { useDocumentLifecycle } from './use-document-lifecycle';
  */
 export function DocumentLessonScreen({ lesson, courseId, onRetry }: LessonTypeScreenProps) {
   const { t } = useI18n();
+  const completion = useLessonCompletion({
+    courseId,
+    lessonId: lesson.lessonId,
+    alreadyCompleted: lesson.progress.status === 'COMPLETED',
+  });
+  // Same immediate-authoritative-feedback reasoning as VideoLessonScreen: the
+  // completion response itself is the backend's own read-back row.
+  const progressStatus = completion.phase === 'saved' ? 'COMPLETED' : lesson.progress.status;
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -53,14 +69,19 @@ export function DocumentLessonScreen({ lesson, courseId, onRetry }: LessonTypeSc
         {lesson.description ? <ThemedText variant="muted">{lesson.description}</ThemedText> : null}
         <View style={{ flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs }}>
           <Badge label={t(lessonTypeLabelKey(lesson.type))} />
-          <Badge
-            label={t(progressLabelKey(lesson.progress.status))}
-            tone={lesson.progress.status === 'COMPLETED' ? 'success' : 'neutral'}
-          />
+          <Badge label={t(progressLabelKey(progressStatus))} tone={progressStatus === 'COMPLETED' ? 'success' : 'neutral'} />
         </View>
       </View>
 
-      <ReadyDocumentBody courseId={courseId} lessonId={lesson.lessonId} title={lesson.title} onLessonRetry={onRetry} />
+      <ReadyDocumentBody
+        courseId={courseId}
+        lessonId={lesson.lessonId}
+        title={lesson.title}
+        onLessonRetry={onRetry}
+        onRendered={completion.trigger}
+      />
+
+      <CompletionIndicator phase={completion.phase} errorKey={completion.errorKey} onRetry={completion.trigger} />
     </View>
   );
 }
@@ -70,11 +91,13 @@ function ReadyDocumentBody({
   lessonId,
   title,
   onLessonRetry,
+  onRendered,
 }: {
   courseId: string;
   lessonId: string;
   title: string;
   onLessonRetry: () => void;
+  onRendered: () => void;
 }) {
   const { t } = useI18n();
   const recoverFromContentError = useContentAccessRecovery();
@@ -114,17 +137,27 @@ function ReadyDocumentBody({
   // different URL) mounts a fresh WebView/viewer rather than attempting an
   // in-place reload — simpler and unambiguous, and refreshes are rare (only
   // on a viewer error or a foreground resume near expiry — never on a timer).
-  return <DocumentViewerSurface key={state.data.downloadUrl} title={title} access={state.data} onNeedsRefresh={state.reload} />;
+  return (
+    <DocumentViewerSurface
+      key={state.data.downloadUrl}
+      title={title}
+      access={state.data}
+      onNeedsRefresh={state.reload}
+      onRendered={onRendered}
+    />
+  );
 }
 
 function DocumentViewerSurface({
   title,
   access,
   onNeedsRefresh,
+  onRendered,
 }: {
   title: string;
   access: DocumentAccessResponse;
   onNeedsRefresh: () => void;
+  onRendered: () => void;
 }) {
   const { t } = useI18n();
   const tokens = useThemeTokens();
@@ -147,8 +180,17 @@ function DocumentViewerSurface({
       }
 
       setViewerState((previous) => reduceDocumentViewerEvent(previous, message));
+
+      // The V1 completion trigger: fires once the viewer confirms every page
+      // has actually rendered — never on 'ready' (viewer JS loaded, nothing
+      // fetched yet) or 'error'. `onRendered` is `useLessonCompletion`'s
+      // `trigger`, itself idempotent/duplicate-safe, so a WebView that somehow
+      // re-emitted 'rendered' would still only ever attempt one completion.
+      if (message.type === 'rendered') {
+        onRendered();
+      }
     },
-    [access.downloadUrl, access.fileName],
+    [access.downloadUrl, access.fileName, onRendered],
   );
 
   const isLoadingViewer = viewerState.phase === 'connecting' || viewerState.phase === 'loadingDocument';

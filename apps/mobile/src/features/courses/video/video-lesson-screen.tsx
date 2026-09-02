@@ -1,4 +1,4 @@
-import { useEvent } from 'expo';
+import { useEvent, useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -10,6 +10,8 @@ import { useI18n } from '@/lib/i18n/i18n-context';
 import { useThemeTokens } from '@/lib/theme/theme-context';
 import { radius, spacing } from '@/lib/theme/tokens';
 import { useAsyncData } from '@/lib/use-async-data';
+import { CompletionIndicator } from '../completion/completion-indicator';
+import { useLessonCompletion } from '../completion/use-lesson-completion';
 import { lessonTypeLabelKey } from '../lesson-type-routing';
 import type { LessonTypeScreenProps } from '../lesson-type-screens';
 import { progressLabelKey } from '../progress-labels';
@@ -23,13 +25,34 @@ import type { VideoAccessResponse } from './video-types';
 
 /**
  * Replaces only the VIDEO placeholder in the lesson-type registry
- * (lesson-type-screens.tsx) — DOCUMENT and QUIZ are untouched. Never calls the
- * lesson-completion endpoint: watching a video does not mark it complete in
- * this milestone (progress mutation is a dedicated later slice).
+ * (lesson-type-screens.tsx) — DOCUMENT and QUIZ are untouched.
+ *
+ * Completion (this milestone): the V1 trigger is the player's own `playToEnd`
+ * event — natural end of playback, never opening the screen, pressing play,
+ * buffering, or partial playback (see VideoPlayerSurface below and the
+ * milestone report's "VIDEO Completion" section for why this was chosen over
+ * a local watch-percentage heuristic: expo-video exposes no watch-time
+ * telemetry the backend can verify, and the frozen backend contract has no
+ * endpoint to record one — `playToEnd` is the one honest, verifiable signal
+ * this player surface actually offers). `useLessonCompletion` owns the
+ * request/idempotency/error state; this component only decides *when* to
+ * call `trigger()` and how to render its result.
  */
 export function VideoLessonScreen({ lesson, courseId, onRetry }: LessonTypeScreenProps) {
   const { t } = useI18n();
   const phase = resolveVideoProcessingPhase(lesson.video?.processingStatus ?? 'ARCHIVED');
+  const completion = useLessonCompletion({
+    courseId,
+    lessonId: lesson.lessonId,
+    alreadyCompleted: lesson.progress.status === 'COMPLETED',
+  });
+  // The completion mutation's own response is authoritative (it's the
+  // backend's row read back after its write — see completion-types.ts), so
+  // it's safe to reflect immediately here without waiting for a fresh Course
+  // Detail fetch; navigating back to Course Detail re-fetches it fresh
+  // regardless (see course-detail-screen.tsx), which is this milestone's
+  // "subsequent navigation must come from backend state" guarantee.
+  const progressStatus = completion.phase === 'saved' ? 'COMPLETED' : lesson.progress.status;
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -38,18 +61,24 @@ export function VideoLessonScreen({ lesson, courseId, onRetry }: LessonTypeScree
         {lesson.description ? <ThemedText variant="muted">{lesson.description}</ThemedText> : null}
         <View style={{ flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs }}>
           <Badge label={t(lessonTypeLabelKey(lesson.type))} />
-          <Badge
-            label={t(progressLabelKey(lesson.progress.status))}
-            tone={lesson.progress.status === 'COMPLETED' ? 'success' : 'neutral'}
-          />
+          <Badge label={t(progressLabelKey(progressStatus))} tone={progressStatus === 'COMPLETED' ? 'success' : 'neutral'} />
         </View>
       </View>
 
       {phase === 'ready' ? (
-        <ReadyVideoBody courseId={courseId} lessonId={lesson.lessonId} title={lesson.title} />
+        <ReadyVideoBody
+          courseId={courseId}
+          lessonId={lesson.lessonId}
+          title={lesson.title}
+          onPlaybackEnded={completion.trigger}
+        />
       ) : (
         <NotReadyBody phase={phase} onRetry={onRetry} />
       )}
+
+      {phase === 'ready' ? (
+        <CompletionIndicator phase={completion.phase} errorKey={completion.errorKey} onRetry={completion.trigger} />
+      ) : null}
     </View>
   );
 }
@@ -80,7 +109,17 @@ function NotReadyBody({ phase, onRetry }: { phase: Exclude<VideoProcessingPhase,
   );
 }
 
-function ReadyVideoBody({ courseId, lessonId, title }: { courseId: string; lessonId: string; title: string }) {
+function ReadyVideoBody({
+  courseId,
+  lessonId,
+  title,
+  onPlaybackEnded,
+}: {
+  courseId: string;
+  lessonId: string;
+  title: string;
+  onPlaybackEnded: () => void;
+}) {
   const { t } = useI18n();
   const recoverFromContentError = useContentAccessRecovery();
 
@@ -111,17 +150,27 @@ function ReadyVideoBody({ courseId, lessonId, title }: { courseId: string; lesso
   // URL) mounts a fresh player/source rather than attempting an in-place
   // `replace()` — simpler and unambiguous, and refreshes are rare (only on a
   // playback error or a foreground resume near expiry — never on a timer).
-  return <VideoPlayerSurface key={state.data.playbackUrl} title={title} access={state.data} onNeedsRefresh={state.reload} />;
+  return (
+    <VideoPlayerSurface
+      key={state.data.playbackUrl}
+      title={title}
+      access={state.data}
+      onNeedsRefresh={state.reload}
+      onPlaybackEnded={onPlaybackEnded}
+    />
+  );
 }
 
 function VideoPlayerSurface({
   title,
   access,
   onNeedsRefresh,
+  onPlaybackEnded,
 }: {
   title: string;
   access: VideoAccessResponse;
   onNeedsRefresh: () => void;
+  onPlaybackEnded: () => void;
 }) {
   const { t } = useI18n();
   const tokens = useThemeTokens();
@@ -142,6 +191,12 @@ function VideoPlayerSurface({
     onCaptureDetected: () => player.pause(),
   });
   useVideoLifecycle({ player, expiresAt: access.expiresAt, onNeedsRefresh });
+  // The V1 completion trigger: fires once per genuine natural-end event the
+  // native player emits — never on open/play/buffer/partial playback. Safe to
+  // wire unconditionally (no "already completed" check here): `onPlaybackEnded`
+  // is `useLessonCompletion`'s `trigger`, which is itself idempotent/duplicate-
+  // safe (see use-lesson-completion.ts).
+  useEventListener(player, 'playToEnd', onPlaybackEnded);
 
   return (
     <View style={{ gap: spacing.sm }}>
