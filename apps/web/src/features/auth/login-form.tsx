@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
 import { getAuthService } from "@/lib/api/session";
@@ -102,6 +103,9 @@ export function LoginForm() {
         {isSubmitting ? t("auth.loading") : t("auth.submit")}
       </button>
 
+      <p className="form-note">
+        {t("auth.activatePrompt")} <Link href="/auth/activate">{t("auth.activateLink")}</Link>
+      </p>
       <p className="form-note">{t("auth.noReset")}</p>
     </form>
   );

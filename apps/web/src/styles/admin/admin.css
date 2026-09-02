@@ -218,6 +218,46 @@
   user-select: all;
 }
 
+/* Part C repair: the activation code's destination, shown as its own block - deliberately
+   neutral (not the warning-toned token box above it) since a route path is not itself a secret,
+   only where the operator must send the instructor. */
+.admin-activation-destination {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-3);
+}
+
+.admin-activation-destination-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-activation-destination-value {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  user-select: all;
+}
+
+/* Extra InstructorActivationState variants (G-02) - `ACTIVATED` intentionally has no rule here:
+   the base `.status-badge` already reads as the positive/neutral state (see components.css),
+   matching how AccountStatus's own ACTIVE value needs no dedicated rule above. */
+.status-badge-pending_activation {
+  background: var(--warning-soft);
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
+}
+
+.status-badge-activation_expired {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 /* ---- Responsive card transform for admin management tables ----
    Same technique as instructor/students.css's own independent copy: below
    the breakpoint each row becomes a bordered card, the first cell reads as

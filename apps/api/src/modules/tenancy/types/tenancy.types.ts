@@ -13,6 +13,17 @@ export type ActivationTokenResult = {
   purpose: AccountActivationPurpose;
 };
 
+/**
+ * Derived, read-time-only Instructor onboarding state — never persisted as its own column.
+ * `ACTIVATED` is authoritative from the existence of a PASSWORD `AuthCredential` (the exact same
+ * fact `AuthOrchestrationService.activateAccount` itself creates when a Instructor completes
+ * activation — see `InstructorOnboardingService`'s derivation). `PENDING_ACTIVATION` and
+ * `ACTIVATION_EXPIRED` distinguish, for an Instructor with no credential yet, whether the most
+ * recently issued `INSTRUCTOR_ACTIVATION` token is still usable or has passed its TTL — purely
+ * informational for the Admin UI; both states are equally eligible for reissue.
+ */
+export type InstructorActivationState = 'PENDING_ACTIVATION' | 'ACTIVATED' | 'ACTIVATION_EXPIRED';
+
 export type InstructorSummary = {
   userId: string;
   email: string;
@@ -23,6 +34,9 @@ export type InstructorSummary = {
   tenantSlug: string;
   membershipRole: TenantMembershipRole;
   createdAt: Date;
+  activationState: InstructorActivationState;
+  /** The currently outstanding activation token's expiry, only when `activationState` is `PENDING_ACTIVATION`; `null` otherwise. */
+  activationExpiresAt: Date | null;
 };
 
 export type CreatedInstructorResult = InstructorSummary & {

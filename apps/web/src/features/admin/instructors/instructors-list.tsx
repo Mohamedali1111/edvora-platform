@@ -7,6 +7,7 @@ import type { CreatedInstructorResult } from "@/lib/api/types";
 import { AdminNavIcon } from "../nav-icons";
 import { formatDate } from "../format";
 import { canGoNext, canGoPrevious, nextOffset, previousOffset } from "../pagination";
+import { INSTRUCTOR_ACTIVATION_STATE_KEY } from "./activation";
 import { CreateInstructorDialog } from "./create-instructor-dialog";
 import { INSTRUCTORS_PAGE_SIZE, useInstructorsList } from "./instructors-service";
 import { isNetworkError } from "./error-mapping";
@@ -77,6 +78,7 @@ export function InstructorsList() {
                   <th scope="col">{t("admin.instructors.columnInstructor")}</th>
                   <th scope="col">{t("admin.instructors.columnTenant")}</th>
                   <th scope="col">{t("admin.instructors.columnStatus")}</th>
+                  <th scope="col">{t("admin.instructors.columnActivation")}</th>
                   <th scope="col" className="table-col-secondary">
                     {t("admin.instructors.columnCreatedAt")}
                   </th>
@@ -98,6 +100,11 @@ export function InstructorsList() {
                       <td data-label={t("admin.instructors.columnStatus")}>
                         <span className={`status-badge status-badge-${instructor.accountStatus.toLowerCase()}`}>
                           {instructor.accountStatus}
+                        </span>
+                      </td>
+                      <td data-label={t("admin.instructors.columnActivation")}>
+                        <span className={`status-badge status-badge-${instructor.activationState.toLowerCase()}`}>
+                          {t(INSTRUCTOR_ACTIVATION_STATE_KEY[instructor.activationState])}
                         </span>
                       </td>
                       <td className="table-col-secondary" data-label={t("admin.instructors.columnCreatedAt")}>

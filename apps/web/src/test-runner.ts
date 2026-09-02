@@ -41,3 +41,8 @@ import "./features/instructor/notifications/format.test";
 import "./features/instructor/notifications/error-mapping.test";
 import "./features/instructor/notifications/notifications-service.test";
 import "./features/admin/instructors/validation.test";
+import "./features/admin/instructors/activation.test";
+import "./features/admin/instructors/instructors-service.test";
+import "./features/auth/validation.test";
+import "./features/auth/error-mapping.test";
+import "./features/auth/activate-client.test";

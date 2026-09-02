@@ -17,6 +17,7 @@ const KNOWN_ERROR_CODE_KEYS: Partial<Record<string, TranslationKey>> = {
   INSTRUCTOR_ALREADY_EXISTS: "admin.instructors.errorAlreadyExists",
   TENANT_SLUG_ALREADY_EXISTS: "admin.instructors.errorSlugExists",
   INSTRUCTOR_NOT_FOUND: "admin.instructors.detailNotFound",
+  INSTRUCTOR_ALREADY_ACTIVATED: "admin.instructors.reissueErrorAlreadyActivated",
   PLATFORM_ADMIN_REQUIRED: "admin.instructors.errorForbidden",
   VALIDATION_FAILED: "admin.instructors.errorValidation",
 };

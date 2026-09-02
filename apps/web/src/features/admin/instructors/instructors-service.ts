@@ -2,8 +2,19 @@
 
 import { useEffect, useState } from "react";
 import type { ApiClient } from "@/lib/api/client";
-import { getAuthService } from "@/lib/api/session";
-import type { CreateInstructorRequest, CreatedInstructorResult, InstructorSummary, OffsetPage } from "@/lib/api/types";
+// Relative, not "@/..." - matches every other feature area's *-service.ts (e.g.
+// features/instructor/courses/courses-service.ts), and unlike the type-only imports above/below,
+// this one has a real runtime require() the plain-Node test harness must resolve without a path-
+// alias loader (see src/test-runner.ts / tsconfig.test.json) - "@/" only ever worked here by
+// accident, because no test previously exercised this file at all.
+import { getAuthService } from "../../../lib/api/session";
+import type {
+  ActivationTokenResult,
+  CreateInstructorRequest,
+  CreatedInstructorResult,
+  InstructorSummary,
+  OffsetPage,
+} from "@/lib/api/types";
 
 /** Bounded page size - the frozen `/admin/instructors` list is only ever fetched one page at a time. */
 export const INSTRUCTORS_PAGE_SIZE = 20;
@@ -38,6 +49,20 @@ export function createInstructor(api: ApiClient, body: CreateInstructorRequest):
   return api.request<CreatedInstructorResult>("/admin/instructors", {
     method: "POST",
     body,
+  });
+}
+
+/**
+ * POST /admin/instructors/:instructorId/activation (G-02 repair) - issues a fresh one-time
+ * `INSTRUCTOR_ACTIVATION` token for an instructor who has not yet completed activation, and
+ * invalidates any still-outstanding prior token (backend-enforced, see
+ * `AccountActivationTokenService`). The frontend must never log or persist
+ * `rawToken` beyond the one-time handoff dialog it drives - see
+ * ReissueActivationDialog and CreateInstructorDialog's identical warning.
+ */
+export function reissueInstructorActivation(api: ApiClient, instructorId: string): Promise<ActivationTokenResult> {
+  return api.request<ActivationTokenResult>(`/admin/instructors/${instructorId}/activation`, {
+    method: "POST",
   });
 }
 

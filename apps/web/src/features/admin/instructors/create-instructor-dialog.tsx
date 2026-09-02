@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/i18n";
 import type { CreatedInstructorResult } from "@/lib/api/types";
 import { Modal } from "../dialog";
 import { formatDateTime } from "../format";
+import { ActivationDestination } from "./activation-destination";
 import { createInstructor } from "./instructors-service";
 import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { normalizeTenantSlug, validateCreateInstructorInput, type CreateInstructorValidationErrors } from "./validation";
@@ -134,6 +135,8 @@ export function CreateInstructorDialog({
           <p className="form-note">
             {t("admin.instructors.activationExpiresLabel")}: {formatDateTime(result.activation.expiresAt)}
           </p>
+
+          <ActivationDestination />
 
           <div className="form-error" role="alert">
             {t("admin.instructors.activationOnceWarning")}

@@ -461,6 +461,21 @@ export type ActivationTokenResult = {
 };
 
 /**
+ * Body for POST /auth/activate (G-01 repair). The exact same public, unauthenticated contract
+ * Student Mobile already calls for `STUDENT_ACTIVATION`
+ * (apps/mobile/src/features/auth/auth-client.ts's `activateAccount`) - Instructor Web uses the
+ * other purpose value, the request/response shape is otherwise identical. A 204 response means
+ * activation succeeded; the backend never returns a session for this call (see
+ * AuthOrchestrationService.activateAccount), so the client must send the instructor to
+ * `/auth/login` rather than inventing an auto-login.
+ */
+export type ActivateAccountRequest = {
+  activationToken: string;
+  purpose: AccountActivationPurpose;
+  newPassword: string;
+};
+
+/**
  * Response for POST /instructor/tenants/:tenantId/students. `activation` is
  * only non-null when the backend had to create a brand-new account (no
  * existing password credential) - re-adding an already-associated student is
@@ -603,6 +618,15 @@ export type ReviewDeviceChangeRequest = {
  * accounts and no endpoint anywhere changes it, but the frontend must not
  * assume `ACTIVE` is the only value it could ever see.
  */
+/**
+ * Derived, read-only Instructor onboarding state (see
+ * apps/api/.../tenancy/services/instructor-onboarding.service.ts's
+ * `deriveInstructorActivationState`). `PENDING_ACTIVATION` and `ACTIVATION_EXPIRED` are equally
+ * eligible for reissue - the distinction is informational only (see
+ * features/admin/instructors/activation.ts's `canReissueActivation`).
+ */
+export type InstructorActivationState = "PENDING_ACTIVATION" | "ACTIVATED" | "ACTIVATION_EXPIRED";
+
 export type InstructorSummary = {
   userId: string;
   email: string;
@@ -613,6 +637,9 @@ export type InstructorSummary = {
   tenantSlug: string;
   membershipRole: TenantMembershipRole;
   createdAt: string;
+  activationState: InstructorActivationState;
+  /** The currently outstanding activation token's expiry, only when `activationState` is `PENDING_ACTIVATION`; `null` otherwise. */
+  activationExpiresAt: string | null;
 };
 
 /**

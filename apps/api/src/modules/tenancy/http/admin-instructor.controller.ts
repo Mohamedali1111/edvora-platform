@@ -10,7 +10,7 @@ import { CreateInstructorDto } from '../dto/create-instructor.dto';
 import { InstructorIdParamDto } from '../dto/uuid-param.dto';
 import { PaginationQueryDto } from '../dto/pagination-query.dto';
 import { InstructorOnboardingService } from '../services/instructor-onboarding.service';
-import type { CreatedInstructorResult, InstructorSummary } from '../types/tenancy.types';
+import type { ActivationTokenResult, CreatedInstructorResult, InstructorSummary } from '../types/tenancy.types';
 
 type InstructorListResponse = OffsetPage<InstructorSummary>;
 
@@ -63,5 +63,23 @@ export class AdminInstructorController {
     @Param() params: InstructorIdParamDto,
   ): Promise<InstructorSummary> {
     return this.instructors.getInstructorDetails(principal, params.instructorId);
+  }
+
+  /**
+   * G-02 repair: issues a fresh one-time `INSTRUCTOR_ACTIVATION` token for an Instructor who has
+   * not yet completed activation — the Admin-facing recovery path for a lost or expired code.
+   * `AccessTokenGuard` (class-level, above) already restricts this to an authenticated principal;
+   * `InstructorOnboardingService.reissueActivation` re-asserts PLATFORM_ADMIN server-side inside
+   * its own transaction, exactly like every other route on this controller.
+   */
+  @Post(':instructorId/activation')
+  @HttpCode(HttpStatus.CREATED)
+  async reissueActivation(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: InstructorIdParamDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<ActivationTokenResult> {
+    setNoStore(response);
+    return this.instructors.reissueActivation(principal, params.instructorId);
   }
 }

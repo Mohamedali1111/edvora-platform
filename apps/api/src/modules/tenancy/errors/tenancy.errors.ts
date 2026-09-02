@@ -6,6 +6,7 @@ export type TenancyErrorCode =
   | 'IDENTITY_ROLE_CONFLICT'
   | 'INSTRUCTOR_ALREADY_EXISTS'
   | 'INSTRUCTOR_NOT_FOUND'
+  | 'INSTRUCTOR_ALREADY_ACTIVATED'
   | 'TENANT_SLUG_ALREADY_EXISTS'
   | 'TENANT_STUDENT_NOT_FOUND'
   | 'ENROLLMENT_NOT_FOUND'
@@ -62,6 +63,16 @@ export class InstructorAlreadyExistsError extends TenancyError {
 export class InstructorNotFoundError extends TenancyError {
   constructor() {
     super('INSTRUCTOR_NOT_FOUND', 'Instructor was not found.');
+  }
+}
+
+// Reissue only ever targets an Instructor who has not yet established a password credential
+// (see InstructorOnboardingService.reissueActivation) — an already-activated Instructor's
+// account is a settled, working credential and must never be disturbed by an Admin action that
+// exists purely to unblock onboarding.
+export class InstructorAlreadyActivatedError extends TenancyError {
+  constructor() {
+    super('INSTRUCTOR_ALREADY_ACTIVATED', 'Instructor has already completed activation.');
   }
 }
 
