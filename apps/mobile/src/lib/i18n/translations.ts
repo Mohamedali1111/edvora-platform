@@ -112,6 +112,20 @@ const en = {
   'courses.lesson.notFoundTitle': "This lesson isn't available",
   'courses.lesson.notFoundBody': 'It may have been moved, unpublished, or is outside its available time window.',
   'courses.lesson.backToCourse': 'Back to course',
+
+  'video.loading': 'Loading video…',
+  'video.buffering': 'Buffering…',
+  'video.playbackError': "Playback couldn't continue. Try again.",
+  'video.processingTitle': 'Video is still processing',
+  'video.processingBody': 'Your academy is still preparing this video. Check back soon.',
+  'video.failedTitle': 'Video processing failed',
+  'video.failedBody': "This video couldn't be processed. Contact your academy if this continues.",
+  'video.error.notAvailable': "This video isn't available.",
+  'video.error.signingFailed': "We couldn't start this video. Try again.",
+  'video.error.network': 'Edvora is unreachable. Check your connection and try again.',
+  'video.error.generic': 'Something went wrong. Try again.',
+  'video.captureNotice': 'Screen recording and screenshots are not allowed while viewing protected course videos.',
+  'video.captureWarning': 'Screenshot detected. Playback has been paused — screen recording and screenshots are not allowed for protected videos.',
 } as const;
 
 const ar: Record<keyof typeof en, string> = {
@@ -220,6 +234,20 @@ const ar: Record<keyof typeof en, string> = {
   'courses.lesson.notFoundTitle': 'هذا الدرس غير متاح',
   'courses.lesson.notFoundBody': 'ربما تم نقله أو إلغاء نشره، أو أنه خارج نافذة إتاحته الزمنية.',
   'courses.lesson.backToCourse': 'العودة إلى الدورة',
+
+  'video.loading': 'جارٍ تحميل الفيديو…',
+  'video.buffering': 'جارٍ التخزين المؤقت…',
+  'video.playbackError': 'تعذّرت متابعة التشغيل. حاول مرة أخرى.',
+  'video.processingTitle': 'الفيديو لا يزال قيد المعالجة',
+  'video.processingBody': 'أكاديميتك لا تزال تُجهّز هذا الفيديو. تحقق مرة أخرى قريبًا.',
+  'video.failedTitle': 'فشلت معالجة الفيديو',
+  'video.failedBody': 'تعذّرت معالجة هذا الفيديو. تواصل مع أكاديميتك إذا استمرت المشكلة.',
+  'video.error.notAvailable': 'هذا الفيديو غير متاح.',
+  'video.error.signingFailed': 'تعذّر بدء تشغيل هذا الفيديو. حاول مرة أخرى.',
+  'video.error.network': 'تعذّر الوصول إلى إدفورا. تحقق من اتصالك وحاول مرة أخرى.',
+  'video.error.generic': 'حدث خطأ ما. حاول مرة أخرى.',
+  'video.captureNotice': 'تسجيل الشاشة ولقطات الشاشة غير مسموح بها أثناء مشاهدة فيديوهات الدورة المحمية.',
+  'video.captureWarning': 'تم رصد لقطة شاشة. تم إيقاف التشغيل مؤقتًا — تسجيل الشاشة ولقطات الشاشة غير مسموح بها للفيديوهات المحمية.',
 };
 
 export const translations: Record<Locale, Record<keyof typeof en, string>> = { en, ar };

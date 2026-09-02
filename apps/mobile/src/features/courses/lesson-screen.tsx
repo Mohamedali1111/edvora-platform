@@ -75,7 +75,7 @@ export function LessonScreen() {
           `<Capitalized ... />` tag built from a variable reads to the lint rule as
           if a new component were being defined during render. Calling it directly
           produces the exact same React element with no such ambiguity. */}
-      {resolveLessonTypeScreen(lesson.type)({ lesson })}
+      {resolveLessonTypeScreen(lesson.type)({ lesson, courseId, onRetry: state.reload })}
     </Screen>
   );
 }

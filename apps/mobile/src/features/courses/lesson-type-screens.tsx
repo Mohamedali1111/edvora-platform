@@ -1,8 +1,20 @@
 import type { ReactElement } from 'react';
 import { LessonPlaceholder } from './components/lesson-placeholder';
 import type { LessonType, StudentLessonSummary } from './course-types';
+import { VideoLessonScreen as RealVideoLessonScreen } from './video/video-lesson-screen';
 
-export type LessonTypeScreenProps = { lesson: StudentLessonSummary };
+export type LessonTypeScreenProps = {
+  lesson: StudentLessonSummary;
+  /** Needed by VIDEO to call /student/courses/:courseId/lessons/:lessonId/video/access. */
+  courseId: string;
+  /**
+   * Re-fetches this lesson's data from Course Detail (the same call
+   * lesson-screen.tsx already made to resolve this lesson) — the legitimate
+   * "check again" action for a lesson-level state that can only change via a
+   * fresh Course Detail read, e.g. VIDEO's `processingStatus` becoming READY.
+   */
+  onRetry: () => void;
+};
 // A plain function returning a concrete ReactElement (not React's broader `FC`,
 // whose return type also permits `Promise<ReactNode>` for async components) —
 // lesson-screen.tsx invokes this directly as a function rather than as a JSX
@@ -10,19 +22,16 @@ export type LessonTypeScreenProps = { lesson: StudentLessonSummary };
 export type LessonTypeScreen = (props: LessonTypeScreenProps) => ReactElement;
 
 /**
- * One real screen per Lesson type — this milestone's foundation for the later
- * slices that replace each of these with an actual player/viewer:
- *  - VIDEO  -> a future Video Lesson screen (Bunny Stream playback + the screen-
- *              capture protection architecture already documented in the auth
- *              milestone's report, neither implemented here)
- *  - DOCUMENT -> a future Document Lesson screen (R2 document viewer)
- *  - QUIZ   -> a future Quiz Lesson screen (attempt flow)
- * All three currently render the same honest "not implemented yet" placeholder
- * body (LessonPlaceholder) — kept as separate named components/registry entries
- * rather than one shared conditional so a later slice can replace exactly one
- * entry without touching the others or this dispatch itself.
+ * One real screen per Lesson type:
+ *  - VIDEO    -> real Bunny Stream HLS playback + screen-capture mitigation
+ *                (see features/courses/video/) — implemented this milestone.
+ *  - DOCUMENT -> still the placeholder (a future R2 document viewer slice).
+ *  - QUIZ     -> still the placeholder (a future attempt-flow slice).
+ * Kept as separate named components/registry entries rather than one shared
+ * conditional so a later slice replaces exactly one entry without touching the
+ * others or this dispatch itself.
  */
-export const VideoLessonScreen: LessonTypeScreen = ({ lesson }) => <LessonPlaceholder lesson={lesson} />;
+export const VideoLessonScreen: LessonTypeScreen = (props) => <RealVideoLessonScreen {...props} />;
 export const DocumentLessonScreen: LessonTypeScreen = ({ lesson }) => <LessonPlaceholder lesson={lesson} />;
 export const QuizLessonScreen: LessonTypeScreen = ({ lesson }) => <LessonPlaceholder lesson={lesson} />;
 
