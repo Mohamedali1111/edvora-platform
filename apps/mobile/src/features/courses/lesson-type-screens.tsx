@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
-import { LessonPlaceholder } from './components/lesson-placeholder';
 import type { LessonType, StudentLessonSummary } from './course-types';
 import { DocumentLessonScreen as RealDocumentLessonScreen } from './document/document-lesson-screen';
+import { QuizLessonScreen as RealQuizLessonScreen } from './quiz/quiz-lesson-screen';
 import { VideoLessonScreen as RealVideoLessonScreen } from './video/video-lesson-screen';
 
 export type LessonTypeScreenProps = {
@@ -27,15 +27,16 @@ export type LessonTypeScreen = (props: LessonTypeScreenProps) => ReactElement;
  *  - VIDEO    -> real Bunny Stream HLS playback + screen-capture mitigation
  *                (see features/courses/video/).
  *  - DOCUMENT -> real protected R2 PDF viewing + screen-capture mitigation
- *                (see features/courses/document/) — implemented this milestone.
- *  - QUIZ     -> still the placeholder (a future attempt-flow slice).
+ *                (see features/courses/document/).
+ *  - QUIZ     -> real quiz attempt/answer/submit flow (see features/courses/quiz/)
+ *                — implemented this milestone.
  * Kept as separate named components/registry entries rather than one shared
  * conditional so a later slice replaces exactly one entry without touching the
  * others or this dispatch itself.
  */
 export const VideoLessonScreen: LessonTypeScreen = (props) => <RealVideoLessonScreen {...props} />;
 export const DocumentLessonScreen: LessonTypeScreen = (props) => <RealDocumentLessonScreen {...props} />;
-export const QuizLessonScreen: LessonTypeScreen = ({ lesson }) => <LessonPlaceholder lesson={lesson} />;
+export const QuizLessonScreen: LessonTypeScreen = (props) => <RealQuizLessonScreen {...props} />;
 
 const LESSON_TYPE_SCREENS: Record<LessonType, LessonTypeScreen> = {
   VIDEO: VideoLessonScreen,

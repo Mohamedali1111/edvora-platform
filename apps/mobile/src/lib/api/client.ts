@@ -2,7 +2,7 @@ import { resolveApiBaseUrl } from './base-url';
 import { ApiError } from './errors';
 import { isBackendErrorEnvelope } from './types';
 
-type RequestMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 type RequestOptions = {
   method?: RequestMethod;
