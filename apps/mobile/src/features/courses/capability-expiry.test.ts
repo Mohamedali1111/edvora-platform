@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isCapabilityExpired, needsRefreshOnForegroundResume } from './playback-expiry';
+import { isCapabilityExpired, needsRefreshOnForegroundResume } from './capability-expiry';
 
 test('isCapabilityExpired is false before expiry and true at/after it', () => {
   const expiresAt = '2026-01-01T00:10:00.000Z';

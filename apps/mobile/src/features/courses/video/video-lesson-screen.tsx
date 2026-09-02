@@ -14,8 +14,8 @@ import { lessonTypeLabelKey } from '../lesson-type-routing';
 import type { LessonTypeScreenProps } from '../lesson-type-screens';
 import { progressLabelKey } from '../progress-labels';
 import { useContentAccessRecovery } from '../use-content-access-recovery';
+import { useCaptureProtection } from '../capture-protection/use-capture-protection';
 import { resolveVideoProcessingPhase, type VideoProcessingPhase } from './processing-phase';
-import { useCaptureProtection } from './use-capture-protection';
 import { useVideoLifecycle } from './use-video-lifecycle';
 import { fetchVideoAccess } from './video-client';
 import { mapVideoAccessError } from './video-error-mapping';
@@ -137,7 +137,10 @@ function VideoPlayerSurface({
   });
 
   const { status, error } = useEvent(player, 'statusChange', { status: player.status });
-  const { warningVisible } = useCaptureProtection({ onCaptureDetected: () => player.pause() });
+  const { warningVisible } = useCaptureProtection({
+    protectionKey: 'edvora.video-lesson',
+    onCaptureDetected: () => player.pause(),
+  });
   useVideoLifecycle({ player, expiresAt: access.expiresAt, onNeedsRefresh });
 
   return (

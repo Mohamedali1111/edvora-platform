@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import type { VideoPlayer } from 'expo-video';
-import { needsRefreshOnForegroundResume } from './playback-expiry';
-import { shouldPauseForAppState } from './capture-state';
+import { needsRefreshOnForegroundResume } from '../capability-expiry';
+import { shouldPauseForAppState } from '../capture-protection/capture-state';
 
 /**
  * Video-screen-scoped app-lifecycle handling (§7/§8 of the milestone spec) —

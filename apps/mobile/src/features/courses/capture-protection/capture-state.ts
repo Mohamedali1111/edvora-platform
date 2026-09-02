@@ -1,7 +1,9 @@
-// Pure decisions for the Video Lesson screen's capture-protection and lifecycle
-// UI state — no React, no RN, no expo-screen-capture import, so these compose
-// correctly under the plain-Node test harness. See use-capture-protection.ts and
-// use-video-access.ts for the hooks that drive real events into these functions.
+// Pure decisions for a protected-content screen's capture-protection and
+// lifecycle UI state — no React, no RN, no expo-screen-capture import, so
+// these compose correctly under the plain-Node test harness. Shared by the
+// Video and Document lesson screens (see use-capture-protection.ts for the
+// hook that drives real events into these functions) — genuinely
+// content-type-agnostic: nothing here is specific to playback or rendering.
 
 export type CaptureWarningState = { visible: boolean; sinceMs: number | null };
 
@@ -26,10 +28,11 @@ export function shouldDismissCaptureWarning(state: CaptureWarningState, nowMs: n
 }
 
 /**
- * Whether protected playback should be paused for this AppState transition.
- * Anything other than 'active' (background, inactive, and any future RN
- * AppState value) pauses — fail safe: an unrecognized state is treated as "not
- * safely foregrounded" rather than assumed to still be visible.
+ * Whether protected content should be paused/hidden for this AppState
+ * transition. Anything other than 'active' (background, inactive, and any
+ * future RN AppState value) pauses — fail safe: an unrecognized state is
+ * treated as "not safely foregrounded" rather than assumed to still be
+ * visible.
  */
 export function shouldPauseForAppState(nextAppState: string): boolean {
   return nextAppState !== 'active';

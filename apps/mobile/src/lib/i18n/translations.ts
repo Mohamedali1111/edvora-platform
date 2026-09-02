@@ -126,6 +126,17 @@ const en = {
   'video.error.generic': 'Something went wrong. Try again.',
   'video.captureNotice': 'Screen recording and screenshots are not allowed while viewing protected course videos.',
   'video.captureWarning': 'Screenshot detected. Playback has been paused — screen recording and screenshots are not allowed for protected videos.',
+
+  'document.loading': 'Loading document…',
+  'document.viewerLoading': 'Opening document…',
+  'document.viewerError': "This document couldn't be displayed. Try again.",
+  'document.error.notAvailable': "This document isn't available.",
+  'document.error.signingFailed': "We couldn't open this document. Try again.",
+  'document.error.unsupportedMime': "This document type isn't supported.",
+  'document.error.network': 'Edvora is unreachable. Check your connection and try again.',
+  'document.error.generic': 'Something went wrong. Try again.',
+  'document.captureNotice': 'Screen recording and screenshots are not allowed while viewing protected course documents.',
+  'document.captureWarning': 'Screenshot detected — screen recording and screenshots are not allowed for protected documents.',
 } as const;
 
 const ar: Record<keyof typeof en, string> = {
@@ -248,6 +259,17 @@ const ar: Record<keyof typeof en, string> = {
   'video.error.generic': 'حدث خطأ ما. حاول مرة أخرى.',
   'video.captureNotice': 'تسجيل الشاشة ولقطات الشاشة غير مسموح بها أثناء مشاهدة فيديوهات الدورة المحمية.',
   'video.captureWarning': 'تم رصد لقطة شاشة. تم إيقاف التشغيل مؤقتًا — تسجيل الشاشة ولقطات الشاشة غير مسموح بها للفيديوهات المحمية.',
+
+  'document.loading': 'جارٍ تحميل المستند…',
+  'document.viewerLoading': 'جارٍ فتح المستند…',
+  'document.viewerError': 'تعذّر عرض هذا المستند. حاول مرة أخرى.',
+  'document.error.notAvailable': 'هذا المستند غير متاح.',
+  'document.error.signingFailed': 'تعذّر فتح هذا المستند. حاول مرة أخرى.',
+  'document.error.unsupportedMime': 'نوع هذا المستند غير مدعوم.',
+  'document.error.network': 'تعذّر الوصول إلى إدفورا. تحقق من اتصالك وحاول مرة أخرى.',
+  'document.error.generic': 'حدث خطأ ما. حاول مرة أخرى.',
+  'document.captureNotice': 'تسجيل الشاشة ولقطات الشاشة غير مسموح بها أثناء عرض مستندات الدورة المحمية.',
+  'document.captureWarning': 'تم رصد لقطة شاشة — تسجيل الشاشة ولقطات الشاشة غير مسموح بها للمستندات المحمية.',
 };
 
 export const translations: Record<Locale, Record<keyof typeof en, string>> = { en, ar };
