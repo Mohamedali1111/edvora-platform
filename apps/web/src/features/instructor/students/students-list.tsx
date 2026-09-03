@@ -71,7 +71,12 @@ export function StudentsList() {
           <span className="empty-state-icon" aria-hidden="true">
             <NavIcon section="students" />
           </span>
-          <p>{t("students.empty")}</p>
+          <div className="empty-state-body">
+            <p>{t("students.empty")}</p>
+            <button className="secondary-button compact-action" type="button" onClick={() => setAddOpen(true)}>
+              {t("students.addAction")}
+            </button>
+          </div>
         </div>
       ) : (
         <>

@@ -72,6 +72,12 @@
   font-size: var(--fs-secondary);
 }
 
+.empty-state-body {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
 .empty-state-compact {
   padding-block: var(--space-1);
 }

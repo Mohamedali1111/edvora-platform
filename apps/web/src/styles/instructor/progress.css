@@ -90,6 +90,91 @@
   color: var(--accent-strong);
 }
 
+@media (max-width: 760px) {
+  .progress-table thead,
+  .progress-results-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    margin: -1px;
+    border: 0;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .progress-table,
+  .progress-table tbody,
+  .progress-table tr,
+  .progress-table td,
+  .progress-results-table,
+  .progress-results-table tbody,
+  .progress-results-table tr,
+  .progress-results-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-scroll:has(.progress-table),
+  .table-scroll:has(.progress-results-table) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow-x: visible;
+  }
+
+  .progress-table tr,
+  .progress-results-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    padding: var(--space-3);
+    margin-block-end: var(--space-3);
+  }
+
+  .progress-table tr:last-child,
+  .progress-results-table tr:last-child {
+    margin-block-end: 0;
+  }
+
+  .progress-table td,
+  .progress-results-table td {
+    border: 0 !important;
+    padding: 0.35rem 0 !important;
+  }
+
+  .progress-table .table-col-secondary,
+  .progress-results-table .table-col-secondary {
+    display: block !important;
+  }
+
+  .progress-table td:first-child,
+  .progress-results-table td:first-child {
+    padding-block-start: 0 !important;
+    font-size: var(--fs-secondary);
+  }
+
+  .progress-table td:nth-child(2),
+  .progress-results-table td:nth-child(2) {
+    padding-block-end: 0.6rem !important;
+    border-block-end: 1px solid var(--border) !important;
+    margin-block-end: 0.35rem;
+  }
+
+  .progress-table td[data-label]::before,
+  .progress-results-table td[data-label]::before {
+    display: block;
+    margin-block-end: 0.15rem;
+    color: var(--muted);
+    font-size: var(--fs-metadata);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    content: attr(data-label);
+  }
+}
+
 @media (max-width: 620px) {
   .progress-filter-row {
     flex-direction: column;

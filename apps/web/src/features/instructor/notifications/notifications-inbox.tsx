@@ -80,7 +80,12 @@ export function NotificationsInbox() {
           </button>
         </div>
       ) : state.data.items.length === 0 ? (
-        <p className="overview-empty">{t("notifications.empty")}</p>
+        <div className="empty-state empty-state-compact">
+          <span className="empty-state-icon" aria-hidden="true">
+            <NotificationMiniIcon />
+          </span>
+          <p>{t("notifications.empty")}</p>
+        </div>
       ) : (
         <>
           <ul className="notifications-list">
@@ -140,6 +145,15 @@ export function NotificationsInbox() {
         </>
       )}
     </div>
+  );
+}
+
+function NotificationMiniIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8.1a4 4 0 0 1 8 0c0 3.65 1.15 4.75 1.15 4.75H4.85S6 11.75 6 8.1Z" />
+      <path d="M8.35 15.6a1.75 1.75 0 0 0 3.3 0" />
+    </svg>
   );
 }
 

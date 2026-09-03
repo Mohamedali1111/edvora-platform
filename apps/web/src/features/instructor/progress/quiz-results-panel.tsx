@@ -10,6 +10,7 @@ import { EntityPicker } from "./entity-picker";
 import { isNetworkError } from "./error-mapping";
 import { formatAttemptPercentage, formatAttemptScore, formatDateTime, presentPassFail } from "./format";
 import { ENTITY_PICKER_PAGE_SIZE, QUIZ_RESULTS_PAGE_SIZE, useQuizAttempts, useQuizPicker, useStudentPicker } from "./progress-service";
+import { resolveProgressEmptyMessage } from "./progress-view-model";
 
 const QUIZ_STATUS_KEY: Record<QuizStatus, TranslationKey> = {
   DRAFT: "status.quizDraft",
@@ -127,7 +128,12 @@ export function QuizResultsPanel() {
       </div>
 
       {!selectedQuiz ? (
-        <p className="overview-empty">{t("progress.noQuizSelected")}</p>
+        <div className="empty-state empty-state-compact">
+          <span className="empty-state-icon" aria-hidden="true">
+            <ResultsMiniIcon />
+          </span>
+          <p>{t(resolveProgressEmptyMessage("noQuiz"))}</p>
+        </div>
       ) : (
         <>
           <div className="progress-filter-row">
@@ -197,11 +203,16 @@ export function QuizResultsPanel() {
               </button>
             </div>
           ) : state.data.items.length === 0 ? (
-            <p className="overview-empty">{t("progress.resultsEmpty")}</p>
+            <div className="empty-state empty-state-compact">
+              <span className="empty-state-icon" aria-hidden="true">
+                <ResultsMiniIcon />
+              </span>
+              <p>{t(resolveProgressEmptyMessage(passFilter === "ALL" && !selectedStudent ? "quizAttempts" : "quizAttemptsFiltered"))}</p>
+            </div>
           ) : (
             <>
               <div className="table-scroll">
-                <table className="data-table">
+                <table className="data-table progress-results-table">
                   <caption className="sr-only">{t("progress.tabResults")}</caption>
                   <thead>
                     <tr>
@@ -232,16 +243,22 @@ export function QuizResultsPanel() {
                           <td>
                             <span className={`status-badge status-badge-attempt-${attempt.status.toLowerCase().replace(/_/g, "-")}`}>{t(ATTEMPT_STATUS_KEY[attempt.status])}</span>
                           </td>
-                          <td>
+                          <td data-label={t("progress.columnScore")}>
                             <span>{formatAttemptScore(attempt.scorePoints, attempt.maxPoints, t("progress.notGraded"))}</span>
                             <span className="table-secondary-text">{formatAttemptPercentage(attempt.percentage, t("progress.notGraded"))}</span>
                           </td>
-                          <td>
+                          <td data-label={t("progress.columnResult")}>
                             <span className={`status-badge ${result.className}`}>{t(result.labelKey)}</span>
                           </td>
-                          <td className="table-col-secondary">{attempt.attemptNumber}</td>
-                          <td className="table-col-secondary">{formatDateTime(attempt.startedAt, "")}</td>
-                          <td className="table-col-secondary">{formatDateTime(attempt.submittedAt, t("progress.notSubmitted"))}</td>
+                          <td className="table-col-secondary" data-label={t("progress.columnAttemptNumber")}>
+                            {attempt.attemptNumber}
+                          </td>
+                          <td className="table-col-secondary" data-label={t("progress.columnStarted")}>
+                            {formatDateTime(attempt.startedAt, "")}
+                          </td>
+                          <td className="table-col-secondary" data-label={t("progress.columnSubmitted")}>
+                            {formatDateTime(attempt.submittedAt, t("progress.notSubmitted"))}
+                          </td>
                         </tr>
                       );
                     })}
@@ -262,5 +279,15 @@ export function QuizResultsPanel() {
         </>
       )}
     </div>
+  );
+}
+
+function ResultsMiniIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 11.5 8.1 14.5 15 6.5" />
+      <path d="M4 4h12" />
+      <path d="M4 16h12" />
+    </svg>
   );
 }

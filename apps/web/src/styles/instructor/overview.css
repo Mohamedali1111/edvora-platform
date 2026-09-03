@@ -52,6 +52,41 @@
   padding: var(--space-4);
 }
 
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home-actions .compact-action {
+  min-height: 44px;
+}
+
+.home-attention {
+  display: grid;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.home-section-heading h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.home-attention-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-attention-item,
 .notification-status {
   display: flex;
   align-items: center;
@@ -60,6 +95,24 @@
   border-radius: var(--radius-md);
   background: var(--surface-strong);
   padding: 0.6rem var(--space-4) 0.6rem 0.6rem;
+}
+
+.home-attention-muted {
+  background: var(--surface);
+}
+
+.home-attention-warning {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: var(--warning-soft);
+}
+
+.home-attention-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .notification-bell {
@@ -270,5 +323,15 @@
 
   .overview-card-header {
     padding-block-end: var(--space-2);
+  }
+
+  .home-actions .compact-action {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .home-attention-item {
+    align-items: flex-start;
+    padding: var(--space-3);
   }
 }

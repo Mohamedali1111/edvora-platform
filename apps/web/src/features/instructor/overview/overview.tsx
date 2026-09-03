@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseStatus, CourseSummary, TenantStudentStatus, TenantStudentSummary } from "@/lib/api/types";
 import { NavIcon } from "@/features/instructor/nav-icons";
+import { buildHomeViewModel, type HomeAttentionItem, type HomeQuickAction } from "./home-view-model";
 import { useInstructorOverview, type OverviewSnapshot } from "./overview-service";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
@@ -50,6 +51,7 @@ export function Overview() {
 function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () => void }) {
   const { t } = useI18n();
   const allFailed = data.courses === null && data.students === null && data.unreadNotifications === null;
+  const viewModel = buildHomeViewModel(data);
 
   if (allFailed) {
     return (
@@ -64,47 +66,31 @@ function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () =
 
   return (
     <>
-      <section className="notification-status" aria-label={t("overview.notificationsHeading")}>
-        <span className="notification-bell" aria-hidden="true">
-          <NotificationBellIcon />
-        </span>
-        {data.unreadNotifications === null ? (
-          <UnavailableNote label={t("overview.notificationsUnavailable")} onRetry={onRetry} />
-        ) : (
-          <Link href="/instructor/notifications" className="notification-status-link" title={t("overview.notificationsViewAll")}>
-            {data.unreadNotifications === 0 ? (
-              <span>{t("overview.notificationsAllCaughtUp")}</span>
-            ) : (
-              <>
-                <span className="notification-count">{data.unreadNotifications}</span>
-                <span>{t("overview.notificationsUnreadLabel")}</span>
-              </>
-            )}
-            <ViewAllArrow />
-          </Link>
-        )}
+      <section className="home-actions" aria-label={t("overview.quickActionsHeading")}>
+        {viewModel.quickActions.map((action) => (
+          <HomeActionLink action={action} key={action.id} />
+        ))}
       </section>
+
+      <AttentionSection items={viewModel.attention} onRetry={onRetry} />
 
       <div className="overview-grid">
         <PreviewCard
-          headingId="overview-courses-heading"
-          heading={t("overview.coursesHeading")}
+          headingId="overview-continue-heading"
+          heading={t("overview.continueHeading")}
           viewAllHref="/instructor/courses"
-          viewAllLabel={t("overview.coursesViewAll")}
+          viewAllLabel={t("overview.continueViewAll")}
         >
-          {data.courses === null ? (
+          {viewModel.continueCourses === null ? (
             <UnavailableNote label={t("overview.coursesUnavailable")} onRetry={onRetry} />
-          ) : data.courses.items.length === 0 ? (
-            <EmptyPreview label={t("overview.coursesEmpty")} section="courses" />
+          ) : viewModel.continueCourses.length === 0 ? (
+            <EmptyPreview label={t("overview.continueEmpty")} section="courses" />
           ) : (
-            <>
-              <ul className="overview-list">
-                {data.courses.items.map((course) => (
+            <ul className="overview-list">
+                {viewModel.continueCourses.map((course) => (
                   <CourseRow key={course.courseId} course={course} />
                 ))}
-              </ul>
-              {data.courses.hasMore ? <p className="overview-more-note">{t("overview.coursesHasMoreNote")}</p> : null}
-            </>
+            </ul>
           )}
         </PreviewCard>
 
@@ -114,23 +100,73 @@ function OverviewBody({ data, onRetry }: { data: OverviewSnapshot; onRetry: () =
           viewAllHref="/instructor/students"
           viewAllLabel={t("overview.studentsViewAll")}
         >
-          {data.students === null ? (
+          {viewModel.studentPreview === null ? (
             <UnavailableNote label={t("overview.studentsUnavailable")} onRetry={onRetry} />
-          ) : data.students.items.length === 0 ? (
+          ) : viewModel.studentPreview.items.length === 0 ? (
             <EmptyPreview label={t("overview.studentsEmpty")} section="students" />
           ) : (
             <>
               <ul className="overview-list">
-                {data.students.items.map((student) => (
+                {viewModel.studentPreview.items.map((student) => (
                   <StudentRow key={student.associationId} student={student} />
                 ))}
               </ul>
-              {data.students.hasMore ? <p className="overview-more-note">{t("overview.studentsHasMoreNote")}</p> : null}
+              {viewModel.studentPreview.hasMore ? <p className="overview-more-note">{t("overview.studentsHasMoreNote")}</p> : null}
             </>
           )}
         </PreviewCard>
       </div>
     </>
+  );
+}
+
+function HomeActionLink({ action }: { action: HomeQuickAction }) {
+  const { t } = useI18n();
+  const className = action.prominence === "primary" ? "primary-button compact-action" : "secondary-button compact-action";
+
+  return (
+    <Link className={className} href={action.href}>
+      {t(action.labelKey)}
+    </Link>
+  );
+}
+
+function AttentionSection({ items, onRetry }: { items: HomeAttentionItem[]; onRetry: () => void }) {
+  const { t } = useI18n();
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="home-attention" aria-labelledby="overview-attention-heading">
+      <div className="home-section-heading">
+        <h3 id="overview-attention-heading">{t("overview.attentionHeading")}</h3>
+      </div>
+      <ul className="home-attention-list">
+        {items.map((item) => (
+          <li className={`home-attention-item home-attention-${item.tone}`} key={item.id}>
+            <span className="notification-bell" aria-hidden="true">
+              <NotificationBellIcon />
+            </span>
+            {item.href ? (
+              <Link href={item.href} className="notification-status-link" title={t("overview.notificationsViewAll")}>
+                {item.count ? <span className="notification-count">{item.count}</span> : null}
+                <span>{t(item.labelKey)}</span>
+                <ViewAllArrow />
+              </Link>
+            ) : (
+              <span className="home-attention-copy">{t(item.labelKey)}</span>
+            )}
+            {item.tone === "warning" ? (
+              <button className="ghost-button compact" type="button" onClick={onRetry}>
+                {t("shell.retry")}
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

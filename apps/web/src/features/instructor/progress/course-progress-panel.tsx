@@ -10,6 +10,7 @@ import { EntityPicker } from "./entity-picker";
 import { isNetworkError } from "./error-mapping";
 import { formatDateTime, formatProgressPercent } from "./format";
 import { PROGRESS_PAGE_SIZE, ENTITY_PICKER_PAGE_SIZE, useCoursePicker, useCourseProgress } from "./progress-service";
+import { resolveCourseProgressSignal, resolveProgressEmptyMessage } from "./progress-view-model";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   DRAFT: "status.courseDraft",
@@ -94,18 +95,25 @@ export function CourseProgressPanel() {
       </div>
 
       {!selectedCourse ? (
-        <p className="overview-empty">{t("progress.noCourseSelected")}</p>
+        <div className="empty-state empty-state-compact">
+          <span className="empty-state-icon" aria-hidden="true">
+            <ProgressMiniIcon />
+          </span>
+          <p>{t(resolveProgressEmptyMessage("noCourse"))}</p>
+        </div>
       ) : (
         <>
-          <div className="field enrollment-filter">
-            <label htmlFor="progress-status-filter">{t("enrollments.statusFilterLabel")}</label>
-            <select id="progress-status-filter" value={statusFilter} onChange={(event) => handleStatusChange(event.target.value as EnrollmentStatus | "ALL")}>
-              {STATUS_FILTER_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option === "ALL" ? t("enrollments.statusAll") : t(ENROLLMENT_STATUS_KEY[option])}
-                </option>
-              ))}
-            </select>
+          <div className="progress-filter-row">
+            <div className="field enrollment-filter">
+              <label htmlFor="progress-status-filter">{t("enrollments.statusFilterLabel")}</label>
+              <select id="progress-status-filter" value={statusFilter} onChange={(event) => handleStatusChange(event.target.value as EnrollmentStatus | "ALL")}>
+                {STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option === "ALL" ? t("enrollments.statusAll") : t(ENROLLMENT_STATUS_KEY[option])}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {state.status === "idle" || state.status === "loading" ? (
@@ -120,11 +128,16 @@ export function CourseProgressPanel() {
               </button>
             </div>
           ) : state.data.items.length === 0 ? (
-            <p className="overview-empty">{t("progress.empty")}</p>
+            <div className="empty-state empty-state-compact">
+              <span className="empty-state-icon" aria-hidden="true">
+                <ProgressMiniIcon />
+              </span>
+              <p>{t(resolveProgressEmptyMessage(statusFilter === "ALL" ? "courseRows" : "courseRowsFiltered"))}</p>
+            </div>
           ) : (
             <>
               <div className="table-scroll">
-                <table className="data-table">
+                <table className="data-table progress-table">
                   <caption className="sr-only">{t("progress.tabProgress")}</caption>
                   <thead>
                     <tr>
@@ -140,37 +153,44 @@ export function CourseProgressPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {state.data.items.map((row) => (
-                      <tr key={row.enrollmentId}>
-                        <td>
-                          <strong>{row.student.displayName ?? row.student.email}</strong>
-                          {row.student.displayName ? <span className="table-secondary-text">{row.student.email}</span> : null}
-                        </td>
-                        <td>
-                          <span className={`status-badge status-badge-enrollment-${row.status.toLowerCase()}`}>{t(ENROLLMENT_STATUS_KEY[row.status])}</span>
-                          {row.currentlyEffective ? <span className="status-badge status-badge-effective">{t("enrollments.currentlyEffective")}</span> : null}
-                        </td>
-                        <td>
-                          <span className="progress-percent">{formatProgressPercent(row.progressPercent)}</span>
-                          <span className="table-secondary-text">
-                            {row.totalLessons === 0
-                              ? t("progress.noLessons")
-                              : t("progress.lessonsCompleted").replace("{completed}", String(row.completedLessons)).replace("{total}", String(row.totalLessons))}
-                          </span>
-                        </td>
-                        <td className="table-col-secondary">
-                          <span className="enrollment-dates">
-                            <span>
-                              {t("enrollments.startsAtLabel")}: {row.startsAt ? formatDateTime(row.startsAt, "") : t("progress.noStartDate")}
+                    {state.data.items.map((row) => {
+                      const signal = resolveCourseProgressSignal(row);
+
+                      return (
+                        <tr key={row.enrollmentId}>
+                          <td>
+                            <strong>{row.student.displayName ?? row.student.email}</strong>
+                            {row.student.displayName ? <span className="table-secondary-text">{row.student.email}</span> : null}
+                          </td>
+                          <td>
+                            <span className={`status-badge status-badge-enrollment-${row.status.toLowerCase()}`}>{t(ENROLLMENT_STATUS_KEY[row.status])}</span>
+                            {row.currentlyEffective ? <span className="status-badge status-badge-effective">{t("enrollments.currentlyEffective")}</span> : null}
+                          </td>
+                          <td data-label={t("progress.columnProgress")}>
+                            <span className="progress-percent">{formatProgressPercent(row.progressPercent)}</span>
+                            <span className="table-secondary-text">
+                              {row.totalLessons === 0
+                                ? t("progress.noLessons")
+                                : t("progress.lessonsCompleted").replace("{completed}", String(row.completedLessons)).replace("{total}", String(row.totalLessons))}
                             </span>
-                            <span>
-                              {t("enrollments.endsAtLabel")}: {row.endsAt ? formatDateTime(row.endsAt, "") : t("progress.noEndDate")}
+                            {signal.id === "no-lessons" ? null : <span className="table-secondary-text">{t(signal.labelKey)}</span>}
+                          </td>
+                          <td className="table-col-secondary" data-label={t("progress.columnEnrollmentWindow")}>
+                            <span className="enrollment-dates">
+                              <span>
+                                {t("enrollments.startsAtLabel")}: {row.startsAt ? formatDateTime(row.startsAt, "") : t("progress.noStartDate")}
+                              </span>
+                              <span>
+                                {t("enrollments.endsAtLabel")}: {row.endsAt ? formatDateTime(row.endsAt, "") : t("progress.noEndDate")}
+                              </span>
                             </span>
-                          </span>
-                        </td>
-                        <td className="table-col-secondary">{formatDateTime(row.lastActivityAt, t("progress.activityNone"))}</td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="table-col-secondary" data-label={t("progress.columnLastActivity")}>
+                            {formatDateTime(row.lastActivityAt, t("progress.activityNone"))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -188,5 +208,16 @@ export function CourseProgressPanel() {
         </>
       )}
     </div>
+  );
+}
+
+function ProgressMiniIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 14V9" />
+      <path d="M10 14V5" />
+      <path d="M16 14v-7" />
+      <path d="M3 16h14" />
+    </svg>
   );
 }

@@ -578,7 +578,7 @@ function QuestionEditor({
             </p>
           </div>
         </div>
-        <div className="section-row-actions">
+        <div className="section-row-actions quiz-reorder-actions">
           <button
             className="ghost-button compact"
             type="button"
@@ -987,7 +987,8 @@ function OptionEditor({
         </div>
       </form>
 
-      <div className="section-row-actions quiz-option-actions">
+      <div className="section-row-actions quiz-option-actions quiz-reorder-actions">
+        <span className="form-note">{t("quizzes.optionPosition").replace("{position}", String(index + 1))}</span>
         <button
           className="ghost-button compact"
           type="button"
@@ -1017,7 +1018,6 @@ function OptionEditor({
             {t("quizzes.clearCorrectAction")}
           </button>
         ) : null}
-        <span className="form-note">{t("quizzes.optionPosition").replace("{position}", String(index + 1))}</span>
       </div>
     </div>
   );
