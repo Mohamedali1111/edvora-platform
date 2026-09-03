@@ -8,15 +8,23 @@ import type { CourseSummary } from "@/lib/api/types";
 import { LifecycleActionDialog, type LifecycleActionCopy } from "@/features/instructor/lifecycle-action-dialog";
 import { archiveCourse, publishCourse, restoreCourse, unpublishCourse } from "./courses-service";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
-import { CourseReadinessSummary } from "./readiness-summary";
 
 export type CourseLifecycleAction = "publish" | "takeOffline" | "archive" | "restore";
 
 const COPY: Record<CourseLifecycleAction, LifecycleActionCopy> = {
+  // Reachable only for a Draft Course that has been live before ("Make live
+  // again" - see first-publish.ts's resolveCourseHeaderPrimaryAction). A
+  // never-published Draft Course never opens this dialog for "publish" at
+  // all - its "Review & publish" primary action opens the First-Publish
+  // Review flow (first-publish-review.tsx) instead, which calls
+  // publish-selected, not this plain /publish. Take Offline is
+  // non-cascading, so every Chapter/Lesson already sits at whatever status
+  // it had before - there is no fresh selection to re-review here, hence no
+  // embedded readiness summary the way the old first-publish flow needed.
   publish: {
-    title: "courses.publishDialogTitle",
-    body: "courses.publishDialogCopy",
-    confirm: "courses.publishConfirm",
+    title: "courses.makeLiveAgainDialogTitle",
+    body: "courses.makeLiveAgainDialogCopy",
+    confirm: "courses.makeLiveAgainConfirm",
     pending: "courses.publishing",
   },
   takeOffline: {
@@ -50,9 +58,9 @@ const ERROR_FALLBACK: Record<CourseLifecycleAction, TranslationKey> = {
  * Shared confirmation for all four Course lifecycle-changing actions - the
  * backend has no request body for any of them, so the only inputs are which
  * action and which course. Archive gets the danger styling since it's the
- * only action that removes the Course from normal active use; Take Offline
- * and Restore both land the Course back on DRAFT and are otherwise ordinary,
- * reversible actions like Publish.
+ * only action that removes the Course from normal active use; Take Offline,
+ * Restore, and "Make live again" (publish) are all ordinary, reversible
+ * actions.
  */
 export function LifecycleConfirmDialog({
   action,
@@ -127,16 +135,6 @@ export function LifecycleConfirmDialog({
       submitting={submitting}
       onConfirm={confirm}
       onClose={onClose}
-    >
-      {action === "publish" ? (
-        <div className="lifecycle-readiness-summary">
-          {/* This dialog mounts fresh every time it opens, so it has no
-              tracked `contentVersion` of its own - `0` is fine, since
-              mounting already fetches current data once and the dialog is
-              too short-lived to accumulate further in-page staleness. */}
-          <CourseReadinessSummary tenantId={tenantId} courseId={course.courseId} contentVersion={0} />
-        </div>
-      ) : null}
-    </LifecycleActionDialog>
+    />
   );
 }

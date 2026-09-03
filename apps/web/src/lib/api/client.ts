@@ -6,13 +6,23 @@ export class ApiError extends Error {
   readonly kind: ApiFailureKind;
   readonly status?: number;
   readonly code: string;
+  /**
+   * Any envelope fields beyond `code`/`message` (e.g. `PUBLISH_SELECTION_STALE`'s
+   * `blockers` array - see BackendErrorEnvelope in ./types) - present only
+   * for the small set of backend errors that carry one, `undefined`
+   * otherwise. A feature reads a specific field off this with its own typed
+   * accessor (see courses/error-mapping.ts's `extractStaleBlockers`) rather
+   * than this generic client knowing about any one feature's error shape.
+   */
+  readonly details?: Record<string, unknown>;
 
-  constructor(input: { kind: ApiFailureKind; message: string; code: string; status?: number }) {
+  constructor(input: { kind: ApiFailureKind; message: string; code: string; status?: number; details?: Record<string, unknown> }) {
     super(input.message);
     this.name = "ApiError";
     this.kind = input.kind;
     this.status = input.status;
     this.code = input.code;
+    this.details = input.details;
   }
 }
 
@@ -131,11 +141,13 @@ async function toApiError(response: Response): Promise<ApiError> {
     const data: unknown = await response.json();
 
     if (isBackendErrorEnvelope(data)) {
+      const { code, message, ...details } = data.error;
       return new ApiError({
         kind: "backend",
         status: response.status,
-        code: data.error.code,
-        message: data.error.message,
+        code,
+        message,
+        details: Object.keys(details).length > 0 ? details : undefined,
       });
     }
   } catch {

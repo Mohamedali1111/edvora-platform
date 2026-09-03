@@ -4,14 +4,16 @@ import { useState } from "react";
 import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { LessonStatus, LessonSummary, LessonType } from "@/lib/api/types";
+import type { LessonStatus, LessonSummary, LessonType, ReadinessIssue } from "@/lib/api/types";
 import { NavIcon } from "@/features/instructor/nav-icons";
 import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
-import { reorderLessons, useLessonsList } from "./lessons-service";
+import { LessonTypeIcon } from "./add-lesson/lesson-type-icons";
+import { reorderLessons } from "./lessons-service";
 import { formatDateTime } from "./format";
 import { canArchiveLesson, canEditLessonMetadata, canPublishLesson, canReorderLesson, canRestoreLesson, canTakeLessonOffline } from "./lifecycle";
 import { moveEarlier, moveLater, reorderableLessonIds } from "./ordering";
 import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
+import { lessonContentReadiness } from "@/features/instructor/courses/readiness-copy";
 import { CreateLessonDialog } from "./create-lesson-dialog";
 import { EditLessonDialog } from "./edit-lesson-dialog";
 import { LessonLifecycleConfirmDialog, type LessonLifecycleAction } from "./lesson-lifecycle-confirm-dialog";
@@ -28,37 +30,54 @@ const LESSON_TYPE_KEY: Record<LessonType, TranslationKey> = {
   QUIZ: "lessons.typeQuiz",
 };
 
+const CONTENT_READINESS_KEY: Record<"processing" | "needsAttention" | "failed", TranslationKey> = {
+  processing: "lessons.assetStatusProcessing",
+  needsAttention: "lessons.contentNeedsAttention",
+  failed: "lessons.assetStatusFailed",
+};
+
 type LifecycleTarget = { action: LessonLifecycleAction; lesson: LessonSummary };
 
 /**
  * A Lesson's editability/lifecycle actions depend only on its own status,
- * never the parent Section's or Course's - confirmed against the frozen
- * backend (no Section/Course-status check exists in any LessonService
- * method) and consistent with the same documented no-cascade design already
- * relied on for Sections. Readiness for publish (asset READY / quiz
- * PUBLISHED) is not predicted here - the list response doesn't expose it,
- * so it's surfaced honestly only if/when a publish attempt actually fails.
+ * never the parent Chapter's or Course's - confirmed against the backend
+ * (no Section/Course-status check exists in any LessonService method) and
+ * consistent with the same documented no-cascade design already relied on
+ * for Chapters. Data (`lessons`) is owned by the Course Builder page
+ * (course-detail.tsx via `useSectionsWithLessons`, threaded through
+ * `SectionsPanel`) - this component is presentational for data, still
+ * owning its own create/edit/lifecycle dialog and reorder-pending UI state.
  *
  * Row shape: Edit is the primary action (a Lesson has no nested content to
- * reveal the way a Section does, so there's no natural row/expand primary -
+ * reveal the way a Chapter does, so there's no natural row/expand primary -
  * editing its content is the obvious next step). Move up/down, Publish,
- * Take Offline, Archive, and Restore all live in the overflow menu.
+ * Hide from students, Archive, and Restore all live in the overflow menu.
+ * A content-readiness badge (Processing/Needs attention/Failed) appears
+ * next to a Draft Lesson's status only when the server's own readiness
+ * blockers report an issue for it - never a raw provider/processing code.
  */
 export function LessonsPanel({
   tenantId,
   courseId,
   sectionId,
+  lessons,
+  readinessBlockersByLessonId,
+  onRefresh,
   onContentChanged,
 }: {
   tenantId: string;
   courseId: string;
   sectionId: string;
+  lessons: LessonSummary[];
+  readinessBlockersByLessonId: ReadonlyMap<string, ReadinessIssue[]> | undefined;
+  /** Re-fetches the whole Chapter/Lesson tree (SectionsPanel's `onRetry`) - the source of `lessons` above, so every mutation here goes through the parent rather than keeping a second, locally-fetched copy. */
+  onRefresh: () => void;
   /**
    * Called after a Lesson create or lifecycle (publish/take offline/
    * archive/restore) change - see `SectionsPanel`'s equivalent prop, which
-   * forwards this straight through from `course-detail.tsx`'s
+   * forwards this straight through from course-detail.tsx's
    * `bumpContentVersion`. A newly created Lesson is also this product's
-   * only "content attachment" event (the frozen backend requires the
+   * only "content attachment" event (the backend requires the
    * videoAssetId/documentAssetId/quizId at creation time - there is no
    * separate later attach step), so `onCreated` alone already covers that
    * case too.
@@ -66,7 +85,6 @@ export function LessonsPanel({
   onContentChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { state, retry } = useLessonsList(tenantId, courseId, sectionId);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingLesson, setEditingLesson] = useState<LessonSummary | null>(null);
   const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
@@ -74,11 +92,11 @@ export function LessonsPanel({
   const [reorderError, setReorderError] = useState<string | null>(null);
 
   async function handleMove(lesson: LessonSummary, direction: "earlier" | "later") {
-    if (reordering || state.status !== "ready") {
+    if (reordering) {
       return;
     }
 
-    const order = reorderableLessonIds(state.data);
+    const order = reorderableLessonIds(lessons);
     const next = direction === "earlier" ? moveEarlier(order, lesson.lessonId) : moveLater(order, lesson.lessonId);
 
     if (!next) {
@@ -90,14 +108,14 @@ export function LessonsPanel({
 
     try {
       await reorderLessons(getAuthService().getClient(), tenantId, courseId, sectionId, next);
-      retry();
+      onRefresh();
     } catch (error) {
       if (isNetworkError(error)) {
         setReorderError(t("shell.apiUnavailable"));
       } else {
         setReorderError(t(resolveErrorMessageKey(error, "lessons.reorderErrorGeneric")));
       }
-      retry();
+      onRefresh();
     } finally {
       setReordering(false);
     }
@@ -173,18 +191,7 @@ export function LessonsPanel({
         </div>
       ) : null}
 
-      {state.status === "loading" ? (
-        <p className="overview-loading" role="status">
-          {t("overview.loading")}
-        </p>
-      ) : state.status === "error" ? (
-        <div className="overview-error" role="alert">
-          <p>{isNetworkError(state.error) ? t("shell.apiUnavailable") : t(resolveErrorMessageKey(state.error, "lessons.errorLoad"))}</p>
-          <button className="secondary-button compact-action" type="button" onClick={retry}>
-            {t("shell.retry")}
-          </button>
-        </div>
-      ) : state.data.length === 0 ? (
+      {lessons.length === 0 ? (
         <div className="empty-state">
           <span className="empty-state-icon" aria-hidden="true">
             <NavIcon section="courses" />
@@ -193,14 +200,17 @@ export function LessonsPanel({
         </div>
       ) : (
         <ol className="lesson-list">
-          {state.data.map((lesson) => {
-            const order = reorderableLessonIds(state.data);
+          {lessons.map((lesson) => {
+            const order = reorderableLessonIds(lessons);
+            const contentReadiness =
+              lesson.status === "DRAFT" ? lessonContentReadiness(readinessBlockersByLessonId?.get(lesson.lessonId) ?? []) : null;
 
             return (
               <li className="lesson-row" key={lesson.lessonId}>
                 <div className="lesson-row-main">
                   <div className="lesson-row-title-line">
                     <span className={`lesson-type-badge lesson-type-${lesson.type.toLowerCase()}`}>
+                      <LessonTypeIcon type={lesson.type} size={14} />
                       {t(LESSON_TYPE_KEY[lesson.type])}
                     </span>
                     <strong>{lesson.title}</strong>
@@ -215,8 +225,11 @@ export function LessonsPanel({
                   ) : null}
                 </div>
 
-                <span className={`status-badge status-badge-${lesson.status.toLowerCase()}`}>
-                  {t(LESSON_STATUS_KEY[lesson.status])}
+                <span className="lesson-row-status">
+                  <span className={`status-badge status-badge-${lesson.status.toLowerCase()}`}>{t(LESSON_STATUS_KEY[lesson.status])}</span>
+                  {contentReadiness ? (
+                    <span className={`status-badge status-badge-content-${contentReadiness}`}>{t(CONTENT_READINESS_KEY[contentReadiness])}</span>
+                  ) : null}
                 </span>
 
                 <div className="row-actions">
@@ -241,7 +254,7 @@ export function LessonsPanel({
           onClose={() => setCreateOpen(false)}
           onCreated={() => {
             setCreateOpen(false);
-            retry();
+            onRefresh();
             onContentChanged();
           }}
         />
@@ -256,9 +269,9 @@ export function LessonsPanel({
           onClose={() => setEditingLesson(null)}
           onSaved={() => {
             setEditingLesson(null);
-            retry();
+            onRefresh();
           }}
-          onConflict={retry}
+          onConflict={onRefresh}
         />
       ) : null}
 
@@ -272,10 +285,10 @@ export function LessonsPanel({
           onClose={() => setLifecycleTarget(null)}
           onDone={() => {
             setLifecycleTarget(null);
-            retry();
+            onRefresh();
             onContentChanged();
           }}
-          onConflict={retry}
+          onConflict={onRefresh}
         />
       ) : null}
     </div>

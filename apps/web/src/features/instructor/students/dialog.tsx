@@ -14,7 +14,18 @@ const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input:not
  * existing conventions (see the mobile drawer in shell.tsx for the same
  * scrim-button pattern).
  */
-export function Modal({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
+export function Modal({
+  titleId,
+  onClose,
+  children,
+  size = "default",
+}: {
+  titleId: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** "wide" is for content that genuinely needs more room at desktop widths (e.g. the First-Publish Review's grouped Chapter/Lesson list) - every existing caller is unaffected by omitting it. */
+  size?: "default" | "wide";
+}) {
   const panelRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
 
@@ -67,7 +78,14 @@ export function Modal({ titleId, onClose, children }: { titleId: string; onClose
   return (
     <div className="modal-layer">
       <button className="modal-scrim" type="button" aria-label={t("common.close")} onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={panelRef} tabIndex={-1}>
+      <div
+        className={size === "wide" ? "modal-panel modal-panel-wide" : "modal-panel"}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={panelRef}
+        tabIndex={-1}
+      >
         {children}
       </div>
     </div>

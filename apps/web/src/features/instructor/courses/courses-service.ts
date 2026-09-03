@@ -3,7 +3,15 @@
 import { useEffect, useState } from "react";
 import type { ApiClient } from "../../../lib/api/client";
 import { getAuthService } from "../../../lib/api/session";
-import type { CourseSummary, CreateCourseRequest, OffsetPage, UpdateCourseRequest } from "../../../lib/api/types";
+import type {
+  CourseReadiness,
+  CourseSummary,
+  CreateCourseRequest,
+  OffsetPage,
+  PublishSelectedRequest,
+  PublishSelectedResult,
+  UpdateCourseRequest,
+} from "../../../lib/api/types";
 
 /** Bounded page size for the courses list - never fetched or aggregated beyond one page at a time. */
 export const COURSES_PAGE_SIZE = 20;
@@ -57,6 +65,34 @@ export function unpublishCourse(api: ApiClient, tenantId: string, courseId: stri
 export function restoreCourse(api: ApiClient, tenantId: string, courseId: string): Promise<CourseSummary> {
   return api.request<CourseSummary>(`/instructor/tenants/${tenantId}/courses/${courseId}/restore`, {
     method: "POST",
+  });
+}
+
+/**
+ * GET .../readiness (DEC-0049) - the single, server-authoritative source of
+ * course publish readiness. Never re-derived client-side from Sections/
+ * Lessons/Media/Quiz list endpoints - see readiness-data.ts.
+ */
+export function getCourseReadiness(api: ApiClient, tenantId: string, courseId: string): Promise<CourseReadiness> {
+  return api.request<CourseReadiness>(`/instructor/tenants/${tenantId}/courses/${courseId}/readiness`);
+}
+
+/**
+ * POST .../publish-selected (DEC-0050) - a Course's *first* publish only.
+ * An already-published-before Course (live now, or Draft again after Take
+ * Offline) rejects with COURSE_ALREADY_PUBLISHED_ONCE; that Course must use
+ * `publishCourse` (existing granular /publish) instead - see
+ * first-publish.ts for which action a given Course should offer.
+ */
+export function publishSelected(
+  api: ApiClient,
+  tenantId: string,
+  courseId: string,
+  body: PublishSelectedRequest,
+): Promise<PublishSelectedResult> {
+  return api.request<PublishSelectedResult>(`/instructor/tenants/${tenantId}/courses/${courseId}/publish-selected`, {
+    method: "POST",
+    body,
   });
 }
 

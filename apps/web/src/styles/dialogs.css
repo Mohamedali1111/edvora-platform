@@ -44,6 +44,14 @@
   font-weight: 800;
 }
 
+/* Wider variant for content that needs real room at desktop/tablet widths
+   (currently only the First-Publish Review's grouped Chapter/Lesson list) -
+   still bounded by the viewport, and still shrinks to the same full-width
+   mobile sheet feel as the default size below the phone breakpoint. */
+.modal-panel-wide {
+  width: min(640px, 100%);
+}
+
 @keyframes modal-fade-in {
   from {
     opacity: 0;

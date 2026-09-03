@@ -6,6 +6,14 @@ export type BackendErrorEnvelope = {
   error: {
     code: string;
     message: string;
+    /**
+     * Present only on `PUBLISH_SELECTION_STALE` (course-error-mapping.ts on
+     * the backend) - the reviewed publish selection's current, machine-readable
+     * blockers, in the exact `ReadinessIssue` shape `GET .../readiness` already
+     * returns. Every other backend error keeps the plain `{ code, message }`
+     * envelope, so this is always optional and otherwise absent.
+     */
+    blockers?: ReadinessIssue[];
   };
 };
 
@@ -84,6 +92,111 @@ export type UpdateCourseRequest = {
   description?: string | null;
   thumbnailAssetRef?: string | null;
   visibility?: CourseVisibility;
+};
+
+/**
+ * Response shape for `GET /instructor/tenants/:tenantId/courses/:courseId/readiness`
+ * (docs/DECISIONS.md DEC-0049) - the single, server-authoritative source of
+ * course publish readiness. Mirrors the backend's `CourseReadiness` type
+ * exactly (apps/api courses/types/course-readiness.types.ts). The frontend
+ * must never re-derive this by scanning Sections/Lessons/Media/Quiz list
+ * endpoints itself - see readiness-copy.ts/readiness-data.ts for how the UI
+ * consumes it.
+ */
+export type ReadinessEntityType = "SECTION" | "LESSON" | "QUIZ" | "VIDEO_ASSET" | "DOCUMENT_ASSET";
+
+export type CourseReadinessReasonCode =
+  | "SECTION_EMPTY"
+  | "LESSON_AVAILABILITY_WINDOW_ELAPSED"
+  | "VIDEO_PREPARING"
+  | "VIDEO_FAILED"
+  | "VIDEO_ASSET_ARCHIVED"
+  | "DOCUMENT_PREPARING"
+  | "DOCUMENT_FAILED"
+  | "DOCUMENT_ASSET_ARCHIVED"
+  | "QUIZ_ARCHIVED"
+  | "QUIZ_NOT_PUBLISHABLE_NO_QUESTIONS"
+  | "QUIZ_NOT_PUBLISHABLE_MISSING_CORRECT_OPTION"
+  | "QUIZ_NOT_PUBLISHABLE_INVALID_POINTS"
+  | "SECTION_NOT_SELECTABLE"
+  | "LESSON_NOT_SELECTABLE"
+  | "LESSON_SECTION_NOT_INCLUDED";
+
+/**
+ * One readiness fact about one entity. `title` is that entity's own raw
+ * authored title (real user content) where one exists - for a
+ * VIDEO_ASSET/DOCUMENT_ASSET issue (which has no title of its own) it
+ * carries the owning Lesson's title instead. `detail`, where present, is a
+ * raw internal string (a stored failure code, or an ISO timestamp) - never
+ * translated copy; the UI must map `reasonCode` to a message itself
+ * (readiness-copy.ts) rather than ever displaying `detail` directly.
+ */
+export type ReadinessIssue = {
+  reasonCode: CourseReadinessReasonCode;
+  entityType: ReadinessEntityType;
+  entityId: string;
+  parentSectionId?: string;
+  parentLessonId?: string;
+  title?: string;
+  detail?: string;
+};
+
+export type ReadyToPublishSection = {
+  sectionId: string;
+  title: string;
+};
+
+export type ReadyToPublishLesson = {
+  lessonId: string;
+  sectionId: string;
+  title: string;
+  type: LessonType;
+};
+
+export type ReadyToPublishQuiz = {
+  quizId: string;
+  lessonId: string;
+  title: string;
+};
+
+/** The Sections/Lessons/Quizzes currently eligible for explicit publish-selected inclusion - see DEC-0049/DEC-0050. */
+export type ReadyToPublish = {
+  sections: ReadyToPublishSection[];
+  lessons: ReadyToPublishLesson[];
+  quizzes: ReadyToPublishQuiz[];
+};
+
+export type CourseReadiness = {
+  courseId: string;
+  ready: boolean;
+  computedAt: string;
+  blockers: ReadinessIssue[];
+  advisories: ReadinessIssue[];
+  readyToPublish: ReadyToPublish;
+};
+
+/**
+ * Body for `POST /instructor/tenants/:tenantId/courses/:courseId/publish-selected`
+ * (DEC-0050) - a Course's *first* publish only. No quizId/asset ID/readiness
+ * flag - Quiz publication is always derived server-side from the selected
+ * Lessons' own relations. `sectionIds` may legitimately be empty (a
+ * selected Lesson whose Section is already PUBLISHED needs no Section
+ * transition); `lessonIds` may not (see publish-selection.ts).
+ */
+export type PublishSelectedRequest = {
+  sectionIds: string[];
+  lessonIds: string[];
+};
+
+/** Success response - reports exactly what this request itself transitioned, nothing more. */
+export type PublishSelectedResult = {
+  courseId: string;
+  status: CourseStatus;
+  published: {
+    sectionIds: string[];
+    lessonIds: string[];
+    quizIds: string[];
+  };
 };
 
 export type SectionStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";

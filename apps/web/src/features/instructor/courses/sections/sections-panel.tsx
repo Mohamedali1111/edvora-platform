@@ -4,10 +4,10 @@ import { useState } from "react";
 import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { CourseSectionSummary, SectionStatus } from "@/lib/api/types";
+import type { CourseSectionSummary, ReadinessIssue, SectionStatus } from "@/lib/api/types";
 import { NavIcon } from "@/features/instructor/nav-icons";
 import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
-import { reorderSections, useSectionsList } from "./sections-service";
+import { reorderSections, type SectionsWithLessonsLoadState } from "./sections-service";
 import {
   canArchiveSection,
   canEditSectionMetadata,
@@ -32,48 +32,63 @@ const SECTION_STATUS_KEY: Record<SectionStatus, TranslationKey> = {
 type LifecycleTarget = { action: SectionLifecycleAction; section: CourseSectionSummary };
 
 /**
- * A Section's editability/lifecycle actions depend only on its own status,
- * never the parent Course's - confirmed against the frozen backend (no
- * Course-status check exists in any CourseSectionService method) and
- * documented as deliberate ("archiving does not cascade... preserving
- * descendant authoring state"). This panel is therefore self-contained and
- * doesn't need the Course's own status at all.
+ * The Chapter builder (product-facing "Chapter" - the backend model and
+ * every service/type/route underneath this stays "Section", matching the
+ * approved "vocabulary in UI only" instruction). A Chapter's editability/
+ * lifecycle actions depend only on its own status, never the parent
+ * Course's - confirmed against the backend (no Course-status check exists
+ * in any CourseSectionService method) and documented as deliberate
+ * ("archiving does not cascade... preserving descendant authoring state").
  *
- * Row shape (Instructor Web Management Action System): the row itself is the
- * primary "reveal this section's lessons" control (a real button, not a
- * click-only div - `aria-expanded`/`aria-controls` keep it keyboard- and
- * screen-reader-operable exactly like the dedicated Show/Hide Lessons button
- * it replaces), and every contextual action (Edit, Move up/down, Publish,
- * Take Offline, Archive, Restore) lives in one overflow menu instead of a
- * row of equally-weighted buttons.
+ * Data (`state`) is owned by the Course Builder page (course-detail.tsx via
+ * `useSectionsWithLessons`), not fetched here - the same load also drives
+ * the header's Chapter count and the per-Lesson readiness join, so one
+ * fetch serves all three rather than three separate ones.
+ *
+ * Row shape (Instructor Web Management Action System): the row itself is
+ * the primary "reveal this Chapter's Lessons" control (a real button, not a
+ * click-only div), and every contextual action (Edit, Move up/down,
+ * Publish, Hide from students, Archive, Restore) lives in one overflow
+ * menu instead of a row of equally-weighted buttons. Only one Chapter is
+ * expanded at a time (an accordion) - this is the same interaction model
+ * at every viewport width, phone included, rather than a separate
+ * mobile-only drilldown route: with everything already inline and only one
+ * Chapter's Lessons visible at once, it already reads as a focused
+ * "Chapter management view" without needing parallel routing.
  */
 export function SectionsPanel({
   tenantId,
   courseId,
+  state,
+  onRetry,
   onContentChanged,
+  readinessBlockersByLessonId,
 }: {
   tenantId: string;
   courseId: string;
+  state: SectionsWithLessonsLoadState;
+  onRetry: () => void;
   /**
-   * Called after a Section create or lifecycle (publish/take offline/
-   * archive/restore) change, and forwarded down to `LessonsPanel` for the
-   * equivalent Lesson mutations - see `course-detail.tsx`'s
-   * `bumpContentVersion`, which this ultimately drives the Course Readiness
-   * panel with. Reorder and plain metadata edits are deliberately not
-   * reported: neither changes anything `readiness.ts` derives from (status
-   * or content readiness), so reporting them would only trigger wasted
-   * refetches.
+   * Called after a Chapter/Lesson create or lifecycle (publish/take
+   * offline/archive/restore) change - see course-detail.tsx's
+   * `bumpContentVersion`, which this ultimately drives the Readiness Strip
+   * with. Reorder and plain metadata edits are deliberately not reported:
+   * neither changes anything readiness derives from (status or content
+   * readiness), so reporting them would only trigger a wasted refetch.
    */
   onContentChanged: () => void;
+  /** Server readiness blockers grouped by Lesson id - `undefined` while readiness itself hasn't loaded yet, in which case Lesson rows simply show no content-status badge (see readiness-copy.ts's `lessonContentReadiness`). */
+  readinessBlockersByLessonId: ReadonlyMap<string, ReadinessIssue[]> | undefined;
 }) {
   const { t } = useI18n();
-  const { state, retry } = useSectionsList(tenantId, courseId);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingSection, setEditingSection] = useState<CourseSectionSummary | null>(null);
   const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
   const [reordering, setReordering] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
+
+  const sections = state.status === "ready" ? state.data : [];
 
   async function handleMove(section: CourseSectionSummary, direction: "earlier" | "later") {
     if (reordering || state.status !== "ready") {
@@ -92,16 +107,16 @@ export function SectionsPanel({
 
     try {
       await reorderSections(getAuthService().getClient(), tenantId, courseId, next);
-      retry();
+      onRetry();
     } catch (error) {
       if (isNetworkError(error)) {
         setReorderError(t("shell.apiUnavailable"));
       } else {
         setReorderError(t(resolveErrorMessageKey(error, "sections.reorderErrorGeneric")));
       }
-      // Any reorder failure (position race, a section archived/created concurrently) means this
+      // Any reorder failure (position race, a chapter archived/created concurrently) means this
       // page's snapshot may be stale - refetch so the next move is computed from real order.
-      retry();
+      onRetry();
     } finally {
       setReordering(false);
     }
@@ -188,11 +203,11 @@ export function SectionsPanel({
       ) : state.status === "error" ? (
         <div className="overview-error" role="alert">
           <p>{isNetworkError(state.error) ? t("shell.apiUnavailable") : t(resolveErrorMessageKey(state.error, "sections.errorLoad"))}</p>
-          <button className="secondary-button compact-action" type="button" onClick={retry}>
+          <button className="secondary-button compact-action" type="button" onClick={onRetry}>
             {t("shell.retry")}
           </button>
         </div>
-      ) : state.data.length === 0 ? (
+      ) : sections.length === 0 ? (
         <div className="empty-state">
           <span className="empty-state-icon" aria-hidden="true">
             <NavIcon section="courses" />
@@ -201,10 +216,11 @@ export function SectionsPanel({
         </div>
       ) : (
         <ol className="section-list">
-          {state.data.map((section) => {
-            const order = reorderableSectionIds(state.data);
+          {sections.map((section) => {
+            const order = reorderableSectionIds(sections);
             const isExpanded = expandedSectionId === section.sectionId;
             const lessonsRegionId = `section-lessons-${section.sectionId}`;
+            const activeLessonCount = section.lessons.filter((lesson) => lesson.status !== "ARCHIVED").length;
 
             return (
               <li className="section-row-group" key={section.sectionId}>
@@ -218,7 +234,10 @@ export function SectionsPanel({
                   >
                     <span className="section-row-main">
                       <strong>{section.title}</strong>
-                      {section.description ? <span className="table-secondary-text">{section.description}</span> : null}
+                      <span className="table-secondary-text">
+                        {section.description ? `${section.description} · ` : ""}
+                        {t("sections.lessonCount").replace("{count}", String(activeLessonCount))}
+                      </span>
                     </span>
                     <ChevronIcon expanded={isExpanded} />
                     <span className="sr-only">
@@ -239,6 +258,9 @@ export function SectionsPanel({
                       tenantId={tenantId}
                       courseId={courseId}
                       sectionId={section.sectionId}
+                      lessons={section.lessons}
+                      readinessBlockersByLessonId={readinessBlockersByLessonId}
+                      onRefresh={onRetry}
                       onContentChanged={onContentChanged}
                     />
                   </div>
@@ -254,10 +276,15 @@ export function SectionsPanel({
           tenantId={tenantId}
           courseId={courseId}
           onClose={() => setCreateOpen(false)}
-          onCreated={() => {
+          onCreated={(created) => {
             setCreateOpen(false);
-            retry();
+            onRetry();
             onContentChanged();
+            // Jump straight into the new Chapter - the obvious next step is
+            // Add lesson, so land the instructor exactly where they'd go
+            // next instead of leaving them to find and reopen a collapsed
+            // row they just created.
+            setExpandedSectionId(created.sectionId);
           }}
         />
       ) : null}
@@ -270,9 +297,9 @@ export function SectionsPanel({
           onClose={() => setEditingSection(null)}
           onSaved={() => {
             setEditingSection(null);
-            retry();
+            onRetry();
           }}
-          onConflict={retry}
+          onConflict={onRetry}
         />
       ) : null}
 
@@ -285,10 +312,10 @@ export function SectionsPanel({
           onClose={() => setLifecycleTarget(null)}
           onDone={() => {
             setLifecycleTarget(null);
-            retry();
+            onRetry();
             onContentChanged();
           }}
-          onConflict={retry}
+          onConflict={onRetry}
         />
       ) : null}
     </div>

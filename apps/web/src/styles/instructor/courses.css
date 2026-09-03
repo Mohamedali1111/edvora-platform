@@ -6,20 +6,6 @@
  * dialog chrome these pages otherwise reuse unchanged. Changing the
  * Course -> Section -> Lesson row/nesting/badge treatment belongs here.
  */
-.course-lifecycle-actions {
-  justify-content: flex-start;
-}
-
-/* ---- Course readiness (Part 7) ---- */
-.course-readiness-ready {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  color: var(--muted);
-}
-
 .course-readiness-list {
   display: grid;
   gap: 0.35rem;
@@ -51,17 +37,6 @@
     flex-direction: column;
     align-items: stretch;
   }
-}
-
-.lifecycle-readiness-summary {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-secondary);
-  padding: 0.75rem 0.9rem;
-}
-
-.lifecycle-readiness-summary .course-readiness-list {
-  margin-block-end: 0;
 }
 
 .archived-banner {
@@ -110,6 +85,7 @@
   display: flex;
   align-items: center;
   min-width: 0;
+  min-height: 44px;
   flex: 1 1 220px;
   gap: 0.6rem;
   border: 0;
@@ -200,7 +176,10 @@
 }
 
 .lesson-type-badge {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 0.3rem;
   border-radius: 999px;
   background: var(--border);
   color: var(--muted);
@@ -210,6 +189,10 @@
   padding: 0.2rem 0.55rem;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.lesson-type-badge svg {
+  flex: 0 0 auto;
 }
 
 .lesson-type-options {
@@ -463,5 +446,282 @@
   .courses-table .row-link {
     flex: 1 1 auto;
     justify-content: center;
+  }
+}
+
+/* =========================================================================
+   Course Builder rebuild - header, Readiness Strip, First-Publish Review.
+   One coherent builder (Course Header -> Readiness/attention -> Chapters &
+   Lessons -> Course settings), not stacked unrelated cards - whitespace and
+   dividers do the separating work most surfaces below deliberately avoid a
+   bordered box for.
+   ========================================================================= */
+
+.course-builder-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.course-builder-header-main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 320px;
+  gap: 0.3rem;
+}
+
+.course-builder-header-titleline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.course-builder-header-titleline h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+}
+
+.course-builder-description {
+  margin: 0;
+}
+
+.course-builder-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 560px) {
+  .course-builder-header-actions {
+    width: 100%;
+  }
+
+  .course-builder-header-actions .primary-button {
+    flex: 1 1 auto;
+  }
+}
+
+/* ---- Readiness Strip ----
+   Deliberately not a dashboard card: a quiet, low-chrome status line with an
+   optional collapsed issue list and (only when it means something) one CTA.
+   `.readiness-strip-error`/`.readiness-strip-blocked` lean on the shared
+   `.overview-error`/`.form-error` color language instead of inventing a
+   third danger treatment. */
+.readiness-strip {
+  display: grid;
+  gap: 0.5rem;
+  border-block-start: 1px solid var(--border);
+  border-block-end: 1px solid var(--border);
+  padding-block: 0.9rem;
+}
+
+.readiness-strip-loading {
+  margin: 0;
+  color: var(--muted);
+}
+
+.readiness-strip-error {
+  color: var(--danger);
+}
+
+.readiness-strip-error p {
+  margin: 0 0 0.5rem;
+}
+
+.readiness-strip-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.readiness-strip-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.readiness-issue-block {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.readiness-issue-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}
+
+/* ---- Chapter row Lesson-count / status region ---- */
+.lesson-row-status {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.status-badge-content-processing {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.status-badge-content-needsAttention {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.status-badge-content-failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* =========================================================================
+   First-Publish Review
+   ========================================================================= */
+.publish-review {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.publish-review-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.publish-review-header p {
+  margin: 0.3rem 0 0;
+}
+
+.publish-review-stale {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  background: var(--warning-soft);
+}
+
+.publish-review-body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.publish-review-chapter {
+  display: grid;
+  gap: 0.5rem;
+  padding-block-end: var(--space-3);
+  border-block-end: 1px solid var(--border);
+}
+
+.publish-review-chapter:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.publish-review-chapter-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.publish-review-chapter-note {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.publish-review-lesson-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.publish-review-lesson-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.65rem;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.publish-review-lesson-option:hover {
+  background: var(--surface-secondary);
+}
+
+.publish-review-lesson-option input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin-block-start: 0.15rem;
+  accent-color: var(--accent);
+}
+
+.publish-review-lesson-info {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.publish-review-lesson-info strong {
+  overflow-wrap: anywhere;
+}
+
+.publish-review-lesson-info .table-secondary-text {
+  flex-basis: 100%;
+  margin-block-start: 0;
+}
+
+.publish-review-issues {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--space-3);
+}
+
+.publish-review-issues h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.publish-review-footer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 0.6rem;
+  background: var(--surface-strong);
+  padding-block-start: 0.75rem;
+  border-block-start: 1px solid var(--border);
+}
+
+.publish-review-footer p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .publish-review-footer {
+    padding-block-end: env(safe-area-inset-bottom, 0px);
+  }
+
+  .publish-review-footer .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .publish-review-footer .modal-actions button {
+    width: 100%;
   }
 }

@@ -3,18 +3,24 @@
 import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { useAuthenticatedInstructorSession } from "@/features/instructor/session-context";
+import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
 import { formatDate } from "@/features/instructor/students/format";
 import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { CourseStatus, CourseSummary, CourseVisibility } from "@/lib/api/types";
+import type { CourseStatus, CourseSummary, CourseVisibility, PublishSelectedResult } from "@/lib/api/types";
 import { updateCourse, useCourseDetail } from "./courses-service";
-import { canArchive, canEditCourseMetadata, canPublish, canRestore, canTakeOffline, isArchived } from "./lifecycle";
+import { canArchive, canEditCourseMetadata, canTakeOffline, isArchived } from "./lifecycle";
+import { isFirstPublishEligible, resolveCourseHeaderPrimaryAction } from "./first-publish";
 import { LifecycleConfirmDialog, type CourseLifecycleAction } from "./lifecycle-confirm-dialog";
+import { FirstPublishReview } from "./first-publish-review";
+import { groupIssuesByLessonId } from "./readiness-copy";
+import { useCourseReadiness } from "./readiness-data";
+import { ReadinessStrip } from "./readiness-strip";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { validateCourseInput } from "./validation";
 import { SectionsPanel } from "./sections/sections-panel";
-import { CourseReadinessPanel } from "./readiness-panel";
+import { useSectionsWithLessons } from "./sections/sections-service";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   DRAFT: "status.courseDraft",
@@ -40,7 +46,7 @@ export function CourseDetail({ courseId }: { courseId: string }) {
   const { state, retry } = useCourseDetail(tenant.tenantId, courseId);
 
   return (
-    <div className="detail-page">
+    <div className="detail-page course-builder">
       <Link href="/instructor/courses" className="back-link">
         <span className="back-arrow" aria-hidden="true" />
         {t("courses.detailBack")}
@@ -69,20 +75,35 @@ export function CourseDetail({ courseId }: { courseId: string }) {
 function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; course: CourseSummary; onChanged: () => void }) {
   const { t } = useI18n();
   const [lifecycleAction, setLifecycleAction] = useState<CourseLifecycleAction | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [publishSuccessMessage, setPublishSuccessMessage] = useState<string | null>(null);
   const editable = canEditCourseMetadata(course.status);
-  // Bumped after any in-page Section/Lesson create or lifecycle
-  // (publish/archive) mutation - the readiness panel below re-fetches
-  // whenever this changes, so "what will students see if I publish this?"
-  // tracks the instructor's own edits on this page without polling. Quiz
-  // and Media are authored on their own separate routes with no live
-  // cross-tab sync; navigating back to this Course Detail route from
-  // elsewhere is a fresh mount of this whole component tree (a distinct
-  // Next.js route, not a kept-alive tab), which already refetches
-  // everything including readiness on its own - the only remaining gap is
-  // an edit made elsewhere *while this exact tab stays open*, covered by
-  // the readiness panel's own manual Refresh action instead.
+
+  // Bumped after any in-page Chapter/Lesson create or lifecycle mutation -
+  // the Readiness Strip re-fetches whenever this changes, so "what will
+  // students see if I publish this?" tracks the instructor's own edits on
+  // this page without polling. Quiz and Media are authored on their own
+  // separate routes with no live cross-tab sync; navigating back to this
+  // Course Detail route from elsewhere is a fresh mount of this whole
+  // component tree, which already refetches everything on its own - the
+  // only remaining gap is an edit made elsewhere *while this exact tab
+  // stays open*, covered by the Readiness Strip's own manual Refresh
+  // action instead.
   const [contentVersion, setContentVersion] = useState(0);
   const bumpContentVersion = () => setContentVersion((value) => value + 1);
+
+  // Owned here, not inside SectionsPanel/LessonsPanel or the Readiness
+  // Strip: the header's Chapter-count summary, the builder list itself, and
+  // the per-Lesson content-readiness join all need the same Chapters+Lessons
+  // and server Readiness data, so one fetch of each serves all three
+  // instead of three separate ones.
+  const { state: contentState, retry: retryContent } = useSectionsWithLessons(tenantId, course.courseId);
+  const chapterCount = contentState.status === "ready" ? contentState.data.length : null;
+  const hasChapters = chapterCount !== null && chapterCount > 0;
+
+  const { state: readinessState, retry: retryReadiness } = useCourseReadiness(tenantId, course.courseId, contentVersion);
+  const readinessBlockersByLessonId =
+    readinessState.status === "ready" ? groupIssuesByLessonId(readinessState.data.blockers) : undefined;
 
   const [title, setTitle] = useState(course.title);
   const [description, setDescription] = useState(course.description ?? "");
@@ -159,46 +180,119 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
     }
   }
 
+  const primaryAction = resolveCourseHeaderPrimaryAction(course);
+
+  function headerOverflowItems(): ActionMenuItem[] {
+    const items: ActionMenuItem[] = [];
+
+    if (canTakeOffline(course.status)) {
+      items.push({ key: "takeOffline", label: t("courses.takeOfflineAction"), onSelect: () => setLifecycleAction("takeOffline") });
+    }
+
+    if (canArchive(course.status)) {
+      items.push({ key: "archive", label: t("courses.archiveAction"), danger: true, onSelect: () => setLifecycleAction("archive") });
+    }
+
+    return items;
+  }
+
+  const overflowItems = headerOverflowItems();
+
   return (
     <>
-      <header className="detail-header">
-        <h2>{course.title}</h2>
-        <span className={`status-badge status-badge-${course.status.toLowerCase()}`}>{t(COURSE_STATUS_KEY[course.status])}</span>
+      <header className="course-builder-header">
+        <div className="course-builder-header-main">
+          <div className="course-builder-header-titleline">
+            <h2>{course.title}</h2>
+            <span className={`status-badge status-badge-${course.status.toLowerCase()}`}>{t(COURSE_STATUS_KEY[course.status])}</span>
+          </div>
+          {course.description ? <p className="page-subtitle course-builder-description">{course.description}</p> : null}
+          {hasChapters ? <p className="form-note">{t("courses.chapterCountSummary").replace("{count}", String(chapterCount))}</p> : null}
+        </div>
+
+        <div className="course-builder-header-actions">
+          {primaryAction === "reviewAndPublish" ? (
+            <button className="primary-button compact-action" type="button" onClick={() => setReviewOpen(true)}>
+              {t("courses.reviewAndPublishAction")}
+            </button>
+          ) : null}
+          {primaryAction === "makeLiveAgain" ? (
+            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("publish")}>
+              {t("courses.makeLiveAgainAction")}
+            </button>
+          ) : null}
+          {primaryAction === "restore" ? (
+            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("restore")}>
+              {t("courses.restoreAction")}
+            </button>
+          ) : null}
+          {overflowItems.length > 0 ? (
+            <ActionMenu label={t("common.moreActionsFor").replace("{item}", course.title)} items={overflowItems} />
+          ) : null}
+        </div>
       </header>
 
       {isArchived(course.status) ? <div className="archived-banner">{t("courses.archivedReadOnlyBanner")}</div> : null}
 
-      <dl className="detail-grid">
-        <div>
-          <dt>{t("courses.detailStatusLabel")}</dt>
-          <dd>{t(COURSE_STATUS_KEY[course.status])}</dd>
+      {publishSuccessMessage ? (
+        <div className="form-success" role="status">
+          {publishSuccessMessage}
         </div>
-        <div>
-          <dt>{t("courses.detailCreatedLabel")}</dt>
-          <dd>{formatDate(course.createdAt)}</dd>
-        </div>
-        <div>
-          <dt>{t("courses.detailUpdatedLabel")}</dt>
-          <dd>{formatDate(course.updatedAt)}</dd>
-        </div>
-        {course.publishedAt ? (
-          <div>
-            <dt>{t("courses.detailPublishedLabel")}</dt>
-            <dd>{formatDate(course.publishedAt)}</dd>
-          </div>
-        ) : null}
-        {course.archivedAt ? (
-          <div>
-            <dt>{t("courses.detailArchivedLabel")}</dt>
-            <dd>{formatDate(course.archivedAt)}</dd>
-          </div>
-        ) : null}
-      </dl>
+      ) : null}
 
-      <section className="detail-section" aria-labelledby="course-edit-heading">
+      {!isArchived(course.status) && hasChapters ? (
+        <ReadinessStrip
+          state={readinessState}
+          mode={isFirstPublishEligible(course) ? "firstPublish" : "contentHealth"}
+          onRefresh={retryReadiness}
+          onReviewAndPublish={() => setReviewOpen(true)}
+        />
+      ) : null}
+
+      <section className="detail-section course-builder-content" aria-labelledby="course-chapters-heading">
+        <div className="detail-section-header">
+          <h2 id="course-chapters-heading">{t("courses.sectionsHeading")}</h2>
+        </div>
+        <SectionsPanel
+          tenantId={tenantId}
+          courseId={course.courseId}
+          state={contentState}
+          onRetry={retryContent}
+          readinessBlockersByLessonId={readinessBlockersByLessonId}
+          onContentChanged={() => {
+            bumpContentVersion();
+            retryReadiness();
+          }}
+        />
+      </section>
+
+      <section className="detail-section course-settings-section" aria-labelledby="course-edit-heading">
         <div className="detail-section-header">
           <h2 id="course-edit-heading">{t("courses.editHeading")}</h2>
         </div>
+
+        <dl className="detail-grid course-settings-meta">
+          <div>
+            <dt>{t("courses.detailCreatedLabel")}</dt>
+            <dd>{formatDate(course.createdAt)}</dd>
+          </div>
+          <div>
+            <dt>{t("courses.detailUpdatedLabel")}</dt>
+            <dd>{formatDate(course.updatedAt)}</dd>
+          </div>
+          {course.publishedAt ? (
+            <div>
+              <dt>{t("courses.detailPublishedLabel")}</dt>
+              <dd>{formatDate(course.publishedAt)}</dd>
+            </div>
+          ) : null}
+          {course.archivedAt ? (
+            <div>
+              <dt>{t("courses.detailArchivedLabel")}</dt>
+              <dd>{formatDate(course.archivedAt)}</dd>
+            </div>
+          ) : null}
+        </dl>
 
         {savedMessage ? (
           <div className="form-success" role="status">
@@ -288,44 +382,6 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
         )}
       </section>
 
-      <section className="detail-section" aria-labelledby="course-lifecycle-heading">
-        <div className="detail-section-header">
-          <h2 id="course-lifecycle-heading">{t("courses.lifecycleHeading")}</h2>
-        </div>
-
-        <div className="modal-actions course-lifecycle-actions">
-          {canPublish(course.status) ? (
-            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("publish")}>
-              {t("courses.publishAction")}
-            </button>
-          ) : null}
-          {canTakeOffline(course.status) ? (
-            <button className="secondary-button compact-action" type="button" onClick={() => setLifecycleAction("takeOffline")}>
-              {t("courses.takeOfflineAction")}
-            </button>
-          ) : null}
-          {canArchive(course.status) ? (
-            <button className="primary-button danger-button compact-action" type="button" onClick={() => setLifecycleAction("archive")}>
-              {t("courses.archiveAction")}
-            </button>
-          ) : null}
-          {canRestore(course.status) ? (
-            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("restore")}>
-              {t("courses.restoreAction")}
-            </button>
-          ) : null}
-        </div>
-      </section>
-
-      <CourseReadinessPanel tenantId={tenantId} courseId={course.courseId} contentVersion={contentVersion} />
-
-      <section className="detail-section" aria-labelledby="course-sections-heading">
-        <div className="detail-section-header">
-          <h2 id="course-sections-heading">{t("courses.sectionsHeading")}</h2>
-        </div>
-        <SectionsPanel tenantId={tenantId} courseId={course.courseId} onContentChanged={bumpContentVersion} />
-      </section>
-
       {lifecycleAction ? (
         <LifecycleConfirmDialog
           action={lifecycleAction}
@@ -337,6 +393,22 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
             onChanged();
           }}
           onConflict={onChanged}
+        />
+      ) : null}
+
+      {reviewOpen ? (
+        <FirstPublishReview
+          tenantId={tenantId}
+          course={course}
+          onClose={() => setReviewOpen(false)}
+          onPublished={(result: PublishSelectedResult) => {
+            setReviewOpen(false);
+            setPublishSuccessMessage(t("courses.publishReviewSuccess").replace("{count}", String(result.published.lessonIds.length)));
+            bumpContentVersion();
+            retryContent();
+            retryReadiness();
+            onChanged();
+          }}
         />
       ) : null}
     </>

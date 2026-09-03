@@ -99,9 +99,8 @@
 }
 
 /* A deliberate instructor cancellation, not a failure - a neutral bordered
-   note (same recipe as `.lifecycle-readiness-summary`), never the red
-   `.form-error` treatment, which would misleadingly imply something went
-   wrong. */
+   note, never the red `.form-error` treatment, which would misleadingly
+   imply something went wrong. */
 .media-cancelled-note {
   display: grid;
   gap: 0.5rem;
