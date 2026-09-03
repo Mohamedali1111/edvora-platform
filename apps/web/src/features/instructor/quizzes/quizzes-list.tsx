@@ -29,7 +29,7 @@ const REVEAL_POLICY_KEY: Record<QuizRevealAnswersPolicy, TranslationKey> = {
 
 type LifecycleTarget = { action: QuizLifecycleAction; quiz: QuizSummary };
 
-export function QuizzesList() {
+export function QuizzesList({ chrome = "page" }: { chrome?: "page" | "panel" }) {
   const { tenant } = useAuthenticatedInstructorSession();
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
@@ -70,15 +70,17 @@ export function QuizzesList() {
 
   return (
     <div className="quizzes-page">
-      <div className="page-header">
-        <div>
-          <h2>{t("nav.quizzes")}</h2>
-          <p className="page-subtitle">{t("quizzes.subtitle")}</p>
+      {chrome === "page" ? (
+        <div className="page-header">
+          <div>
+            <h2>{t("nav.quizzes")}</h2>
+            <p className="page-subtitle">{t("quizzes.subtitle")}</p>
+          </div>
+          <button className="primary-button" type="button" onClick={() => setCreateOpen(true)}>
+            {t("quizzes.createAction")}
+          </button>
         </div>
-        <button className="primary-button" type="button" onClick={() => setCreateOpen(true)}>
-          {t("quizzes.createAction")}
-        </button>
-      </div>
+      ) : null}
 
       {state.status === "loading" ? (
         <p className="overview-loading" role="status">

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "@/lib/i18n/i18n";
 import { NavIcon } from "./nav-icons";
-import { instructorSections, resolveInstructorSection, type InstructorSection } from "./navigation";
+import { instructorMobileSections, instructorPrimarySections, resolveInstructorSection, type InstructorNavItem, type InstructorSection } from "./navigation";
 import { useInstructorSession } from "./session-context";
 import { ThemeControl } from "./theme-control";
 
@@ -24,8 +24,9 @@ export function InstructorShell({ children }: { children: ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const activeSection = useMemo(() => resolveInstructorSection(pathname), [pathname]);
+  const bottomActiveSection = activeSection === "progress" ? "more" : activeSection;
   const activeTitle = activeSection
-    ? t(instructorSections.find((section) => section.id === activeSection)!.labelKey)
+    ? t(instructorPrimarySections.find((section) => section.id === activeSection)!.labelKey)
     : t("shell.notFoundTitle");
 
   if (session.status === "bootstrapping") {
@@ -57,7 +58,7 @@ export function InstructorShell({ children }: { children: ReactNode }) {
   const identityInitial = (session.user.displayName ?? session.user.email).trim().charAt(0).toUpperCase();
 
   const navigation = (
-    <Navigation active={activeSection} onNavigate={() => setDrawerOpen(false)} />
+    <Navigation items={instructorPrimarySections} active={activeSection} onNavigate={() => setDrawerOpen(false)} />
   );
 
   const identityRow = (
@@ -139,6 +140,8 @@ export function InstructorShell({ children }: { children: ReactNode }) {
         </main>
       </div>
 
+      <Navigation items={instructorMobileSections} active={bottomActiveSection} onNavigate={() => setDrawerOpen(false)} variant="bottom" />
+
       {drawerOpen ? (
         <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={t("shell.openMenu")}>
           <button className="drawer-scrim" type="button" aria-label={t("shell.closeMenu")} onClick={() => setDrawerOpen(false)} />
@@ -175,12 +178,22 @@ function LogoutIcon() {
   );
 }
 
-function Navigation({ active, onNavigate }: { active: InstructorSection | null; onNavigate: () => void }) {
+function Navigation({
+  items,
+  active,
+  onNavigate,
+  variant = "rail",
+}: {
+  items: InstructorNavItem[];
+  active: InstructorSection | null;
+  onNavigate: () => void;
+  variant?: "rail" | "bottom";
+}) {
   const { t } = useI18n();
 
   return (
-    <nav className="nav-list" aria-label={t("shell.navigation")}>
-      {instructorSections.map((item) => (
+    <nav className={variant === "bottom" ? "bottom-nav" : "nav-list"} aria-label={variant === "bottom" ? t("shell.mobileNavigation") : t("shell.navigation")}>
+      {items.map((item) => (
         <Link
           className={item.id === active ? "nav-link active" : "nav-link"}
           href={item.href}

@@ -21,13 +21,12 @@ const ICON_PROPS: SVGProps<SVGSVGElement> = {
   "aria-hidden": true,
 };
 
-function OverviewIcon() {
+function HomeIcon() {
   return (
     <svg {...ICON_PROPS}>
-      <rect x="2.75" y="2.75" width="6.2" height="6.2" rx="1.4" />
-      <rect x="11.05" y="2.75" width="6.2" height="6.2" rx="1.4" />
-      <rect x="2.75" y="11.05" width="6.2" height="6.2" rx="1.4" />
-      <rect x="11.05" y="11.05" width="6.2" height="6.2" rx="1.4" />
+      <path d="M3 9.2 10 3l7 6.2" />
+      <path d="M5.1 8.2v8.1h9.8V8.2" />
+      <path d="M8.2 16.3v-4.7h3.6v4.7" />
     </svg>
   );
 }
@@ -52,21 +51,22 @@ function CoursesIcon() {
   );
 }
 
-function MediaIcon() {
+function LibraryIcon() {
   return (
     <svg {...ICON_PROPS}>
-      <rect x="2.6" y="3.4" width="14.8" height="11.2" rx="1.7" />
-      <path d="M8.15 6.7 12 9l-3.85 2.3Z" fill="currentColor" stroke="none" />
-      <path d="M6 17.1h8" />
+      <path d="M4 4.2h8.4a2.2 2.2 0 0 1 2.2 2.2v10.1H6.2A2.2 2.2 0 0 1 4 14.3Z" />
+      <path d="M7 7.1h4.6M7 10h4.6" />
+      <path d="M14.6 6.2H16a1.7 1.7 0 0 1 1.7 1.7v8.6h-3.1" />
     </svg>
   );
 }
 
-function QuizzesIcon() {
+function MoreIcon() {
   return (
     <svg {...ICON_PROPS}>
-      <path d="M5 2.75h10v14.5H5z" />
-      <path d="M7.6 6.6h4.8M7.6 9.6h4.8M7.6 12.6h2.9" />
+      <circle cx="4.5" cy="10" r="1.25" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="10" r="1.25" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="10" r="1.25" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -79,23 +79,13 @@ function ProgressIcon() {
   );
 }
 
-function NotificationsIcon() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M6 8.1a4 4 0 0 1 8 0c0 3.65 1.15 4.75 1.15 4.75H4.85S6 11.75 6 8.1Z" />
-      <path d="M8.35 15.6a1.75 1.75 0 0 0 3.3 0" />
-    </svg>
-  );
-}
-
 const NAV_ICONS: Record<InstructorSection, () => ReactElement> = {
-  overview: OverviewIcon,
-  students: StudentsIcon,
+  home: HomeIcon,
   courses: CoursesIcon,
-  media: MediaIcon,
-  quizzes: QuizzesIcon,
+  students: StudentsIcon,
+  library: LibraryIcon,
   progress: ProgressIcon,
-  notifications: NotificationsIcon,
+  more: MoreIcon,
 };
 
 export function NavIcon({ section }: { section: InstructorSection }) {

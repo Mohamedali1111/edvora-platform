@@ -17,8 +17,8 @@ const ASSET_STATUS_KEY: Record<AssetProcessingStatus, TranslationKey> = {
   UPLOADING: "lessons.assetStatusUploading",
   PROCESSING: "lessons.assetStatusProcessing",
   READY: "lessons.assetStatusReady",
-  FAILED: "lessons.assetStatusFailed",
-  ARCHIVED: "lessons.assetStatusArchived",
+  FAILED: "media.assetStatusNeedsAttention",
+  ARCHIVED: "media.assetStatusNeedsAttention",
 };
 
 /**
@@ -32,7 +32,7 @@ const ASSET_STATUS_KEY: Record<AssetProcessingStatus, TranslationKey> = {
  * Documents tab, or navigating away) always clears the interval - it is
  * never left running in the background.
  */
-export function VideosPanel() {
+export function VideosPanel({ showHeaderActions = true }: { showHeaderActions?: boolean }) {
   const { tenant } = useAuthenticatedInstructorSession();
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
@@ -56,16 +56,18 @@ export function VideosPanel() {
 
   return (
     <div className="media-panel">
-      <div className="media-panel-header">
-        <button className="primary-button" type="button" onClick={() => setUploadOpen(true)}>
-          {t("media.uploadVideoAction")}
-        </button>
-        {/* Silent refresh (not `retry`) - clicking this should not blank the
-            already-populated table back to a loading state. */}
-        <button className="ghost-button compact" type="button" onClick={refresh}>
-          {t("media.refreshAction")}
-        </button>
-      </div>
+      {showHeaderActions ? (
+        <div className="media-panel-header">
+          <button className="primary-button" type="button" onClick={() => setUploadOpen(true)}>
+            {t("media.uploadVideoAction")}
+          </button>
+          {/* Silent refresh (not `retry`) - clicking this should not blank the
+              already-populated table back to a loading state. */}
+          <button className="ghost-button compact" type="button" onClick={refresh}>
+            {t("media.refreshAction")}
+          </button>
+        </div>
+      ) : null}
 
       {state.status === "loading" ? (
         <p className="overview-loading" role="status">

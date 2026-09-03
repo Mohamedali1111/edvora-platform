@@ -16,8 +16,8 @@ const ASSET_STATUS_KEY: Record<AssetProcessingStatus, TranslationKey> = {
   UPLOADING: "lessons.assetStatusUploading",
   PROCESSING: "lessons.assetStatusProcessing",
   READY: "lessons.assetStatusReady",
-  FAILED: "lessons.assetStatusFailed",
-  ARCHIVED: "lessons.assetStatusArchived",
+  FAILED: "media.assetStatusNeedsAttention",
+  ARCHIVED: "media.assetStatusNeedsAttention",
 };
 
 /**
@@ -37,7 +37,7 @@ function documentTypeLabel(mimeType: string, t: (key: TranslationKey) => string)
  * panel never polls; a completed upload's result is already final by the
  * time `onUploaded` fires.
  */
-export function DocumentsPanel() {
+export function DocumentsPanel({ showHeaderActions = true }: { showHeaderActions?: boolean }) {
   const { tenant } = useAuthenticatedInstructorSession();
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
@@ -46,11 +46,13 @@ export function DocumentsPanel() {
 
   return (
     <div className="media-panel">
-      <div className="media-panel-header">
-        <button className="primary-button" type="button" onClick={() => setUploadOpen(true)}>
-          {t("media.uploadDocumentAction")}
-        </button>
-      </div>
+      {showHeaderActions ? (
+        <div className="media-panel-header">
+          <button className="primary-button" type="button" onClick={() => setUploadOpen(true)}>
+            {t("media.uploadDocumentAction")}
+          </button>
+        </div>
+      ) : null}
 
       {state.status === "loading" ? (
         <p className="overview-loading" role="status">

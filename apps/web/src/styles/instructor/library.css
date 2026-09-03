@@ -1,0 +1,93 @@
+/**
+ * Instructor Library IA shell. The underlying Videos/Documents/Quizzes
+ * implementations keep their feature-specific table/dialog styles; this file
+ * owns the shared Library heading, tabs, and More destination layout.
+ */
+.library-page,
+.more-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.library-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-tab {
+  min-height: 44px;
+  border-block-end: 2px solid transparent;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 0.65rem 0.9rem;
+}
+
+.library-tab:hover,
+.library-tab:focus-visible {
+  color: var(--text);
+}
+
+.library-tab[aria-current="page"] {
+  border-block-end-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.more-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 1rem;
+}
+
+.more-section h3,
+.more-section p {
+  margin: 0;
+}
+
+.more-section h3 {
+  font-size: 1rem;
+}
+
+.more-section p {
+  display: grid;
+  gap: 0.25rem;
+  margin-block-start: 0.35rem;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
+}
+
+.more-section strong {
+  color: var(--text);
+}
+
+.more-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.mobile-more-destination {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-more-destination {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 560px) {
+  .library-page > .page-header .primary-button,
+  .more-section .secondary-button,
+  .more-actions {
+    width: 100%;
+  }
+}

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useI18n } from "@/lib/i18n/i18n";
-import { instructorSections, resolveInstructorSection } from "./navigation";
+import { instructorPrimarySections, resolveInstructorSection } from "./navigation";
 
 /**
  * Shared stub for sections not yet built (students/courses/media/quizzes/
@@ -14,7 +14,7 @@ export function Placeholder() {
   const pathname = usePathname();
   const { t } = useI18n();
   const section = resolveInstructorSection(pathname);
-  const label = section ? t(instructorSections.find((item) => item.id === section)!.labelKey) : "";
+  const label = section ? t(instructorPrimarySections.find((item) => item.id === section)!.labelKey) : "";
 
   return (
     <section className="placeholder-panel" aria-labelledby="placeholder-title">
