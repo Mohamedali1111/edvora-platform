@@ -14,6 +14,7 @@ import { LifecycleConfirmDialog } from "./lifecycle-confirm-dialog";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { validateCourseInput } from "./validation";
 import { SectionsPanel } from "./sections/sections-panel";
+import { CourseReadinessPanel } from "./readiness-panel";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   DRAFT: "status.courseDraft",
@@ -69,6 +70,19 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
   const { t } = useI18n();
   const [lifecycleAction, setLifecycleAction] = useState<"publish" | "archive" | null>(null);
   const editable = canEditCourseMetadata(course.status);
+  // Bumped after any in-page Section/Lesson create or lifecycle
+  // (publish/archive) mutation - the readiness panel below re-fetches
+  // whenever this changes, so "what will students see if I publish this?"
+  // tracks the instructor's own edits on this page without polling. Quiz
+  // and Media are authored on their own separate routes with no live
+  // cross-tab sync; navigating back to this Course Detail route from
+  // elsewhere is a fresh mount of this whole component tree (a distinct
+  // Next.js route, not a kept-alive tab), which already refetches
+  // everything including readiness on its own - the only remaining gap is
+  // an edit made elsewhere *while this exact tab stays open*, covered by
+  // the readiness panel's own manual Refresh action instead.
+  const [contentVersion, setContentVersion] = useState(0);
+  const bumpContentVersion = () => setContentVersion((value) => value + 1);
 
   const [title, setTitle] = useState(course.title);
   const [description, setDescription] = useState(course.description ?? "");
@@ -295,11 +309,13 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
         </section>
       )}
 
+      <CourseReadinessPanel tenantId={tenantId} courseId={course.courseId} contentVersion={contentVersion} />
+
       <section className="detail-section" aria-labelledby="course-sections-heading">
         <div className="detail-section-header">
           <h2 id="course-sections-heading">{t("courses.sectionsHeading")}</h2>
         </div>
-        <SectionsPanel tenantId={tenantId} courseId={course.courseId} />
+        <SectionsPanel tenantId={tenantId} courseId={course.courseId} onContentChanged={bumpContentVersion} />
       </section>
 
       {lifecycleAction ? (

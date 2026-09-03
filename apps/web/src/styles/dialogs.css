@@ -129,3 +129,21 @@
   color: var(--accent-strong);
   font-weight: 700;
 }
+
+/* Actionable empty state (Add Lesson content picker, and any other dialog
+   list that should offer a primary "create here" action instead of a dead
+   end - see docs on the document/video/quiz false-empty-state fix). Stacks
+   vertically, unlike the icon+text `.empty-state` row it otherwise reuses,
+   since a full-width primary button reads better below the message than
+   squeezed beside it - true at every width, not just mobile. */
+.empty-state-action {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+.empty-state-action p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}

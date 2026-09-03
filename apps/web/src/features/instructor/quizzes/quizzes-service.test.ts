@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiClient } from "../../../lib/api/client";
+import type { QuestionSummary, QuizSummary } from "../../../lib/api/types";
+import { canPublishQuiz } from "./lifecycle";
 import {
+  applyQuizLifecycleResult,
   archiveQuiz,
   createOption,
   createQuestion,
@@ -13,6 +16,7 @@ import {
   publishQuiz,
   reorderOptions,
   reorderQuestions,
+  type QuizAuthoringDetail,
   updateOption,
   updateQuestion,
   updateQuiz,
@@ -137,6 +141,73 @@ test("options use exact list/create/update/reorder contracts, including one-requ
     },
   ]);
 });
+
+/**
+ * Regression coverage for the Quiz publish stale-state bug: quiz-detail.tsx
+ * applies a lifecycle mutation's own response via this exact function and
+ * deliberately does NOT also force a refetch of the rest of the detail (see
+ * `applyQuizLifecycleResult`'s docstring and quiz-detail.tsx's `onDone`).
+ * These cases prove the property that fix depends on: the mutation response
+ * alone - with no second network call of any kind - is already sufficient
+ * for `canPublishQuiz`/`canArchiveQuiz` to reflect the true, committed
+ * status, and that applying it never disturbs unrelated already-loaded
+ * question/option state.
+ */
+test("applying a publish response makes the quiz immediately non-publishable, from the response alone", () => {
+  const detail = quizAuthoringDetailFixture("DRAFT");
+
+  const next = applyQuizLifecycleResult(detail, { ...detail.quiz, status: "PUBLISHED", publishedAt: "2026-01-01T00:00:00.000Z" });
+
+  assert.equal(next.quiz.status, "PUBLISHED");
+  assert.equal(canPublishQuiz(next.quiz.status), false);
+});
+
+test("applying an archive response makes the quiz immediately non-publishable and non-archivable", () => {
+  const detail = quizAuthoringDetailFixture("PUBLISHED");
+
+  const next = applyQuizLifecycleResult(detail, { ...detail.quiz, status: "ARCHIVED" });
+
+  assert.equal(next.quiz.status, "ARCHIVED");
+  assert.equal(canPublishQuiz(next.quiz.status), false);
+});
+
+test("applying a lifecycle result never touches already-loaded questions/options", () => {
+  const detail = quizAuthoringDetailFixture("DRAFT");
+
+  const next = applyQuizLifecycleResult(detail, { ...detail.quiz, status: "PUBLISHED" });
+
+  assert.equal(next.questions, detail.questions);
+  assert.equal(next.optionsByQuestionId, detail.optionsByQuestionId);
+});
+
+function quizAuthoringDetailFixture(status: QuizSummary["status"]): QuizAuthoringDetail {
+  const quiz: QuizSummary = {
+    quizId: QUIZ_ID,
+    tenantId: TENANT_ID,
+    title: "Quiz",
+    description: null,
+    status,
+    passingScorePercent: null,
+    attemptLimit: null,
+    revealAnswersPolicy: "AFTER_SUBMISSION",
+    publishedAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const question: QuestionSummary = {
+    questionId: QUESTION_ID,
+    quizId: QUIZ_ID,
+    type: "MULTIPLE_CHOICE",
+    prompt: "Prompt",
+    position: 1,
+    points: "1",
+    status: "ACTIVE",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  return { quiz, questions: [question], optionsByQuestionId: { [QUESTION_ID]: [] } };
+}
 
 function apiWith(fetchFn: typeof fetch): ApiClient {
   return new ApiClient({ baseUrl: "http://api.test", fetchFn });

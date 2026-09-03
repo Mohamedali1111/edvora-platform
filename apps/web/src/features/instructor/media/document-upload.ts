@@ -50,6 +50,38 @@ export function isUploadCapabilityExpired(expiresAtIso: string, now: Date): bool
 export type DocumentUploadTransportError = { kind: "network" } | { kind: "http"; status: number } | { kind: "aborted" };
 
 /**
+ * Whether a failed direct-to-R2 `PUT` is ambiguous - i.e. whether the bytes
+ * may have actually reached R2 despite the browser reporting a transport
+ * failure. `xhr.onerror` (`{kind:"network"}`) fires for cases that do not
+ * prove the request never arrived server-side - a connection reset *after*
+ * the request body finished sending, a missing CORS response-exposure
+ * header on an otherwise-successful response, a proxy hiccup on the reply
+ * but not the request - so it must never be reported to the instructor as a
+ * definitive failure. `{kind:"http"}` (a real non-2xx status R2 itself
+ * returned) and `{kind:"aborted"}` (the instructor/dialog cancelled it) are
+ * both unambiguous and are not covered by this - see upload-document-dialog.tsx,
+ * which reconciles an ambiguous failure against authoritative backend state
+ * (the same idempotent `confirmDocumentUpload` call already used for the
+ * happy path) instead of ever guessing.
+ */
+export function isAmbiguousPutFailure(error: DocumentUploadTransportError): boolean {
+  return error.kind === "network";
+}
+
+/**
+ * Whether a failed PUT was a deliberate, known instructor cancellation
+ * (`{kind:"aborted"}`, from `uploadDocumentBytes`'s `xhr.onabort` -
+ * see the `signal` parameter above, wired by `cancelUpload` in
+ * use-document-upload-flow.ts) rather than an unexplained transport
+ * failure. Unlike `isAmbiguousPutFailure`, this is never ambiguous: the
+ * instructor's own intent is already known, so it is reported honestly as
+ * "cancelled" - never reconciled, never shown as a failure.
+ */
+export function isUserCancelledPut(error: DocumentUploadTransportError): boolean {
+  return error.kind === "aborted";
+}
+
+/**
  * Performs the direct-to-R2 `PUT` using exactly the `uploadUrl`/`headers`
  * capability the backend issued - no signing logic, no provider SDK, no
  * credentials constructed client-side. `XMLHttpRequest` is used (not

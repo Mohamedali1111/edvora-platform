@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DOCUMENT_MAX_FILE_SIZE_BYTES, isUploadCapabilityExpired, validateDocumentFile } from "./document-upload";
+import {
+  DOCUMENT_MAX_FILE_SIZE_BYTES,
+  isAmbiguousPutFailure,
+  isUploadCapabilityExpired,
+  isUserCancelledPut,
+  validateDocumentFile,
+} from "./document-upload";
 
 test("accepts a valid PDF within the size limit", () => {
   assert.equal(validateDocumentFile({ type: "application/pdf", size: 1024 }), null);
@@ -45,6 +51,45 @@ test("treats the exact expiry instant itself as already expired (>=, not >)", ()
  * backend-issued, time-limited capability shape) or must instead require a
  * brand new upload intent. These cases model that reuse directly.
  */
+/**
+ * Regression coverage for the document-upload false-failure bug: a browser
+ * `xhr.onerror` transport failure (`{kind:"network"}`) never proves the
+ * bytes failed to reach R2, so it must be classified as ambiguous and
+ * reconciled against authoritative backend state rather than reported as a
+ * definitive failure. A real non-2xx status from R2 (`{kind:"http"}`) and an
+ * instructor/dialog-initiated cancellation (`{kind:"aborted"}`) are both
+ * unambiguous and must not trigger reconciliation.
+ */
+test("only a network-kind PUT failure is treated as ambiguous (reconciled), not an HTTP status or an abort", () => {
+  assert.equal(isAmbiguousPutFailure({ kind: "network" }), true);
+  assert.equal(isAmbiguousPutFailure({ kind: "http", status: 403 }), false);
+  assert.equal(isAmbiguousPutFailure({ kind: "http", status: 500 }), false);
+  assert.equal(isAmbiguousPutFailure({ kind: "aborted" }), false);
+});
+
+/**
+ * Regression coverage for the active-upload-dismissal follow-up: a
+ * deliberate instructor cancellation (`{kind:"aborted"}`, from the real
+ * `AbortController` wired into `uploadDocumentBytes` via `cancelUpload`)
+ * must be classified distinctly from both an ambiguous network failure and
+ * a real HTTP rejection - it is reported honestly as "cancelled", never
+ * reconciled and never shown as a failure, because the instructor's own
+ * intent is already known.
+ */
+test("only an aborted PUT is treated as a user cancellation, not a network or HTTP failure", () => {
+  assert.equal(isUserCancelledPut({ kind: "aborted" }), true);
+  assert.equal(isUserCancelledPut({ kind: "network" }), false);
+  assert.equal(isUserCancelledPut({ kind: "http", status: 500 }), false);
+});
+
+test("an aborted PUT and an ambiguous network failure are mutually exclusive classifications", () => {
+  const aborted = { kind: "aborted" } as const;
+  const network = { kind: "network" } as const;
+
+  assert.notEqual(isUserCancelledPut(aborted), isAmbiguousPutFailure(aborted));
+  assert.notEqual(isUserCancelledPut(network), isAmbiguousPutFailure(network));
+});
+
 test("gates a video capability retry decision the same way a document capability retry decision is gated", () => {
   const issuedAt = new Date("2026-01-01T00:00:00.000Z");
   const videoExpiresAt = new Date(issuedAt.getTime() + 5 * 60_000).toISOString(); // Bunny TUS AuthorizationExpire-derived TTL

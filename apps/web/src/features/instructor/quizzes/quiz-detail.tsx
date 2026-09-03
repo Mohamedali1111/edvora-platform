@@ -65,7 +65,6 @@ const REVEAL_POLICY_KEY: Record<QuizRevealAnswersPolicy, TranslationKey> = {
 
 type PendingState = {
   metadata?: boolean;
-  lifecycle?: "publish" | "archive";
   questionCreate?: boolean;
   questionId?: string;
   questionReorder?: boolean;
@@ -226,12 +225,12 @@ export function QuizDetail({ quizId }: { quizId: string }) {
         <PublishRequirements quiz={quiz} questions={questions} optionsByQuestionId={optionsByQuestionId} />
         <div className="section-row-actions quiz-lifecycle-actions">
           {canPublishQuiz(quiz.status) ? (
-            <button className="primary-button compact" type="button" onClick={() => setDialog("publish")} disabled={pending.lifecycle === "publish"}>
+            <button className="primary-button compact" type="button" onClick={() => setDialog("publish")}>
               {t("quizzes.publishAction")}
             </button>
           ) : null}
           {canArchiveQuiz(quiz.status) ? (
-            <button className="primary-button danger-button compact" type="button" onClick={() => setDialog("archive")} disabled={pending.lifecycle === "archive"}>
+            <button className="primary-button danger-button compact" type="button" onClick={() => setDialog("archive")}>
               {t("quizzes.archiveAction")}
             </button>
           ) : null}
@@ -247,8 +246,19 @@ export function QuizDetail({ quizId }: { quizId: string }) {
           onClose={() => setDialog(null)}
           onDone={(updated) => {
             setDialog(null);
+            // `updated` is the mutation's own response - already the
+            // authoritative, backend-committed row. Apply it directly and
+            // do NOT also force a refetch here (`afterMutation(..., false)`):
+            // a redundant retry() would discard this fresh, correct status
+            // and re-run the full question/option fan-out, and any transient
+            // failure in that larger fetch would then mask the successful
+            // publish/archive as stale/unpublished state - see
+            // quizzes-service.ts#applyQuizLifecycleResult and
+            // docs referenced there. A refetch remains correct - and still
+            // happens, via onConflict below - only when the mutation itself
+            // reports the local state was actually wrong.
             replaceQuiz(updated);
-            afterMutation(dialog === "publish" ? "quizzes.publishSuccess" : "quizzes.archiveSuccess");
+            afterMutation(dialog === "publish" ? "quizzes.publishSuccess" : "quizzes.archiveSuccess", false);
           }}
           onConflict={retry}
         />

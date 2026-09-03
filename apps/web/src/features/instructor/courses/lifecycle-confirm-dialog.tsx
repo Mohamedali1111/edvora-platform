@@ -8,6 +8,7 @@ import type { CourseSummary } from "@/lib/api/types";
 import { Modal } from "@/features/instructor/students/dialog";
 import { archiveCourse, publishCourse } from "./courses-service";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
+import { CourseReadinessSummary } from "./readiness-summary";
 
 type LifecycleAction = "publish" | "archive";
 
@@ -100,6 +101,16 @@ export function LifecycleConfirmDialog({
         <p className="form-note">
           {t(copy.body)} <strong>{course.title}</strong>
         </p>
+
+        {action === "publish" ? (
+          <div className="lifecycle-readiness-summary">
+            {/* This dialog mounts fresh every time it opens, so it has no
+                tracked `contentVersion` of its own - `0` is fine, since
+                mounting already fetches current data once and the dialog is
+                too short-lived to accumulate further in-page staleness. */}
+            <CourseReadinessSummary tenantId={tenantId} courseId={course.courseId} contentVersion={0} />
+          </div>
+        ) : null}
 
         {backendError ? (
           <div className="form-error" role="alert">

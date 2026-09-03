@@ -39,7 +39,26 @@ type LifecycleTarget = { action: "publish" | "archive"; lesson: LessonSummary };
  * PUBLISHED) is not predicted here - the list response doesn't expose it,
  * so it's surfaced honestly only if/when a publish attempt actually fails.
  */
-export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: string; courseId: string; sectionId: string }) {
+export function LessonsPanel({
+  tenantId,
+  courseId,
+  sectionId,
+  onContentChanged,
+}: {
+  tenantId: string;
+  courseId: string;
+  sectionId: string;
+  /**
+   * Called after a Lesson create or lifecycle (publish/archive) change -
+   * see `SectionsPanel`'s equivalent prop, which forwards this straight
+   * through from `course-detail.tsx`'s `bumpContentVersion`. A newly
+   * created Lesson is also this product's only "content attachment" event
+   * (the frozen backend requires the videoAssetId/documentAssetId/quizId
+   * at creation time - there is no separate later attach step), so
+   * `onCreated` alone already covers that case too.
+   */
+  onContentChanged: () => void;
+}) {
   const { t } = useI18n();
   const { state, retry } = useLessonsList(tenantId, courseId, sectionId);
   const [createOpen, setCreateOpen] = useState(false);
@@ -212,6 +231,7 @@ export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: stri
           onCreated={() => {
             setCreateOpen(false);
             retry();
+            onContentChanged();
           }}
         />
       ) : null}
@@ -242,6 +262,7 @@ export function LessonsPanel({ tenantId, courseId, sectionId }: { tenantId: stri
           onDone={() => {
             setLifecycleTarget(null);
             retry();
+            onContentChanged();
           }}
           onConflict={retry}
         />

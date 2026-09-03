@@ -79,6 +79,43 @@
   font-size: 0.85rem;
 }
 
+/* Actively-transferring row (real Cancel available - see cancelUpload in
+   use-document-upload-flow.ts): hint text plus the one genuine
+   cancellation this flow supports. Wraps to a stacked, full-width button
+   on narrow viewports rather than squeezing beside the hint text. */
+.media-busy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .media-busy-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* A deliberate instructor cancellation, not a failure - a neutral bordered
+   note (same recipe as `.lifecycle-readiness-summary`), never the red
+   `.form-error` treatment, which would misleadingly imply something went
+   wrong. */
+.media-cancelled-note {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  padding: 0.75rem 0.9rem;
+}
+
+.media-cancelled-note .form-note {
+  margin: 0;
+}
+
 .media-processing-hint {
   margin: 0;
   color: var(--muted);

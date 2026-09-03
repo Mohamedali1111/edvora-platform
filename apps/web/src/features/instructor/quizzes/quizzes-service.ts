@@ -118,6 +118,23 @@ export type QuizAuthoringDetail = {
   optionsByQuestionId: Record<string, QuestionOptionSummary[]>;
 };
 
+/**
+ * Applies a lifecycle/metadata mutation's own response - already the
+ * authoritative, backend-committed row (see `publishQuiz`/`archiveQuiz`/
+ * `updateQuiz` above, each a direct pass-through of the mutation's HTTP
+ * response) - to the currently-loaded detail. Deliberately the *only* way
+ * `quiz` is ever updated after a mutation: it must never be paired with a
+ * forced refetch of the whole detail (see `useQuizAuthoringDetail.replaceQuiz`
+ * and quiz-detail.tsx's `onDone`), because a mutation response is already
+ * strictly fresher than anything a subsequent GET could return, and
+ * discarding it to re-fetch is what previously let a transient failure in
+ * the (much larger) refetch fan-out mask a successful publish/archive as
+ * stale/unpublished state.
+ */
+export function applyQuizLifecycleResult(detail: QuizAuthoringDetail, quiz: QuizSummary): QuizAuthoringDetail {
+  return { ...detail, quiz };
+}
+
 async function getQuizAuthoringDetail(api: ApiClient, tenantId: string, quizId: string): Promise<QuizAuthoringDetail> {
   const [quiz, questionsResponse] = await Promise.all([getQuiz(api, tenantId, quizId), listQuestions(api, tenantId, quizId)]);
   const optionsEntries = await Promise.all(
@@ -210,7 +227,7 @@ export function useQuizAuthoringDetail(tenantId: string, quizId: string): {
     state,
     retry: () => setAttempt((value) => value + 1),
     replaceQuiz: (quiz) => {
-      setState((current) => (current.status === "ready" ? { status: "ready", data: { ...current.data, quiz } } : current));
+      setState((current) => (current.status === "ready" ? { status: "ready", data: applyQuizLifecycleResult(current.data, quiz) } : current));
     },
   };
 }

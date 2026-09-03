@@ -32,7 +32,24 @@ type LifecycleTarget = { action: "publish" | "archive"; section: CourseSectionSu
  * descendant authoring state"). This panel is therefore self-contained and
  * doesn't need the Course's own status at all.
  */
-export function SectionsPanel({ tenantId, courseId }: { tenantId: string; courseId: string }) {
+export function SectionsPanel({
+  tenantId,
+  courseId,
+  onContentChanged,
+}: {
+  tenantId: string;
+  courseId: string;
+  /**
+   * Called after a Section create or lifecycle (publish/archive) change,
+   * and forwarded down to `LessonsPanel` for the equivalent Lesson
+   * mutations - see `course-detail.tsx`'s `bumpContentVersion`, which this
+   * ultimately drives the Course Readiness panel with. Reorder and plain
+   * metadata edits are deliberately not reported: neither changes anything
+   * `readiness.ts` derives from (status or content readiness), so reporting
+   * them would only trigger wasted refetches.
+   */
+  onContentChanged: () => void;
+}) {
   const { t } = useI18n();
   const { state, retry } = useSectionsList(tenantId, courseId);
   const [createOpen, setCreateOpen] = useState(false);
@@ -197,7 +214,12 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
 
                 {isExpanded ? (
                   <div className="section-lessons-area">
-                    <LessonsPanel tenantId={tenantId} courseId={courseId} sectionId={section.sectionId} />
+                    <LessonsPanel
+                      tenantId={tenantId}
+                      courseId={courseId}
+                      sectionId={section.sectionId}
+                      onContentChanged={onContentChanged}
+                    />
                   </div>
                 ) : null}
               </li>
@@ -214,6 +236,7 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
           onCreated={() => {
             setCreateOpen(false);
             retry();
+            onContentChanged();
           }}
         />
       ) : null}
@@ -242,6 +265,7 @@ export function SectionsPanel({ tenantId, courseId }: { tenantId: string; course
           onDone={() => {
             setLifecycleTarget(null);
             retry();
+            onContentChanged();
           }}
           onConflict={retry}
         />

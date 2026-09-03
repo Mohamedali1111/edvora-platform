@@ -13,6 +13,7 @@ import "./features/instructor/courses/lifecycle.test";
 import "./features/instructor/courses/validation.test";
 import "./features/instructor/courses/error-mapping.test";
 import "./features/instructor/courses/courses-service.test";
+import "./features/instructor/courses/readiness.test";
 import "./features/instructor/courses/sections/lifecycle.test";
 import "./features/instructor/courses/sections/ordering.test";
 import "./features/instructor/courses/sections/error-mapping.test";

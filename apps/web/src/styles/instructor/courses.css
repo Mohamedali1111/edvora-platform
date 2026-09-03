@@ -10,6 +10,60 @@
   justify-content: flex-start;
 }
 
+/* ---- Course readiness (Part 7) ---- */
+.course-readiness-ready {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--muted);
+}
+
+.course-readiness-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.75rem;
+  padding-inline-start: 1.2rem;
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}
+
+/* In-page Section/Lesson changes refresh readiness automatically; this row
+   is the honest, always-available way to pull in a Quiz/Media change made
+   on a separate route (Part 7 follow-up) - never implies a problem, so it
+   stays visible in both the ready and blocked states, not just on error. */
+.course-readiness-refresh-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-start: 0.25rem;
+}
+
+.course-readiness-refresh-row .form-note {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .course-readiness-refresh-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.lifecycle-readiness-summary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  padding: 0.75rem 0.9rem;
+}
+
+.lifecycle-readiness-summary .course-readiness-list {
+  margin-block-end: 0;
+}
+
 .archived-banner {
   border-inline-start: 4px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -144,6 +198,115 @@
   font-weight: 700;
 }
 
+/* ---- Add Lesson flow (Part 3 authoring redesign) ----
+   Type step: three large, equally-weighted tappable cards rather than a
+   plain radiogroup of small options - the type choice is the first, most
+   consequential decision in the flow and should read as such. Real
+   <button> elements (never a click-only div), one column on narrow
+   viewports so each card gets a full-width, comfortably tall touch
+   target. */
+.lesson-type-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.lesson-type-card {
+  display: grid;
+  justify-items: start;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-4) var(--space-3);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
+}
+
+.lesson-type-card:hover,
+.lesson-type-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.lesson-type-card-icon {
+  display: grid;
+  place-items: center;
+  color: var(--accent-strong);
+}
+
+.lesson-type-card-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.lesson-type-card-description {
+  color: var(--muted);
+  font-size: var(--fs-secondary);
+}
+
+/* Content step: "upload/create new" vs "choose existing" segmented choice.
+   Full-width, equal-width tabs so both remain comfortable one-handed touch
+   targets down to the smallest supported width. */
+.add-lesson-source-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.add-lesson-source-tab {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.add-lesson-source-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.add-lesson-back {
+  justify-self: start;
+  padding-inline: 0;
+}
+
+.add-lesson-create-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.add-lesson-continue-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--space-3);
+}
+
+@media (max-width: 560px) {
+  .lesson-type-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .add-lesson-continue-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .add-lesson-continue-row .primary-button {
+    width: 100%;
+  }
+}
+
 /* Move-earlier/move-later buttons (Sections and Lessons): icon + label,
    matching the same small-icon-plus-text treatment already established for
    other secondary actions (e.g. the Overview "view all" links). */
@@ -153,10 +316,39 @@
   gap: 0.3rem;
 }
 
+/* ---- Mobile-first Section/Lesson row compaction (Part 9) ----
+   Below the breakpoint, `.section-row`/`.lesson-row` stop trying to fit
+   title + status + a cluster of small action buttons on one flexible row -
+   that's what produced the "crowded toolbar" / wrapped-button mess on
+   375-430px phones. Each row becomes two clear zones stacked vertically:
+   the content (title/status) on top, actions below as a full-width,
+   evenly-sized action bar - still every action's own real <button>, just
+   laid out for a thumb instead of a mouse. */
 @media (max-width: 480px) {
   .section-lessons-area {
     margin-inline-start: 0.5rem;
     padding-inline-start: 0.5rem;
+  }
+
+  .section-row,
+  .lesson-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-row-actions,
+  .lesson-row .section-row-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-block-start: 0.5rem;
+    border-block-start: 1px solid var(--border);
+  }
+
+  .section-row-actions .ghost-button,
+  .section-row-actions .secondary-button {
+    flex: 1 1 calc(50% - 0.25rem);
+    justify-content: center;
+    min-height: 2.5rem;
   }
 }
 
