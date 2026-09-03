@@ -118,6 +118,15 @@ export class InstructorCourseController {
     return this.courses.unpublishCourse(principal, params.tenantId, params.courseId);
   }
 
+  @Post(':courseId/restore')
+  @HttpCode(HttpStatus.OK)
+  async restore(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+  ): Promise<CourseSummary> {
+    return this.courses.restoreCourse(principal, params.tenantId, params.courseId);
+  }
+
   @Get(':courseId/progress')
   @HttpCode(HttpStatus.OK)
   async progressReport(

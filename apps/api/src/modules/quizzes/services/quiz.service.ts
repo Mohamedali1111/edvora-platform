@@ -286,6 +286,55 @@ export class QuizService {
       return toQuizSummary(quiz);
     });
   }
+
+  async restoreQuiz(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    quizId: string,
+  ): Promise<QuizSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+      // Restore also crosses the publication boundary (ARCHIVED -> DRAFT), so it uses the
+      // same Quiz-level lock ordering as publish/archive/unpublish and Question/Option writes.
+      await lockQuizPublicationBoundary(tx, quizId);
+
+      const existing = await tx.quiz.findUnique({
+        where: { id_tenantId: { id: quizId, tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new QuizNotFoundError();
+      }
+
+      if (existing.status === QuizStatus.PUBLISHED) {
+        throw new InvalidQuizLifecycleTransitionError();
+      }
+
+      if (existing.status === QuizStatus.ARCHIVED) {
+        const updated = await tx.quiz.updateMany({
+          where: { id: quizId, tenantId, status: QuizStatus.ARCHIVED },
+          data: { status: QuizStatus.DRAFT },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.quiz.findUniqueOrThrow({
+            where: { id_tenantId: { id: quizId, tenantId } },
+            select: { status: true },
+          });
+          if (current.status === QuizStatus.PUBLISHED) {
+            throw new InvalidQuizLifecycleTransitionError();
+          }
+        }
+      }
+
+      const quiz = await tx.quiz.findUniqueOrThrow({
+        where: { id_tenantId: { id: quizId, tenantId } },
+      });
+
+      return toQuizSummary(quiz);
+    });
+  }
 }
 
 function toQuizSummary(quiz: {

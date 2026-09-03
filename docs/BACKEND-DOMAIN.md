@@ -140,17 +140,20 @@ V1 courses should support title, optional description, thumbnail/media reference
 
 Course authoring lifecycle transitions are explicit application-service actions, not generic client
 metadata writes. `Course`, `CourseSection`, `Lesson`, and `Quiz` support `DRAFT -> PUBLISHED`,
-`DRAFT -> ARCHIVED`, `PUBLISHED -> ARCHIVED`, and the reversible explicit take-offline transition
-`PUBLISHED -> DRAFT`; publishing an already-published resource, unpublishing an already-draft
-resource, and archiving an already-archived resource are idempotent, while `ARCHIVED` remains
-terminal until the separate Restore slice lands and cannot be published/unpublished/restored.
+`DRAFT -> ARCHIVED`, `PUBLISHED -> ARCHIVED`, the reversible explicit take-offline transition
+`PUBLISHED -> DRAFT`, and explicit restore `ARCHIVED -> DRAFT`; publishing an already-published
+resource, unpublishing/restoring an already-draft resource, and archiving an already-archived
+resource are idempotent. Restore never makes content Live, never infers a prior state, and existing
+publish endpoints are the only path from restored Draft content back to Live.
 Publishing never cascades to descendants or ancestors: each Course, Section, Lesson, and Quiz must
-be published explicitly. Take Offline/unpublish likewise never cascades and preserves historical
-student data, enrollments, progress, attempts, answers, ordering, content references, and existing
-`publishedAt` timestamps on Course and Quiz. Archiving likewise does not cascade; ancestor status
-already blocks student access while preserving descendant state and historical ordering. For Quiz
-authoring specifically, an `ARCHIVED` parent Quiz rejects ordinary Question and Option mutations,
-including create, metadata/correctness update, and reorder.
+be published explicitly. Take Offline/unpublish and Restore likewise never cascade and preserve
+historical student data, enrollments, progress, attempts, answers, ordering, content references, and
+existing `publishedAt` timestamps on Course and Quiz. Archiving likewise does not cascade; ancestor
+status already blocks student access while preserving descendant state and historical ordering. For
+Quiz authoring specifically, an `ARCHIVED` parent Quiz rejects ordinary Question and Option
+mutations, including create, metadata/correctness update, and reorder, until the Quiz itself is
+explicitly restored. Question restore, media restore, and student lifecycle restore are not
+implemented by this content restore boundary.
 
 Course and Section publication has no V1 child-count prerequisite. Lesson publication additionally
 requires deliverable type-specific content: VIDEO and DOCUMENT lessons must reference tenant-linked
@@ -171,7 +174,7 @@ creates a Question first and its Options only through later, separate calls, so 
 Question always starts with zero Options and can never itself satisfy "exactly one correct
 option" — rather than allow that incomplete state to land, even transiently, Question creation on
 a `PUBLISHED` Quiz fails with the same publishability error `publishQuiz()` would produce. This
-mutation-safety check, `publishQuiz()`, `unpublishQuiz()`, and `archiveQuiz()` share one PostgreSQL
+mutation-safety check, `publishQuiz()`, `unpublishQuiz()`, `restoreQuiz()`, and `archiveQuiz()` share one PostgreSQL
 transaction-scoped advisory lock keyed on the Quiz ID, so lifecycle boundary changes and concurrent
 publishability-affecting mutations on the same Quiz always serialize rather than both observing a
 stale pre-commit status; Option mutations additionally keep their existing Question-scoped advisory

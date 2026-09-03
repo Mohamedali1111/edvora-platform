@@ -310,6 +310,53 @@ export class CourseSectionService {
     });
   }
 
+  async restoreSection(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    courseId: string,
+    sectionId: string,
+  ): Promise<CourseSectionSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const section = await tx.courseSection.findUnique({
+        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!section) {
+        throw new SectionNotFoundError();
+      }
+
+      if (section.status === SectionStatus.PUBLISHED) {
+        throw new InvalidSectionLifecycleTransitionError();
+      }
+
+      if (section.status === SectionStatus.ARCHIVED) {
+        const updated = await tx.courseSection.updateMany({
+          where: { id: sectionId, courseId, tenantId, status: SectionStatus.ARCHIVED },
+          data: { status: SectionStatus.DRAFT },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.courseSection.findUniqueOrThrow({
+            where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+            select: { status: true },
+          });
+          if (current.status === SectionStatus.PUBLISHED) {
+            throw new InvalidSectionLifecycleTransitionError();
+          }
+        }
+      }
+
+      const restored = await tx.courseSection.findUniqueOrThrow({
+        where: { id_courseId_tenantId: { id: sectionId, courseId, tenantId } },
+      });
+
+      return toSectionSummary(restored);
+    });
+  }
+
   async reorderSections(
     principal: AuthenticatedPrincipal,
     tenantId: string,

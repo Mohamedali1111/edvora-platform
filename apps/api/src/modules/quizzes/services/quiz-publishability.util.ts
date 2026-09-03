@@ -149,6 +149,8 @@ export async function lockAndAssertQuizAuthoringMutable(
  *
  *  - `QuizService.unpublishQuiz` - acquires it because PUBLISHED -> DRAFT crosses the same
  *    publication boundary and must serialize with publishability-affecting mutations.
+ *  - `QuizService.restoreQuiz` - acquires it because ARCHIVED -> DRAFT crosses the same
+ *    publication boundary and must serialize with publishability-affecting mutations.
  *
  * Lock ordering: every path that needs both locks acquires this Quiz-level lock strictly
  * *before* the Question-level lock (`createOption`/`updateOption`: Quiz lock, then

@@ -131,6 +131,21 @@ export class InstructorLessonController {
     );
   }
 
+  @Post(':lessonId/restore')
+  @HttpCode(HttpStatus.OK)
+  async restore(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: LessonIdParamDto,
+  ): Promise<LessonSummary> {
+    return this.lessons.restoreLesson(
+      principal,
+      params.tenantId,
+      params.courseId,
+      params.sectionId,
+      params.lessonId,
+    );
+  }
+
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
   async reorder(

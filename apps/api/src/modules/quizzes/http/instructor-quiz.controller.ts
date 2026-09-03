@@ -120,6 +120,15 @@ export class InstructorQuizController {
     return this.quizzes.unpublishQuiz(principal, params.tenantId, params.quizId);
   }
 
+  @Post(':quizId/restore')
+  @HttpCode(HttpStatus.OK)
+  async restore(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: QuizIdParamDto,
+  ): Promise<QuizSummary> {
+    return this.quizzes.restoreQuiz(principal, params.tenantId, params.quizId);
+  }
+
   @Get(':quizId/attempts')
   @HttpCode(HttpStatus.OK)
   async attemptsReport(
