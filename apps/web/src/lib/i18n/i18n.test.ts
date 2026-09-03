@@ -14,3 +14,13 @@ test("resolves persisted language and direction", () => {
 test("keeps English and Arabic translation keys aligned", () => {
   assert.deepEqual(Object.keys(translations.ar).sort(), Object.keys(translations.en).sort());
 });
+
+test("keeps Instructor product vocabulary out of backend/provider language", () => {
+  assert.match(translations.en["courses.createDialogCopy"], /chapters/);
+  assert.doesNotMatch(translations.en["courses.createDialogCopy"], /sections/i);
+  assert.equal(translations.en["lessons.quizStatusPublished"], "Live");
+  assert.equal(translations.ar["lessons.quizStatusPublished"], "مباشر");
+  assert.doesNotMatch(translations.en["media.uploadStateVideoQueued"], /Bunny|R2|backend/i);
+  assert.doesNotMatch(translations.ar["media.uploadStateVideoQueued"], /Bunny|R2|backend/i);
+  assert.doesNotMatch(translations.en["quizzes.publishRequirementsIntro"], /backend/i);
+});
