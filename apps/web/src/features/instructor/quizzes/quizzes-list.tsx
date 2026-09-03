@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useAuthenticatedInstructorSession } from "@/features/instructor/session-context";
+import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
 import { formatDate } from "@/features/instructor/students/format";
 import { canGoNext, canGoPrevious, nextOffset, previousOffset } from "@/features/instructor/students/pagination";
-import type { QuizRevealAnswersPolicy, QuizStatus } from "@/lib/api/types";
+import type { QuizRevealAnswersPolicy, QuizStatus, QuizSummary } from "@/lib/api/types";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { CreateQuizDialog } from "./create-quiz-dialog";
 import { isNetworkError } from "./error-mapping";
+import { canArchiveQuiz, canPublishQuiz, canRestoreQuiz, canTakeQuizOffline } from "./lifecycle";
+import { QuizLifecycleConfirmDialog, type QuizLifecycleAction } from "./lifecycle-confirm-dialog";
 import { QUIZZES_PAGE_SIZE, useQuizzesList } from "./quizzes-service";
 
 const QUIZ_STATUS_KEY: Record<QuizStatus, TranslationKey> = {
@@ -24,12 +27,46 @@ const REVEAL_POLICY_KEY: Record<QuizRevealAnswersPolicy, TranslationKey> = {
   AFTER_PASSING: "quizzes.revealAfterPassing",
 };
 
+type LifecycleTarget = { action: QuizLifecycleAction; quiz: QuizSummary };
+
 export function QuizzesList() {
   const { tenant } = useAuthenticatedInstructorSession();
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
   const { state, retry } = useQuizzesList(tenant.tenantId, offset);
+
+  function quizActions(quiz: QuizSummary): ActionMenuItem[] {
+    const items: ActionMenuItem[] = [];
+
+    if (canPublishQuiz(quiz.status)) {
+      items.push({ key: "publish", label: t("quizzes.publishAction"), onSelect: () => setLifecycleTarget({ action: "publish", quiz }) });
+    }
+
+    if (canTakeQuizOffline(quiz.status)) {
+      items.push({
+        key: "takeOffline",
+        label: t("quizzes.takeOfflineAction"),
+        onSelect: () => setLifecycleTarget({ action: "takeOffline", quiz }),
+      });
+    }
+
+    if (canArchiveQuiz(quiz.status)) {
+      items.push({
+        key: "archive",
+        label: t("quizzes.archiveAction"),
+        danger: true,
+        onSelect: () => setLifecycleTarget({ action: "archive", quiz }),
+      });
+    }
+
+    if (canRestoreQuiz(quiz.status)) {
+      items.push({ key: "restore", label: t("quizzes.restoreAction"), onSelect: () => setLifecycleTarget({ action: "restore", quiz }) });
+    }
+
+    return items;
+  }
 
   return (
     <div className="quizzes-page">
@@ -96,9 +133,16 @@ export function QuizzesList() {
                     <td className="table-col-secondary">{t(REVEAL_POLICY_KEY[quiz.revealAnswersPolicy])}</td>
                     <td className="table-col-secondary">{formatDate(quiz.updatedAt)}</td>
                     <td>
-                      <Link className="ghost-button compact" href={`/instructor/quizzes/${quiz.quizId}`}>
-                        {t("quizzes.viewAction")}
-                      </Link>
+                      <div className="row-actions">
+                        <Link
+                          className="ghost-button compact"
+                          href={`/instructor/quizzes/${quiz.quizId}`}
+                          aria-label={t("quizzes.manageActionLabel").replace("{quiz}", quiz.title)}
+                        >
+                          {t("quizzes.manageAction")}
+                        </Link>
+                        <ActionMenu label={t("common.moreActionsFor").replace("{item}", quiz.title)} items={quizActions(quiz)} />
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -128,6 +172,20 @@ export function QuizzesList() {
       )}
 
       {createOpen ? <CreateQuizDialog tenantId={tenant.tenantId} onClose={() => setCreateOpen(false)} /> : null}
+
+      {lifecycleTarget ? (
+        <QuizLifecycleConfirmDialog
+          action={lifecycleTarget.action}
+          tenantId={tenant.tenantId}
+          quiz={lifecycleTarget.quiz}
+          onClose={() => setLifecycleTarget(null)}
+          onDone={() => {
+            setLifecycleTarget(null);
+            retry();
+          }}
+          onConflict={retry}
+        />
+      ) : null}
     </div>
   );
 }

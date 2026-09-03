@@ -73,6 +73,34 @@ export function archiveLesson(
   );
 }
 
+/** Take Offline: PUBLISHED -> DRAFT. Non-cascading, reversible via `publishLesson` again. */
+export function unpublishLesson(
+  api: ApiClient,
+  tenantId: string,
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+): Promise<LessonSummary> {
+  return api.request<LessonSummary>(
+    `/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/unpublish`,
+    { method: "POST" },
+  );
+}
+
+/** Restore: ARCHIVED -> DRAFT. Never resurrects straight to PUBLISHED. */
+export function restoreLesson(
+  api: ApiClient,
+  tenantId: string,
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+): Promise<LessonSummary> {
+  return api.request<LessonSummary>(
+    `/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/restore`,
+    { method: "POST" },
+  );
+}
+
 /**
  * Scoped to one section (the frozen reorder endpoint lives under
  * .../sections/:sectionId/lessons/reorder). `lessonIds` must be exactly the

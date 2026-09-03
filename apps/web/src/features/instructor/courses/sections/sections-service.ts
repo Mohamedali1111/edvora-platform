@@ -51,6 +51,20 @@ export function archiveSection(api: ApiClient, tenantId: string, courseId: strin
   });
 }
 
+/** Take Offline: PUBLISHED -> DRAFT. Non-cascading, reversible via `publishSection` again. */
+export function unpublishSection(api: ApiClient, tenantId: string, courseId: string, sectionId: string): Promise<CourseSectionSummary> {
+  return api.request<CourseSectionSummary>(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/unpublish`, {
+    method: "POST",
+  });
+}
+
+/** Restore: ARCHIVED -> DRAFT. Never resurrects straight to PUBLISHED. */
+export function restoreSection(api: ApiClient, tenantId: string, courseId: string, sectionId: string): Promise<CourseSectionSummary> {
+  return api.request<CourseSectionSummary>(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/restore`, {
+    method: "POST",
+  });
+}
+
 /**
  * `sectionIds` must be exactly the current set of non-ARCHIVED section IDs for
  * this course, in the desired final order - see ordering.ts for how that set

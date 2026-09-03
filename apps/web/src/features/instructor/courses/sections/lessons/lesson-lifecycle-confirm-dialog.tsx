@@ -1,44 +1,57 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Modal } from "@/features/instructor/students/dialog";
 import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { LessonSummary } from "@/lib/api/types";
-import { archiveLesson, publishLesson } from "./lessons-service";
+import { LifecycleActionDialog, type LifecycleActionCopy } from "@/features/instructor/lifecycle-action-dialog";
+import { archiveLesson, publishLesson, restoreLesson, unpublishLesson } from "./lessons-service";
 import { isLessonLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 
-type LifecycleAction = "publish" | "archive";
+export type LessonLifecycleAction = "publish" | "takeOffline" | "archive" | "restore";
 
-const COPY: Record<
-  LifecycleAction,
-  { title: TranslationKey; body: TranslationKey; confirm: TranslationKey; pending: TranslationKey; errorFallback: TranslationKey }
-> = {
+const COPY: Record<LessonLifecycleAction, LifecycleActionCopy> = {
   publish: {
     title: "lessons.publishDialogTitle",
     body: "lessons.publishDialogCopy",
     confirm: "lessons.publishConfirm",
     pending: "courses.publishing",
-    errorFallback: "lessons.publishErrorGeneric",
+  },
+  takeOffline: {
+    title: "lessons.takeOfflineDialogTitle",
+    body: "lessons.takeOfflineDialogCopy",
+    confirm: "lessons.takeOfflineConfirm",
+    pending: "courses.takingOffline",
   },
   archive: {
     title: "lessons.archiveDialogTitle",
     body: "lessons.archiveDialogCopy",
     confirm: "lessons.archiveConfirm",
     pending: "courses.archiving",
-    errorFallback: "lessons.archiveErrorGeneric",
+  },
+  restore: {
+    title: "lessons.restoreDialogTitle",
+    body: "lessons.restoreDialogCopy",
+    confirm: "lessons.restoreConfirm",
+    pending: "courses.restoring",
   },
 };
 
+const ERROR_FALLBACK: Record<LessonLifecycleAction, TranslationKey> = {
+  publish: "lessons.publishErrorGeneric",
+  takeOffline: "lessons.takeOfflineErrorGeneric",
+  archive: "lessons.archiveErrorGeneric",
+  restore: "lessons.restoreErrorGeneric",
+};
+
 /**
- * Mirrors Course/Section's LifecycleConfirmDialog (same shape/behavior),
- * kept as its own component rather than generalizing the already-committed
- * ones. The frozen backend has no request body for either endpoint. Publish
- * failures here are where LESSON_CONTENT_NOT_READY actually surfaces (the
- * asset/quiz readiness check happens only at publish time, never predicted
- * beforehand) - resolveErrorMessageKey maps it to a clear, translated,
- * accurate explanation rather than a raw backend string.
+ * Mirrors Course/Section's LifecycleConfirmDialog (same shared shell, same
+ * four actions). The backend has no request body for any of these four
+ * endpoints. Publish failures here are where LESSON_CONTENT_NOT_READY
+ * actually surfaces (the asset/quiz readiness check happens only at publish
+ * time, never predicted beforehand) - resolveErrorMessageKey maps it to a
+ * clear, translated, accurate explanation rather than a raw backend string.
  */
 export function LessonLifecycleConfirmDialog({
   action,
@@ -50,7 +63,7 @@ export function LessonLifecycleConfirmDialog({
   onDone,
   onConflict,
 }: {
-  action: LifecycleAction;
+  action: LessonLifecycleAction;
   tenantId: string;
   courseId: string;
   sectionId: string;
@@ -79,13 +92,17 @@ export function LessonLifecycleConfirmDialog({
       const result =
         action === "publish"
           ? await publishLesson(client, tenantId, courseId, sectionId, lesson.lessonId)
-          : await archiveLesson(client, tenantId, courseId, sectionId, lesson.lessonId);
+          : action === "takeOffline"
+            ? await unpublishLesson(client, tenantId, courseId, sectionId, lesson.lessonId)
+            : action === "archive"
+              ? await archiveLesson(client, tenantId, courseId, sectionId, lesson.lessonId)
+              : await restoreLesson(client, tenantId, courseId, sectionId, lesson.lessonId);
       onDone(result);
     } catch (error) {
       if (isNetworkError(error)) {
         setBackendError(t("shell.apiUnavailable"));
       } else {
-        setBackendError(t(resolveErrorMessageKey(error, copy.errorFallback)));
+        setBackendError(t(resolveErrorMessageKey(error, ERROR_FALLBACK[action])));
 
         if (isLessonLifecycleConflict(error)) {
           onConflict?.();
@@ -98,33 +115,15 @@ export function LessonLifecycleConfirmDialog({
   }
 
   return (
-    <Modal titleId="lesson-lifecycle-title" onClose={onClose}>
-      <div className="auth-form">
-        <h2 id="lesson-lifecycle-title">{t(copy.title)}</h2>
-        <p className="form-note">
-          {t(copy.body)} <strong>{lesson.title}</strong>
-        </p>
-
-        {backendError ? (
-          <div className="form-error" role="alert">
-            {backendError}
-          </div>
-        ) : null}
-
-        <div className="modal-actions">
-          <button className="secondary-button" type="button" onClick={onClose} disabled={submitting} autoFocus>
-            {t("common.cancel")}
-          </button>
-          <button
-            className={action === "archive" ? "primary-button danger-button" : "primary-button"}
-            type="button"
-            onClick={confirm}
-            disabled={submitting}
-          >
-            {submitting ? t(copy.pending) : t(copy.confirm)}
-          </button>
-        </div>
-      </div>
-    </Modal>
+    <LifecycleActionDialog
+      titleId="lesson-lifecycle-title"
+      entityTitle={lesson.title}
+      copy={copy}
+      danger={action === "archive"}
+      backendError={backendError}
+      submitting={submitting}
+      onConfirm={confirm}
+      onClose={onClose}
+    />
   );
 }

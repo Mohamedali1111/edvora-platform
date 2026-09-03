@@ -6,14 +6,21 @@ import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseSectionSummary, SectionStatus } from "@/lib/api/types";
 import { NavIcon } from "@/features/instructor/nav-icons";
-import { MoveEarlierIcon, MoveLaterIcon } from "@/features/instructor/courses/ordering-icons";
+import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
 import { reorderSections, useSectionsList } from "./sections-service";
-import { canArchiveSection, canEditSectionMetadata, canPublishSection, canReorderSection } from "./lifecycle";
+import {
+  canArchiveSection,
+  canEditSectionMetadata,
+  canPublishSection,
+  canReorderSection,
+  canRestoreSection,
+  canTakeSectionOffline,
+} from "./lifecycle";
 import { moveEarlier, moveLater, reorderableSectionIds } from "./ordering";
 import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { CreateSectionDialog } from "./create-section-dialog";
 import { EditSectionDialog } from "./edit-section-dialog";
-import { SectionLifecycleConfirmDialog } from "./section-lifecycle-confirm-dialog";
+import { SectionLifecycleConfirmDialog, type SectionLifecycleAction } from "./section-lifecycle-confirm-dialog";
 import { LessonsPanel } from "./lessons/lessons-panel";
 
 const SECTION_STATUS_KEY: Record<SectionStatus, TranslationKey> = {
@@ -22,7 +29,7 @@ const SECTION_STATUS_KEY: Record<SectionStatus, TranslationKey> = {
   ARCHIVED: "sections.statusArchived",
 };
 
-type LifecycleTarget = { action: "publish" | "archive"; section: CourseSectionSummary };
+type LifecycleTarget = { action: SectionLifecycleAction; section: CourseSectionSummary };
 
 /**
  * A Section's editability/lifecycle actions depend only on its own status,
@@ -31,6 +38,14 @@ type LifecycleTarget = { action: "publish" | "archive"; section: CourseSectionSu
  * documented as deliberate ("archiving does not cascade... preserving
  * descendant authoring state"). This panel is therefore self-contained and
  * doesn't need the Course's own status at all.
+ *
+ * Row shape (Instructor Web Management Action System): the row itself is the
+ * primary "reveal this section's lessons" control (a real button, not a
+ * click-only div - `aria-expanded`/`aria-controls` keep it keyboard- and
+ * screen-reader-operable exactly like the dedicated Show/Hide Lessons button
+ * it replaces), and every contextual action (Edit, Move up/down, Publish,
+ * Take Offline, Archive, Restore) lives in one overflow menu instead of a
+ * row of equally-weighted buttons.
  */
 export function SectionsPanel({
   tenantId,
@@ -40,13 +55,14 @@ export function SectionsPanel({
   tenantId: string;
   courseId: string;
   /**
-   * Called after a Section create or lifecycle (publish/archive) change,
-   * and forwarded down to `LessonsPanel` for the equivalent Lesson
-   * mutations - see `course-detail.tsx`'s `bumpContentVersion`, which this
-   * ultimately drives the Course Readiness panel with. Reorder and plain
-   * metadata edits are deliberately not reported: neither changes anything
-   * `readiness.ts` derives from (status or content readiness), so reporting
-   * them would only trigger wasted refetches.
+   * Called after a Section create or lifecycle (publish/take offline/
+   * archive/restore) change, and forwarded down to `LessonsPanel` for the
+   * equivalent Lesson mutations - see `course-detail.tsx`'s
+   * `bumpContentVersion`, which this ultimately drives the Course Readiness
+   * panel with. Reorder and plain metadata edits are deliberately not
+   * reported: neither changes anything `readiness.ts` derives from (status
+   * or content readiness), so reporting them would only trigger wasted
+   * refetches.
    */
   onContentChanged: () => void;
 }) {
@@ -91,6 +107,61 @@ export function SectionsPanel({
     }
   }
 
+  function sectionActions(section: CourseSectionSummary, order: string[]): ActionMenuItem[] {
+    const items: ActionMenuItem[] = [];
+
+    if (canEditSectionMetadata(section.status)) {
+      items.push({ key: "edit", label: t("sections.editAction"), onSelect: () => setEditingSection(section) });
+    }
+
+    if (canReorderSection(section.status)) {
+      const canMoveEarlier = moveEarlier(order, section.sectionId) !== null;
+      const canMoveLater = moveLater(order, section.sectionId) !== null;
+
+      items.push({
+        key: "move-earlier",
+        label: t("sections.moveEarlierAction"),
+        disabled: !canMoveEarlier,
+        disabledReason: canMoveEarlier ? undefined : t("common.alreadyFirst"),
+        onSelect: () => void handleMove(section, "earlier"),
+      });
+      items.push({
+        key: "move-later",
+        label: t("sections.moveLaterAction"),
+        disabled: !canMoveLater,
+        disabledReason: canMoveLater ? undefined : t("common.alreadyLast"),
+        onSelect: () => void handleMove(section, "later"),
+      });
+    }
+
+    if (canPublishSection(section.status)) {
+      items.push({ key: "publish", label: t("courses.publishAction"), onSelect: () => setLifecycleTarget({ action: "publish", section }) });
+    }
+
+    if (canTakeSectionOffline(section.status)) {
+      items.push({
+        key: "takeOffline",
+        label: t("courses.takeOfflineAction"),
+        onSelect: () => setLifecycleTarget({ action: "takeOffline", section }),
+      });
+    }
+
+    if (canArchiveSection(section.status)) {
+      items.push({
+        key: "archive",
+        label: t("courses.archiveAction"),
+        danger: true,
+        onSelect: () => setLifecycleTarget({ action: "archive", section }),
+      });
+    }
+
+    if (canRestoreSection(section.status)) {
+      items.push({ key: "restore", label: t("courses.restoreAction"), onSelect: () => setLifecycleTarget({ action: "restore", section }) });
+    }
+
+    return items;
+  }
+
   return (
     <div className="section-panel">
       <div className="modal-actions">
@@ -132,88 +203,38 @@ export function SectionsPanel({
         <ol className="section-list">
           {state.data.map((section) => {
             const order = reorderableSectionIds(state.data);
-            const canMoveEarlier = canReorderSection(section.status) && moveEarlier(order, section.sectionId) !== null;
-            const canMoveLater = canReorderSection(section.status) && moveLater(order, section.sectionId) !== null;
-
             const isExpanded = expandedSectionId === section.sectionId;
+            const lessonsRegionId = `section-lessons-${section.sectionId}`;
 
             return (
               <li className="section-row-group" key={section.sectionId}>
                 <div className="section-row">
-                  <div className="section-row-main">
-                    <strong>{section.title}</strong>
-                    {section.description ? <span className="table-secondary-text">{section.description}</span> : null}
-                  </div>
+                  <button
+                    type="button"
+                    className="section-row-primary"
+                    aria-expanded={isExpanded}
+                    aria-controls={lessonsRegionId}
+                    onClick={() => setExpandedSectionId(isExpanded ? null : section.sectionId)}
+                  >
+                    <span className="section-row-main">
+                      <strong>{section.title}</strong>
+                      {section.description ? <span className="table-secondary-text">{section.description}</span> : null}
+                    </span>
+                    <ChevronIcon expanded={isExpanded} />
+                    <span className="sr-only">
+                      {t(isExpanded ? "sections.collapseRowLabel" : "sections.expandRowLabel").replace("{section}", section.title)}
+                    </span>
+                  </button>
 
                   <span className={`status-badge status-badge-${section.status.toLowerCase()}`}>
                     {t(SECTION_STATUS_KEY[section.status])}
                   </span>
 
-                  <div className="section-row-actions">
-                    {canReorderSection(section.status) ? (
-                      <>
-                        <button
-                          className="ghost-button compact icon-text-button"
-                          type="button"
-                          onClick={() => handleMove(section, "earlier")}
-                          disabled={reordering || !canMoveEarlier}
-                          aria-label={`${t("sections.moveEarlierAction")}: ${section.title}`}
-                        >
-                          <MoveEarlierIcon />
-                          {t("sections.moveEarlierAction")}
-                        </button>
-                        <button
-                          className="ghost-button compact icon-text-button"
-                          type="button"
-                          onClick={() => handleMove(section, "later")}
-                          disabled={reordering || !canMoveLater}
-                          aria-label={`${t("sections.moveLaterAction")}: ${section.title}`}
-                        >
-                          <MoveLaterIcon />
-                          {t("sections.moveLaterAction")}
-                        </button>
-                      </>
-                    ) : null}
-
-                    {canEditSectionMetadata(section.status) ? (
-                      <button className="ghost-button compact" type="button" onClick={() => setEditingSection(section)}>
-                        {t("sections.editAction")}
-                      </button>
-                    ) : null}
-
-                    {canPublishSection(section.status) ? (
-                      <button
-                        className="secondary-button compact"
-                        type="button"
-                        onClick={() => setLifecycleTarget({ action: "publish", section })}
-                      >
-                        {t("courses.publishAction")}
-                      </button>
-                    ) : null}
-
-                    {canArchiveSection(section.status) ? (
-                      <button
-                        className="secondary-button compact"
-                        type="button"
-                        onClick={() => setLifecycleTarget({ action: "archive", section })}
-                      >
-                        {t("courses.archiveAction")}
-                      </button>
-                    ) : null}
-
-                    <button
-                      className="ghost-button compact"
-                      type="button"
-                      onClick={() => setExpandedSectionId(isExpanded ? null : section.sectionId)}
-                      aria-expanded={isExpanded}
-                    >
-                      {isExpanded ? t("sections.hideLessonsAction") : t("sections.showLessonsAction")}
-                    </button>
-                  </div>
+                  <ActionMenu label={t("common.moreActionsFor").replace("{item}", section.title)} items={sectionActions(section, order)} />
                 </div>
 
                 {isExpanded ? (
-                  <div className="section-lessons-area">
+                  <div className="section-lessons-area" id={lessonsRegionId}>
                     <LessonsPanel
                       tenantId={tenantId}
                       courseId={courseId}
@@ -271,5 +292,26 @@ export function SectionsPanel({
         />
       ) : null}
     </div>
+  );
+}
+
+/** Expand/collapse chevron - rotates between collapsed (pointing down) and expanded (pointing up), a vertical distinction that reads the same in LTR and RTL, so unlike the shell's back-link arrow it never needs an `:dir(rtl)` mirror. */
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="section-row-chevron"
+      style={{ transform: expanded ? "rotate(180deg)" : "none" }}
+    >
+      <path d="M5 7.5 10 13l5-5.5" />
+    </svg>
   );
 }

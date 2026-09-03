@@ -1,42 +1,56 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Modal } from "@/features/instructor/students/dialog";
 import { getAuthService } from "@/lib/api/session";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseSectionSummary } from "@/lib/api/types";
-import { archiveSection, publishSection } from "./sections-service";
+import { LifecycleActionDialog, type LifecycleActionCopy } from "@/features/instructor/lifecycle-action-dialog";
+import { archiveSection, publishSection, restoreSection, unpublishSection } from "./sections-service";
 import { isNetworkError, isSectionLifecycleConflict, resolveErrorMessageKey } from "./error-mapping";
 
-type LifecycleAction = "publish" | "archive";
+export type SectionLifecycleAction = "publish" | "takeOffline" | "archive" | "restore";
 
-const COPY: Record<
-  LifecycleAction,
-  { title: TranslationKey; body: TranslationKey; confirm: TranslationKey; pending: TranslationKey; errorFallback: TranslationKey }
-> = {
+const COPY: Record<SectionLifecycleAction, LifecycleActionCopy> = {
   publish: {
     title: "sections.publishDialogTitle",
     body: "sections.publishDialogCopy",
     confirm: "sections.publishConfirm",
     pending: "courses.publishing",
-    errorFallback: "sections.publishErrorGeneric",
+  },
+  takeOffline: {
+    title: "sections.takeOfflineDialogTitle",
+    body: "sections.takeOfflineDialogCopy",
+    confirm: "sections.takeOfflineConfirm",
+    pending: "courses.takingOffline",
   },
   archive: {
     title: "sections.archiveDialogTitle",
     body: "sections.archiveDialogCopy",
     confirm: "sections.archiveConfirm",
     pending: "courses.archiving",
-    errorFallback: "sections.archiveErrorGeneric",
+  },
+  restore: {
+    title: "sections.restoreDialogTitle",
+    body: "sections.restoreDialogCopy",
+    confirm: "sections.restoreConfirm",
+    pending: "courses.restoring",
   },
 };
 
+const ERROR_FALLBACK: Record<SectionLifecycleAction, TranslationKey> = {
+  publish: "sections.publishErrorGeneric",
+  takeOffline: "sections.takeOfflineErrorGeneric",
+  archive: "sections.archiveErrorGeneric",
+  restore: "sections.restoreErrorGeneric",
+};
+
 /**
- * Mirrors Course's LifecycleConfirmDialog (same shape/behavior), kept as its
- * own component rather than generalizing the Course one - that file is
- * already-approved Slice D1 architecture and isn't touched here. The frozen
- * backend has no request body for either endpoint, so the only inputs are
- * which action and which section.
+ * Mirrors Course's LifecycleConfirmDialog (same shared shell, same four
+ * actions) - kept as its own component rather than merging into it, since
+ * Section calls its own service module and error-mapping module. The
+ * backend has no request body for any of these four endpoints, so the only
+ * inputs are which action and which section.
  */
 export function SectionLifecycleConfirmDialog({
   action,
@@ -47,7 +61,7 @@ export function SectionLifecycleConfirmDialog({
   onDone,
   onConflict,
 }: {
-  action: LifecycleAction;
+  action: SectionLifecycleAction;
   tenantId: string;
   courseId: string;
   section: CourseSectionSummary;
@@ -75,13 +89,17 @@ export function SectionLifecycleConfirmDialog({
       const result =
         action === "publish"
           ? await publishSection(client, tenantId, courseId, section.sectionId)
-          : await archiveSection(client, tenantId, courseId, section.sectionId);
+          : action === "takeOffline"
+            ? await unpublishSection(client, tenantId, courseId, section.sectionId)
+            : action === "archive"
+              ? await archiveSection(client, tenantId, courseId, section.sectionId)
+              : await restoreSection(client, tenantId, courseId, section.sectionId);
       onDone(result);
     } catch (error) {
       if (isNetworkError(error)) {
         setBackendError(t("shell.apiUnavailable"));
       } else {
-        setBackendError(t(resolveErrorMessageKey(error, copy.errorFallback)));
+        setBackendError(t(resolveErrorMessageKey(error, ERROR_FALLBACK[action])));
 
         if (isSectionLifecycleConflict(error)) {
           onConflict?.();
@@ -94,33 +112,15 @@ export function SectionLifecycleConfirmDialog({
   }
 
   return (
-    <Modal titleId="section-lifecycle-title" onClose={onClose}>
-      <div className="auth-form">
-        <h2 id="section-lifecycle-title">{t(copy.title)}</h2>
-        <p className="form-note">
-          {t(copy.body)} <strong>{section.title}</strong>
-        </p>
-
-        {backendError ? (
-          <div className="form-error" role="alert">
-            {backendError}
-          </div>
-        ) : null}
-
-        <div className="modal-actions">
-          <button className="secondary-button" type="button" onClick={onClose} disabled={submitting} autoFocus>
-            {t("common.cancel")}
-          </button>
-          <button
-            className={action === "archive" ? "primary-button danger-button" : "primary-button"}
-            type="button"
-            onClick={confirm}
-            disabled={submitting}
-          >
-            {submitting ? t(copy.pending) : t(copy.confirm)}
-          </button>
-        </div>
-      </div>
-    </Modal>
+    <LifecycleActionDialog
+      titleId="section-lifecycle-title"
+      entityTitle={section.title}
+      copy={copy}
+      danger={action === "archive"}
+      backendError={backendError}
+      submitting={submitting}
+      onConfirm={confirm}
+      onClose={onClose}
+    />
   );
 }

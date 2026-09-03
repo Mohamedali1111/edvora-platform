@@ -24,6 +24,7 @@
 @import "../styles/dialogs.css";
 @import "../styles/tables.css";
 @import "../styles/components.css";
+@import "../styles/instructor/action-menu.css";
 @import "../styles/instructor/overview.css";
 @import "../styles/instructor/students.css";
 @import "../styles/instructor/courses.css";

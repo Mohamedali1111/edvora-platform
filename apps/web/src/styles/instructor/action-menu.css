@@ -1,0 +1,161 @@
+/**
+ * Shared overflow ("...") action menu (`features/instructor/action-menu.tsx`)
+ * used by every Course/Section/Lesson/Quiz management row.
+ *
+ * The trigger (`.action-menu-trigger`) stays inline in its row. The opened
+ * panel (`.action-menu-scrim` + `.action-menu-panel`) is rendered through a
+ * React portal into `document.body`, so this stylesheet never needs to
+ * reason about the row/table it was triggered from - only the viewport.
+ * `position: fixed` is set here for both breakpoints; the *desktop*
+ * top/left offsets are computed in JS (action-menu-placement.ts, from the
+ * trigger's real on-screen position) and applied as an inline style, while
+ * the *mobile* shape below simply pins the panel to the bottom of the
+ * viewport - no JS coordinates needed there at all. This is deliberately
+ * not `position: absolute` anchored inside the row anymore: that anchoring
+ * was clipped by `.table-scroll`'s `overflow-x: auto` (which forces a
+ * clipping `overflow-y: auto` too, per the CSS overflow spec) for rows near
+ * the bottom of the Courses/Quizzes tables. Portaling + `fixed` removes the
+ * popover from that container's box entirely, without touching
+ * `.table-scroll` itself, which Students/Enrollments and other unrelated
+ * surfaces also rely on.
+ */
+.action-menu {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.action-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  color: var(--text-secondary);
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.action-menu-trigger:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.action-menu-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* Hidden above the mobile breakpoint - the popover has no need for a
+   dismiss scrim, since an outside click, a scroll, or a resize already
+   closes it (see action-menu.tsx). */
+.action-menu-scrim {
+  display: none;
+}
+
+.action-menu-panel {
+  position: fixed;
+  z-index: 25;
+  display: grid;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 16px));
+  /* Bounds the pathological "menu taller than the viewport" case that
+     action-menu-placement.ts's clamp alone can't fully solve - the panel
+     scrolls internally instead of ever exceeding the viewport height. */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  gap: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 0.4rem;
+  box-shadow: var(--shadow-md);
+  animation: modal-rise-in var(--duration-base) var(--ease-standard);
+}
+
+.action-menu-item {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+  text-align: start;
+  padding: 0.6rem 0.75rem;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.action-menu-item:hover,
+.action-menu-item:focus-visible {
+  background: var(--surface-secondary);
+}
+
+.action-menu-item-danger {
+  color: var(--danger);
+}
+
+.action-menu-item-danger:hover,
+.action-menu-item-danger:focus-visible {
+  background: var(--danger-soft);
+}
+
+.action-menu-item[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.action-menu-item[aria-disabled="true"]:hover,
+.action-menu-item[aria-disabled="true"]:focus-visible {
+  background: transparent;
+}
+
+/* ---- Mobile: bottom/action sheet instead of a tiny anchored popover ----
+   Never shrink the desktop popover down to phone width (docs instruction:
+   "do NOT show a tiny desktop popover at 375px") - below the breakpoint the
+   panel ignores its JS-computed top/left entirely (action-menu.tsx sets no
+   inline position at this breakpoint - see its `mobileQuery.matches`
+   branch) and instead becomes a full-width sheet pinned to the bottom of
+   the viewport, with its own scrim like the sidebar drawer
+   (instructor/shell.css) and the shared Modal (styles/dialogs.css) already
+   use. */
+@media (max-width: 640px) {
+  .action-menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 24;
+    display: block;
+    border: 0;
+    background: rgb(10 12 11 / 46%);
+    animation: modal-fade-in var(--duration-base) var(--ease-standard);
+  }
+
+  .action-menu-panel {
+    inset-inline: 0;
+    bottom: 0;
+    top: auto !important;
+    left: auto !important;
+    min-width: 0;
+    max-width: none;
+    max-height: 70vh;
+    gap: 0.3rem;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding: 0.6rem 0.6rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: var(--shadow-lg);
+    animation: action-sheet-rise-in var(--duration-base) var(--ease-standard);
+  }
+
+  .action-menu-item {
+    min-height: 48px;
+    font-size: var(--fs-body);
+    padding: 0.75rem 0.85rem;
+  }
+}
+
+@keyframes action-sheet-rise-in {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}

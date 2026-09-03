@@ -9,8 +9,8 @@ import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { CourseStatus, CourseSummary, CourseVisibility } from "@/lib/api/types";
 import { updateCourse, useCourseDetail } from "./courses-service";
-import { canArchive, canEditCourseMetadata, canPublish, isTerminal } from "./lifecycle";
-import { LifecycleConfirmDialog } from "./lifecycle-confirm-dialog";
+import { canArchive, canEditCourseMetadata, canPublish, canRestore, canTakeOffline, isArchived } from "./lifecycle";
+import { LifecycleConfirmDialog, type CourseLifecycleAction } from "./lifecycle-confirm-dialog";
 import { isCourseLifecycleConflict, isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { validateCourseInput } from "./validation";
 import { SectionsPanel } from "./sections/sections-panel";
@@ -68,7 +68,7 @@ export function CourseDetail({ courseId }: { courseId: string }) {
 
 function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; course: CourseSummary; onChanged: () => void }) {
   const { t } = useI18n();
-  const [lifecycleAction, setLifecycleAction] = useState<"publish" | "archive" | null>(null);
+  const [lifecycleAction, setLifecycleAction] = useState<CourseLifecycleAction | null>(null);
   const editable = canEditCourseMetadata(course.status);
   // Bumped after any in-page Section/Lesson create or lifecycle
   // (publish/archive) mutation - the readiness panel below re-fetches
@@ -166,7 +166,7 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
         <span className={`status-badge status-badge-${course.status.toLowerCase()}`}>{t(COURSE_STATUS_KEY[course.status])}</span>
       </header>
 
-      {isTerminal(course.status) ? <div className="archived-banner">{t("courses.archivedReadOnlyBanner")}</div> : null}
+      {isArchived(course.status) ? <div className="archived-banner">{t("courses.archivedReadOnlyBanner")}</div> : null}
 
       <dl className="detail-grid">
         <div>
@@ -288,26 +288,34 @@ function CourseDetailBody({ tenantId, course, onChanged }: { tenantId: string; c
         )}
       </section>
 
-      {isTerminal(course.status) ? null : (
-        <section className="detail-section" aria-labelledby="course-lifecycle-heading">
-          <div className="detail-section-header">
-            <h2 id="course-lifecycle-heading">{t("courses.lifecycleHeading")}</h2>
-          </div>
+      <section className="detail-section" aria-labelledby="course-lifecycle-heading">
+        <div className="detail-section-header">
+          <h2 id="course-lifecycle-heading">{t("courses.lifecycleHeading")}</h2>
+        </div>
 
-          <div className="modal-actions course-lifecycle-actions">
-            {canPublish(course.status) ? (
-              <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("publish")}>
-                {t("courses.publishAction")}
-              </button>
-            ) : null}
-            {canArchive(course.status) ? (
-              <button className="secondary-button compact-action" type="button" onClick={() => setLifecycleAction("archive")}>
-                {t("courses.archiveAction")}
-              </button>
-            ) : null}
-          </div>
-        </section>
-      )}
+        <div className="modal-actions course-lifecycle-actions">
+          {canPublish(course.status) ? (
+            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("publish")}>
+              {t("courses.publishAction")}
+            </button>
+          ) : null}
+          {canTakeOffline(course.status) ? (
+            <button className="secondary-button compact-action" type="button" onClick={() => setLifecycleAction("takeOffline")}>
+              {t("courses.takeOfflineAction")}
+            </button>
+          ) : null}
+          {canArchive(course.status) ? (
+            <button className="primary-button danger-button compact-action" type="button" onClick={() => setLifecycleAction("archive")}>
+              {t("courses.archiveAction")}
+            </button>
+          ) : null}
+          {canRestore(course.status) ? (
+            <button className="primary-button compact-action" type="button" onClick={() => setLifecycleAction("restore")}>
+              {t("courses.restoreAction")}
+            </button>
+          ) : null}
+        </div>
+      </section>
 
       <CourseReadinessPanel tenantId={tenantId} courseId={course.courseId} contentVersion={contentVersion} />
 

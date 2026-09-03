@@ -1,16 +1,17 @@
 import type { LessonStatus } from "../../../../../lib/api/types";
 
 /**
- * The frozen backend's Lesson transitions (confirmed against
- * LessonService, matching Course/Section's DEC-0048 enforcement exactly):
- * DRAFT -> PUBLISHED, DRAFT -> ARCHIVED, PUBLISHED -> ARCHIVED. ARCHIVED is
- * terminal - no unpublish, no restore. A Lesson's own status is the only
- * thing that governs its own editability/lifecycle actions: the backend
- * never checks the parent Section's or Course's status in any Lesson
- * service method - confirmed by reading every method (createLesson,
- * listLessons, updateLessonMetadata, archiveLesson, publishLesson,
- * reorderLessons) - so these helpers intentionally take only the Lesson's
- * own status.
+ * The backend's Lesson transitions (confirmed against LessonService, matching
+ * Course/Section's DEC-0048 enforcement exactly, including the 2026-09-03
+ * Take Offline/Restore addenda): DRAFT -> PUBLISHED, DRAFT -> ARCHIVED,
+ * PUBLISHED -> ARCHIVED, PUBLISHED -> DRAFT (Take Offline), and
+ * ARCHIVED -> DRAFT (Restore). A Lesson's own status is the only thing that
+ * governs its own editability/lifecycle actions: the backend never checks the
+ * parent Section's or Course's status in any Lesson service method -
+ * confirmed by reading every method (createLesson, listLessons,
+ * updateLessonMetadata, archiveLesson, publishLesson, unpublishLesson,
+ * restoreLesson, reorderLessons) - so these helpers intentionally take only
+ * the Lesson's own status.
  *
  * Publishing additionally requires real content readiness (VIDEO/DOCUMENT
  * asset READY, QUIZ PUBLISHED) - that is a backend-enforced concern
@@ -27,8 +28,16 @@ export function canPublishLesson(status: LessonStatus): boolean {
   return status === "DRAFT";
 }
 
+export function canTakeLessonOffline(status: LessonStatus): boolean {
+  return status === "PUBLISHED";
+}
+
 export function canArchiveLesson(status: LessonStatus): boolean {
   return status === "DRAFT" || status === "PUBLISHED";
+}
+
+export function canRestoreLesson(status: LessonStatus): boolean {
+  return status === "ARCHIVED";
 }
 
 /**
@@ -41,6 +50,6 @@ export function canReorderLesson(status: LessonStatus): boolean {
   return status !== "ARCHIVED";
 }
 
-export function isLessonTerminal(status: LessonStatus): boolean {
+export function isLessonArchived(status: LessonStatus): boolean {
   return status === "ARCHIVED";
 }

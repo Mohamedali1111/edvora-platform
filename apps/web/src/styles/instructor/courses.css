@@ -98,10 +98,39 @@
   padding: 0.85rem 1rem;
 }
 
+/**
+ * The row's primary control - a real <button> (not a click-only div) that
+ * both reveals the row's title/description and toggles the nested
+ * LessonsPanel, replacing the old dedicated Show/Hide Lessons button. Reset
+ * to look like plain row content, not a standalone button, so it reads as
+ * part of the row rather than competing with the ActionMenu trigger for
+ * "which button do I press" attention.
+ */
+.section-row-primary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 220px;
+  gap: 0.6rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  padding: 0.4rem 0.2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.section-row-primary:hover,
+.section-row-primary:focus-visible {
+  background: var(--surface-secondary);
+}
+
 .section-row-main {
   display: grid;
   min-width: 0;
-  flex: 1 1 220px;
+  flex: 1 1 auto;
   gap: 0.2rem;
 }
 
@@ -109,12 +138,10 @@
   overflow-wrap: anywhere;
 }
 
-.section-row-actions {
-  display: flex;
+.section-row-chevron {
   flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
+  color: var(--muted);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
 .section-row-group {
@@ -307,23 +334,18 @@
   }
 }
 
-/* Move-earlier/move-later buttons (Sections and Lessons): icon + label,
-   matching the same small-icon-plus-text treatment already established for
-   other secondary actions (e.g. the Overview "view all" links). */
-.icon-text-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-/* ---- Mobile-first Section/Lesson row compaction (Part 9) ----
+/* ---- Mobile-first Section/Lesson row compaction ----
    Below the breakpoint, `.section-row`/`.lesson-row` stop trying to fit
-   title + status + a cluster of small action buttons on one flexible row -
-   that's what produced the "crowded toolbar" / wrapped-button mess on
-   375-430px phones. Each row becomes two clear zones stacked vertically:
-   the content (title/status) on top, actions below as a full-width,
-   evenly-sized action bar - still every action's own real <button>, just
-   laid out for a thumb instead of a mouse. */
+   title + status + actions on one horizontal line - that's what produced
+   the old "crowded toolbar" / wrapped-button-wall mess on 375-430px phones.
+   Now that every contextual action lives in the single ActionMenu overflow
+   (see features/instructor/action-menu.tsx) instead of a row of equally-
+   weighted buttons, there's very little left to lay out: the row becomes a
+   simple stack - title/description content first (full width, so long
+   titles wrap normally), then the status badge, then the row's trailing
+   control(s) (Edit + the overflow trigger, or just the overflow trigger),
+   each left where a thumb naturally lands rather than stretched edge to
+   edge. */
 @media (max-width: 480px) {
   .section-lessons-area {
     margin-inline-start: 0.5rem;
@@ -336,19 +358,18 @@
     align-items: stretch;
   }
 
-  .section-row-actions,
-  .lesson-row .section-row-actions {
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    padding-block-start: 0.5rem;
-    border-block-start: 1px solid var(--border);
+  .section-row > .status-badge,
+  .lesson-row > .status-badge {
+    align-self: flex-start;
   }
 
-  .section-row-actions .ghost-button,
-  .section-row-actions .secondary-button {
-    flex: 1 1 calc(50% - 0.25rem);
-    justify-content: center;
-    min-height: 2.5rem;
+  .section-row > .action-menu {
+    align-self: flex-end;
+  }
+
+  .lesson-row > .row-actions {
+    justify-content: flex-end;
+    padding-block-start: 0.3rem;
   }
 }
 
@@ -435,8 +456,12 @@
     content: attr(data-label);
   }
 
+  /* The trailing cell now holds the Manage link plus the overflow
+     ActionMenu (see `.row-actions` in styles/components.css) side by side
+     rather than the link alone - it grows to fill the row while the
+     44x44 overflow trigger keeps its own fixed size next to it. */
   .courses-table .row-link {
-    width: 100%;
+    flex: 1 1 auto;
     justify-content: center;
   }
 }

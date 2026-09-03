@@ -71,6 +71,20 @@
   color: var(--muted);
 }
 
+/**
+ * Primary action (Manage/Edit link or button) paired with the shared
+ * overflow ActionMenu (instructor/action-menu.tsx) at the end of a
+ * management row - Courses/Quizzes list rows and Lesson rows all use this.
+ */
+.row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
 .back-link {
   display: inline-flex;
   align-items: center;

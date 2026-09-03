@@ -46,6 +46,16 @@ export function archiveQuiz(api: ApiClient, tenantId: string, quizId: string): P
   return api.request<QuizSummary>(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`, { method: "POST" });
 }
 
+/** Take Offline: PUBLISHED -> DRAFT. Non-cascading, reversible via `publishQuiz` again. */
+export function unpublishQuiz(api: ApiClient, tenantId: string, quizId: string): Promise<QuizSummary> {
+  return api.request<QuizSummary>(`/instructor/tenants/${tenantId}/quizzes/${quizId}/unpublish`, { method: "POST" });
+}
+
+/** Restore: ARCHIVED -> DRAFT. Never resurrects straight to PUBLISHED. Question statuses/Options are untouched. */
+export function restoreQuiz(api: ApiClient, tenantId: string, quizId: string): Promise<QuizSummary> {
+  return api.request<QuizSummary>(`/instructor/tenants/${tenantId}/quizzes/${quizId}/restore`, { method: "POST" });
+}
+
 export function listQuestions(api: ApiClient, tenantId: string, quizId: string): Promise<QuestionListResponse> {
   return api.request<QuestionListResponse>(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions`);
 }

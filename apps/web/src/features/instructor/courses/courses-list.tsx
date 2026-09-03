@@ -4,14 +4,17 @@ import Link from "next/link";
 import { useState } from "react";
 import { useAuthenticatedInstructorSession } from "@/features/instructor/session-context";
 import { NavIcon } from "@/features/instructor/nav-icons";
+import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
 import { formatDate } from "@/features/instructor/students/format";
 import { canGoNext, canGoPrevious, nextOffset, previousOffset } from "@/features/instructor/students/pagination";
 import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { CourseStatus } from "@/lib/api/types";
+import type { CourseStatus, CourseSummary } from "@/lib/api/types";
 import { CreateCourseDialog } from "./create-course-dialog";
 import { COURSES_PAGE_SIZE, useCoursesList } from "./courses-service";
 import { isNetworkError } from "./error-mapping";
+import { canArchive, canPublishAgainFromCoursesList, canRestore, canTakeOffline } from "./lifecycle";
+import { LifecycleConfirmDialog, type CourseLifecycleAction } from "./lifecycle-confirm-dialog";
 
 const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   DRAFT: "status.courseDraft",
@@ -19,12 +22,58 @@ const COURSE_STATUS_KEY: Record<CourseStatus, TranslationKey> = {
   ARCHIVED: "status.courseArchived",
 };
 
+type LifecycleTarget = { action: CourseLifecycleAction; course: CourseSummary };
+
 export function CoursesList() {
   const { tenant } = useAuthenticatedInstructorSession();
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
   const { state, retry } = useCoursesList(tenant.tenantId, offset);
+
+  function courseActions(course: CourseSummary): ActionMenuItem[] {
+    const items: ActionMenuItem[] = [];
+
+    // A never-published Draft Course (publishedAt === null) deliberately gets
+    // no one-click publish action from this list - see lifecycle.ts's
+    // canPublishAgainFromCoursesList doc comment. The only path forward for
+    // it is Manage (the future first-publish Course Review flow lands there).
+    if (canPublishAgainFromCoursesList(course)) {
+      items.push({
+        key: "publish",
+        label: t("courses.makeLiveAgainAction"),
+        onSelect: () => setLifecycleTarget({ action: "publish", course }),
+      });
+    }
+
+    if (canTakeOffline(course.status)) {
+      items.push({
+        key: "takeOffline",
+        label: t("courses.takeOfflineAction"),
+        onSelect: () => setLifecycleTarget({ action: "takeOffline", course }),
+      });
+    }
+
+    if (canArchive(course.status)) {
+      items.push({
+        key: "archive",
+        label: t("courses.archiveAction"),
+        danger: true,
+        onSelect: () => setLifecycleTarget({ action: "archive", course }),
+      });
+    }
+
+    if (canRestore(course.status)) {
+      items.push({
+        key: "restore",
+        label: t("courses.restoreAction"),
+        onSelect: () => setLifecycleTarget({ action: "restore", course }),
+      });
+    }
+
+    return items;
+  }
 
   return (
     <div className="courses-page">
@@ -88,14 +137,20 @@ export function CoursesList() {
                       {formatDate(course.updatedAt)}
                     </td>
                     <td data-label={t("courses.columnActions")}>
-                      <Link
-                        className="ghost-button compact row-link"
-                        href={`/instructor/courses/${course.courseId}`}
-                        aria-label={t("courses.viewActionLabel").replace("{course}", course.title)}
-                      >
-                        {t("courses.viewAction")}
-                        <span className="row-link-arrow" aria-hidden="true" />
-                      </Link>
+                      <div className="row-actions">
+                        <Link
+                          className="ghost-button compact row-link"
+                          href={`/instructor/courses/${course.courseId}`}
+                          aria-label={t("courses.manageActionLabel").replace("{course}", course.title)}
+                        >
+                          {t("courses.manageAction")}
+                          <span className="row-link-arrow" aria-hidden="true" />
+                        </Link>
+                        <ActionMenu
+                          label={t("common.moreActionsFor").replace("{item}", course.title)}
+                          items={courseActions(course)}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -125,6 +180,20 @@ export function CoursesList() {
       )}
 
       {createOpen ? <CreateCourseDialog tenantId={tenant.tenantId} onClose={() => setCreateOpen(false)} /> : null}
+
+      {lifecycleTarget ? (
+        <LifecycleConfirmDialog
+          action={lifecycleTarget.action}
+          tenantId={tenant.tenantId}
+          course={lifecycleTarget.course}
+          onClose={() => setLifecycleTarget(null)}
+          onDone={() => {
+            setLifecycleTarget(null);
+            retry();
+          }}
+          onConflict={retry}
+        />
+      ) : null}
     </div>
   );
 }

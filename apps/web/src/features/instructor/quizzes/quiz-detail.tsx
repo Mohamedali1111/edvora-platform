@@ -18,9 +18,11 @@ import {
   canMutateQuestion,
   canPublishQuiz,
   canReorderQuestion,
+  canRestoreQuiz,
+  canTakeQuizOffline,
   isQuizArchived,
 } from "./lifecycle";
-import { QuizLifecycleConfirmDialog } from "./lifecycle-confirm-dialog";
+import { QuizLifecycleConfirmDialog, type QuizLifecycleAction } from "./lifecycle-confirm-dialog";
 import { moveEarlier, moveLater, reorderableQuestionIds } from "./ordering";
 import {
   createOption,
@@ -63,6 +65,13 @@ const REVEAL_POLICY_KEY: Record<QuizRevealAnswersPolicy, TranslationKey> = {
   AFTER_PASSING: "quizzes.revealAfterPassing",
 };
 
+const LIFECYCLE_SUCCESS_KEY: Record<QuizLifecycleAction, TranslationKey> = {
+  publish: "quizzes.publishSuccess",
+  takeOffline: "quizzes.takeOfflineSuccess",
+  archive: "quizzes.archiveSuccess",
+  restore: "quizzes.restoreSuccess",
+};
+
 type PendingState = {
   metadata?: boolean;
   questionCreate?: boolean;
@@ -81,7 +90,7 @@ export function QuizDetail({ quizId }: { quizId: string }) {
   const [success, setSuccess] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingState>({});
-  const [dialog, setDialog] = useState<"publish" | "archive" | null>(null);
+  const [dialog, setDialog] = useState<QuizLifecycleAction | null>(null);
 
   function showMutationError(error: unknown, fallback: TranslationKey) {
     if (isNetworkError(error)) {
@@ -229,9 +238,19 @@ export function QuizDetail({ quizId }: { quizId: string }) {
               {t("quizzes.publishAction")}
             </button>
           ) : null}
+          {canTakeQuizOffline(quiz.status) ? (
+            <button className="secondary-button compact" type="button" onClick={() => setDialog("takeOffline")}>
+              {t("quizzes.takeOfflineAction")}
+            </button>
+          ) : null}
           {canArchiveQuiz(quiz.status) ? (
             <button className="primary-button danger-button compact" type="button" onClick={() => setDialog("archive")}>
               {t("quizzes.archiveAction")}
+            </button>
+          ) : null}
+          {canRestoreQuiz(quiz.status) ? (
+            <button className="primary-button compact" type="button" onClick={() => setDialog("restore")}>
+              {t("quizzes.restoreAction")}
             </button>
           ) : null}
           {archived ? <p className="form-note">{t("quizzes.archivedTerminalNote")}</p> : null}
@@ -252,13 +271,13 @@ export function QuizDetail({ quizId }: { quizId: string }) {
             // a redundant retry() would discard this fresh, correct status
             // and re-run the full question/option fan-out, and any transient
             // failure in that larger fetch would then mask the successful
-            // publish/archive as stale/unpublished state - see
+            // publish/archive/take-offline/restore as stale state - see
             // quizzes-service.ts#applyQuizLifecycleResult and
             // docs referenced there. A refetch remains correct - and still
             // happens, via onConflict below - only when the mutation itself
             // reports the local state was actually wrong.
             replaceQuiz(updated);
-            afterMutation(dialog === "publish" ? "quizzes.publishSuccess" : "quizzes.archiveSuccess", false);
+            afterMutation(LIFECYCLE_SUCCESS_KEY[dialog], false);
           }}
           onConflict={retry}
         />

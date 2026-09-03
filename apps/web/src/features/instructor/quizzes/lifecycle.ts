@@ -8,8 +8,16 @@ export function canPublishQuiz(status: QuizStatus): boolean {
   return status === "DRAFT";
 }
 
+export function canTakeQuizOffline(status: QuizStatus): boolean {
+  return status === "PUBLISHED";
+}
+
 export function canArchiveQuiz(status: QuizStatus): boolean {
   return status === "DRAFT" || status === "PUBLISHED";
+}
+
+export function canRestoreQuiz(status: QuizStatus): boolean {
+  return status === "ARCHIVED";
 }
 
 export function isQuizArchived(status: QuizStatus): boolean {

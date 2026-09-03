@@ -46,6 +46,20 @@ export function archiveCourse(api: ApiClient, tenantId: string, courseId: string
   });
 }
 
+/** Take Offline: PUBLISHED -> DRAFT. Non-cascading, reversible via `publishCourse` again (DEC-0048 2026-09-03 addendum). */
+export function unpublishCourse(api: ApiClient, tenantId: string, courseId: string): Promise<CourseSummary> {
+  return api.request<CourseSummary>(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`, {
+    method: "POST",
+  });
+}
+
+/** Restore: ARCHIVED -> DRAFT. Never resurrects straight to PUBLISHED (DEC-0048 2026-09-03 addendum). */
+export function restoreCourse(api: ApiClient, tenantId: string, courseId: string): Promise<CourseSummary> {
+  return api.request<CourseSummary>(`/instructor/tenants/${tenantId}/courses/${courseId}/restore`, {
+    method: "POST",
+  });
+}
+
 export type CoursesListLoadState =
   | { status: "loading" }
   | { status: "ready"; data: OffsetPage<CourseSummary> }

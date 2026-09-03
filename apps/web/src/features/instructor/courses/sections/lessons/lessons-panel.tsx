@@ -6,15 +6,15 @@ import { useI18n } from "@/lib/i18n/i18n";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type { LessonStatus, LessonSummary, LessonType } from "@/lib/api/types";
 import { NavIcon } from "@/features/instructor/nav-icons";
-import { MoveEarlierIcon, MoveLaterIcon } from "@/features/instructor/courses/ordering-icons";
+import { ActionMenu, type ActionMenuItem } from "@/features/instructor/action-menu";
 import { reorderLessons, useLessonsList } from "./lessons-service";
 import { formatDateTime } from "./format";
-import { canArchiveLesson, canEditLessonMetadata, canPublishLesson, canReorderLesson } from "./lifecycle";
+import { canArchiveLesson, canEditLessonMetadata, canPublishLesson, canReorderLesson, canRestoreLesson, canTakeLessonOffline } from "./lifecycle";
 import { moveEarlier, moveLater, reorderableLessonIds } from "./ordering";
 import { isNetworkError, resolveErrorMessageKey } from "./error-mapping";
 import { CreateLessonDialog } from "./create-lesson-dialog";
 import { EditLessonDialog } from "./edit-lesson-dialog";
-import { LessonLifecycleConfirmDialog } from "./lesson-lifecycle-confirm-dialog";
+import { LessonLifecycleConfirmDialog, type LessonLifecycleAction } from "./lesson-lifecycle-confirm-dialog";
 
 const LESSON_STATUS_KEY: Record<LessonStatus, TranslationKey> = {
   DRAFT: "lessons.statusDraft",
@@ -28,7 +28,7 @@ const LESSON_TYPE_KEY: Record<LessonType, TranslationKey> = {
   QUIZ: "lessons.typeQuiz",
 };
 
-type LifecycleTarget = { action: "publish" | "archive"; lesson: LessonSummary };
+type LifecycleTarget = { action: LessonLifecycleAction; lesson: LessonSummary };
 
 /**
  * A Lesson's editability/lifecycle actions depend only on its own status,
@@ -38,6 +38,11 @@ type LifecycleTarget = { action: "publish" | "archive"; lesson: LessonSummary };
  * relied on for Sections. Readiness for publish (asset READY / quiz
  * PUBLISHED) is not predicted here - the list response doesn't expose it,
  * so it's surfaced honestly only if/when a publish attempt actually fails.
+ *
+ * Row shape: Edit is the primary action (a Lesson has no nested content to
+ * reveal the way a Section does, so there's no natural row/expand primary -
+ * editing its content is the obvious next step). Move up/down, Publish,
+ * Take Offline, Archive, and Restore all live in the overflow menu.
  */
 export function LessonsPanel({
   tenantId,
@@ -49,13 +54,14 @@ export function LessonsPanel({
   courseId: string;
   sectionId: string;
   /**
-   * Called after a Lesson create or lifecycle (publish/archive) change -
-   * see `SectionsPanel`'s equivalent prop, which forwards this straight
-   * through from `course-detail.tsx`'s `bumpContentVersion`. A newly
-   * created Lesson is also this product's only "content attachment" event
-   * (the frozen backend requires the videoAssetId/documentAssetId/quizId
-   * at creation time - there is no separate later attach step), so
-   * `onCreated` alone already covers that case too.
+   * Called after a Lesson create or lifecycle (publish/take offline/
+   * archive/restore) change - see `SectionsPanel`'s equivalent prop, which
+   * forwards this straight through from `course-detail.tsx`'s
+   * `bumpContentVersion`. A newly created Lesson is also this product's
+   * only "content attachment" event (the frozen backend requires the
+   * videoAssetId/documentAssetId/quizId at creation time - there is no
+   * separate later attach step), so `onCreated` alone already covers that
+   * case too.
    */
   onContentChanged: () => void;
 }) {
@@ -95,6 +101,57 @@ export function LessonsPanel({
     } finally {
       setReordering(false);
     }
+  }
+
+  function lessonActions(lesson: LessonSummary, order: string[]): ActionMenuItem[] {
+    const items: ActionMenuItem[] = [];
+
+    if (canReorderLesson(lesson.status)) {
+      const canMoveEarlier = moveEarlier(order, lesson.lessonId) !== null;
+      const canMoveLater = moveLater(order, lesson.lessonId) !== null;
+
+      items.push({
+        key: "move-earlier",
+        label: t("sections.moveEarlierAction"),
+        disabled: !canMoveEarlier,
+        disabledReason: canMoveEarlier ? undefined : t("common.alreadyFirst"),
+        onSelect: () => void handleMove(lesson, "earlier"),
+      });
+      items.push({
+        key: "move-later",
+        label: t("sections.moveLaterAction"),
+        disabled: !canMoveLater,
+        disabledReason: canMoveLater ? undefined : t("common.alreadyLast"),
+        onSelect: () => void handleMove(lesson, "later"),
+      });
+    }
+
+    if (canPublishLesson(lesson.status)) {
+      items.push({ key: "publish", label: t("courses.publishAction"), onSelect: () => setLifecycleTarget({ action: "publish", lesson }) });
+    }
+
+    if (canTakeLessonOffline(lesson.status)) {
+      items.push({
+        key: "takeOffline",
+        label: t("courses.takeOfflineAction"),
+        onSelect: () => setLifecycleTarget({ action: "takeOffline", lesson }),
+      });
+    }
+
+    if (canArchiveLesson(lesson.status)) {
+      items.push({
+        key: "archive",
+        label: t("courses.archiveAction"),
+        danger: true,
+        onSelect: () => setLifecycleTarget({ action: "archive", lesson }),
+      });
+    }
+
+    if (canRestoreLesson(lesson.status)) {
+      items.push({ key: "restore", label: t("courses.restoreAction"), onSelect: () => setLifecycleTarget({ action: "restore", lesson }) });
+    }
+
+    return items;
   }
 
   return (
@@ -138,8 +195,6 @@ export function LessonsPanel({
         <ol className="lesson-list">
           {state.data.map((lesson) => {
             const order = reorderableLessonIds(state.data);
-            const canMoveEarlier = canReorderLesson(lesson.status) && moveEarlier(order, lesson.lessonId) !== null;
-            const canMoveLater = canReorderLesson(lesson.status) && moveLater(order, lesson.lessonId) !== null;
 
             return (
               <li className="lesson-row" key={lesson.lessonId}>
@@ -164,57 +219,13 @@ export function LessonsPanel({
                   {t(LESSON_STATUS_KEY[lesson.status])}
                 </span>
 
-                <div className="section-row-actions">
-                  {canReorderLesson(lesson.status) ? (
-                    <>
-                      <button
-                        className="ghost-button compact icon-text-button"
-                        type="button"
-                        onClick={() => handleMove(lesson, "earlier")}
-                        disabled={reordering || !canMoveEarlier}
-                        aria-label={`${t("sections.moveEarlierAction")}: ${lesson.title}`}
-                      >
-                        <MoveEarlierIcon />
-                        {t("sections.moveEarlierAction")}
-                      </button>
-                      <button
-                        className="ghost-button compact icon-text-button"
-                        type="button"
-                        onClick={() => handleMove(lesson, "later")}
-                        disabled={reordering || !canMoveLater}
-                        aria-label={`${t("sections.moveLaterAction")}: ${lesson.title}`}
-                      >
-                        <MoveLaterIcon />
-                        {t("sections.moveLaterAction")}
-                      </button>
-                    </>
-                  ) : null}
-
+                <div className="row-actions">
                   {canEditLessonMetadata(lesson.status) ? (
                     <button className="ghost-button compact" type="button" onClick={() => setEditingLesson(lesson)}>
                       {t("sections.editAction")}
                     </button>
                   ) : null}
-
-                  {canPublishLesson(lesson.status) ? (
-                    <button
-                      className="secondary-button compact"
-                      type="button"
-                      onClick={() => setLifecycleTarget({ action: "publish", lesson })}
-                    >
-                      {t("courses.publishAction")}
-                    </button>
-                  ) : null}
-
-                  {canArchiveLesson(lesson.status) ? (
-                    <button
-                      className="secondary-button compact"
-                      type="button"
-                      onClick={() => setLifecycleTarget({ action: "archive", lesson })}
-                    >
-                      {t("courses.archiveAction")}
-                    </button>
-                  ) : null}
+                  <ActionMenu label={t("common.moreActionsFor").replace("{item}", lesson.title)} items={lessonActions(lesson, order)} />
                 </div>
               </li>
             );
