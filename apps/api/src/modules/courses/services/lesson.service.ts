@@ -369,6 +369,55 @@ export class LessonService {
     });
   }
 
+  async unpublishLesson(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+  ): Promise<LessonSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const lesson = await tx.lesson.findFirst({
+        where: { id: lessonId, sectionId, courseId, tenantId },
+        select: { id: true, status: true },
+      });
+
+      if (!lesson) {
+        throw new LessonNotFoundError();
+      }
+
+      if (lesson.status === LessonStatus.ARCHIVED) {
+        throw new InvalidLessonLifecycleTransitionError();
+      }
+
+      if (lesson.status === LessonStatus.PUBLISHED) {
+        const updated = await tx.lesson.updateMany({
+          where: { id: lessonId, sectionId, courseId, tenantId, status: LessonStatus.PUBLISHED },
+          data: { status: LessonStatus.DRAFT },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.lesson.findUniqueOrThrow({
+            where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
+            select: { status: true },
+          });
+          if (current.status === LessonStatus.ARCHIVED) {
+            throw new InvalidLessonLifecycleTransitionError();
+          }
+        }
+      }
+
+      const unpublished = await tx.lesson.findUniqueOrThrow({
+        where: { id_tenantId_courseId: { id: lessonId, tenantId, courseId } },
+        include: LESSON_DETAIL_INCLUDE,
+      });
+
+      return toLessonSummary(unpublished);
+    });
+  }
+
   async reorderLessons(
     principal: AuthenticatedPrincipal,
     tenantId: string,

@@ -147,6 +147,9 @@ export async function lockAndAssertQuizAuthoringMutable(
  *    Question/Option authoring mutation. A mutation may commit before archive, but no mutation can
  *    observe a non-archived parent and then commit after archive has already made the Quiz ARCHIVED.
  *
+ *  - `QuizService.unpublishQuiz` - acquires it because PUBLISHED -> DRAFT crosses the same
+ *    publication boundary and must serialize with publishability-affecting mutations.
+ *
  * Lock ordering: every path that needs both locks acquires this Quiz-level lock strictly
  * *before* the Question-level lock (`createOption`/`updateOption`: Quiz lock, then
  * `lockQuestionOptionMutations`). No path ever acquires the Question-level lock first and this

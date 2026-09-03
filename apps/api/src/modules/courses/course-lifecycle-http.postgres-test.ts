@@ -9,11 +9,13 @@ import {
   CourseStatus,
   DevicePlatform,
   EnrollmentStatus,
+  LessonProgressStatus,
   LessonStatus,
   LessonType,
   PlatformRole,
   QuestionStatus,
   QuestionType,
+  QuizAttemptStatus,
   QuizStatus,
   SectionStatus,
   StudentDeviceStatus,
@@ -171,6 +173,73 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .expect((response) =>
         expect(responseBody<{ status: CourseStatus }>(response).status).toBe(CourseStatus.ARCHIVED),
       );
+  });
+
+  it('supports Course PUBLISHED->DRAFT take-offline without cascading, preserves publishedAt, rejects ARCHIVED, and republishes', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('course-unpublish');
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.DRAFT);
+    const sectionId = await createSection(tenantId, courseId, SectionStatus.PUBLISHED);
+    const quizId = await createValidQuiz(tenantId, QuizStatus.PUBLISHED);
+    const lessonId = await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.PUBLISHED, quizId);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    const publishedAt = (await prisma.client.course.findUniqueOrThrow({ where: { id: courseId } })).publishedAt;
+    expect(publishedAt).toEqual(NOW);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ courseId, status: CourseStatus.DRAFT }));
+
+    await expect(prisma.client.course.findUniqueOrThrow({ where: { id: courseId } })).resolves.toMatchObject({
+      status: CourseStatus.DRAFT,
+      publishedAt,
+    });
+    await expect(prisma.client.courseSection.findUniqueOrThrow({ where: { id: sectionId } })).resolves.toMatchObject({
+      status: SectionStatus.PUBLISHED,
+    });
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
+      status: LessonStatus.PUBLISHED,
+    });
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: CourseStatus.DRAFT }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: CourseStatus.PUBLISHED }));
+    await expect(prisma.client.course.findUniqueOrThrow({ where: { id: courseId } })).resolves.toMatchObject({
+      status: CourseStatus.PUBLISHED,
+      publishedAt,
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ error: { code: 'INVALID_COURSE_LIFECYCLE_TRANSITION' } }),
+      );
+    await expect(prisma.client.course.findUniqueOrThrow({ where: { id: courseId } })).resolves.toMatchObject({
+      status: CourseStatus.ARCHIVED,
+    });
   });
 
   it('rejects ordinary metadata edits once Course/Section/Lesson/Quiz is ARCHIVED, while DRAFT and PUBLISHED edits remain allowed (DEC-0048)', async () => {
@@ -395,11 +464,16 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
     const otherSectionId = await createSection(otherTenantId, otherCourseId, SectionStatus.DRAFT);
     const quizId = await createValidQuiz(tenantId);
     const otherQuizId = await createValidQuiz(otherTenantId);
-    await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.DRAFT, quizId);
+    const lessonId = await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.DRAFT, quizId);
     const otherLessonId = await createQuizLesson(otherTenantId, otherCourseId, otherSectionId, LessonStatus.DRAFT, otherQuizId);
 
     await request(server)
       .post(`/instructor/tenants/${tenantId}/courses/${courseId}/publish`)
+      .set('Authorization', `Bearer ${otherToken}`)
+      .expect(HttpStatus.FORBIDDEN);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`)
       .set('Authorization', `Bearer ${otherToken}`)
       .expect(HttpStatus.FORBIDDEN);
 
@@ -409,7 +483,17 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .expect(HttpStatus.NOT_FOUND);
 
     await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${otherCourseId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+
+    await request(server)
       .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${otherSectionId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${otherSectionId}/unpublish`)
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.NOT_FOUND);
 
@@ -421,7 +505,19 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .expect(HttpStatus.NOT_FOUND);
 
     await request(server)
+      .post(
+        `/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${otherLessonId}/unpublish`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+
+    await request(server)
       .post(`/instructor/tenants/${tenantId}/quizzes/${otherQuizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${otherQuizId}/unpublish`)
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.NOT_FOUND);
 
@@ -434,6 +530,14 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .post(`/instructor/tenants/${tenantId}/quizzes/${randomId}/archive`)
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.NOT_FOUND);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${randomId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${randomId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.NOT_FOUND);
 
     await expect(prisma.client.course.findUniqueOrThrow({ where: { id: otherCourseId } })).resolves.toMatchObject({
       status: CourseStatus.DRAFT,
@@ -442,6 +546,9 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       status: SectionStatus.DRAFT,
     });
     await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: otherLessonId } })).resolves.toMatchObject({
+      status: LessonStatus.DRAFT,
+    });
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
       status: LessonStatus.DRAFT,
     });
   });
@@ -485,6 +592,54 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .expect(({ body }) =>
         expect(body).toMatchObject({ error: { code: 'INVALID_SECTION_LIFECYCLE_TRANSITION' } }),
       );
+  });
+
+  it('supports Section PUBLISHED->DRAFT take-offline without cascading, preserves position, rejects ARCHIVED, and republishes', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('section-unpublish');
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.DRAFT);
+    const sectionId = await createSection(tenantId, courseId, SectionStatus.DRAFT, 7);
+    const lessonId = await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.PUBLISHED, await createValidQuiz(tenantId));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ sectionId, status: SectionStatus.DRAFT, position: 7 }));
+
+    await expect(prisma.client.courseSection.findUniqueOrThrow({ where: { id: sectionId } })).resolves.toMatchObject({
+      status: SectionStatus.DRAFT,
+      position: 7,
+    });
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
+      status: LessonStatus.PUBLISHED,
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: SectionStatus.PUBLISHED, position: 7 }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ error: { code: 'INVALID_SECTION_LIFECYCLE_TRANSITION' } }),
+      );
+    await expect(prisma.client.courseSection.findUniqueOrThrow({ where: { id: sectionId } })).resolves.toMatchObject({
+      status: SectionStatus.ARCHIVED,
+      position: 7,
+    });
   });
 
   it('requires Lesson publishable content and never auto-publishes parent Course/Section or linked Quiz', async () => {
@@ -546,6 +701,74 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
     });
     await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: draftQuiz } })).resolves.toMatchObject({
       status: QuizStatus.DRAFT,
+    });
+  });
+
+  it('supports Lesson PUBLISHED->DRAFT take-offline while preserving content, progress, availability, linked Quiz, and republish behavior', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('lesson-unpublish');
+    const studentId = await createStudent('lesson-unpublish-student');
+    await createTenantStudent(tenantId, studentId);
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.PUBLISHED);
+    const sectionId = await createSection(tenantId, courseId, SectionStatus.PUBLISHED);
+    const quizId = await createValidQuiz(tenantId, QuizStatus.PUBLISHED);
+    const availableFrom = new Date('2026-06-01T00:00:00.000Z');
+    const availableUntil = new Date('2026-07-01T00:00:00.000Z');
+    const lessonId = await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.PUBLISHED, quizId);
+    await prisma.client.lesson.update({
+      where: { id: lessonId },
+      data: { availableFrom, availableUntil },
+    });
+    const enrollmentId = await createEnrollment(tenantId, studentId, courseId, instructorId);
+    const progressId = await createLessonProgress(tenantId, courseId, lessonId, studentId, enrollmentId);
+    const progressBefore = await prisma.client.lessonProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const linkedQuizBefore = await prisma.client.quizLesson.findUniqueOrThrow({ where: { lessonId } });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({
+          lessonId,
+          status: LessonStatus.DRAFT,
+          quizId,
+          availableFrom: availableFrom.toISOString(),
+          availableUntil: availableUntil.toISOString(),
+        }),
+      );
+
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
+      status: LessonStatus.DRAFT,
+      availableFrom,
+      availableUntil,
+    });
+    await expect(prisma.client.quizLesson.findUniqueOrThrow({ where: { lessonId } })).resolves.toEqual(linkedQuizBefore);
+    await expect(prisma.client.lessonProgress.findUniqueOrThrow({ where: { id: progressId } })).resolves.toEqual(progressBefore);
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.PUBLISHED,
+    });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: LessonStatus.PUBLISHED, quizId }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ error: { code: 'INVALID_LESSON_LIFECYCLE_TRANSITION' } }),
+      );
+    await expect(prisma.client.lesson.findUniqueOrThrow({ where: { id: lessonId } })).resolves.toMatchObject({
+      status: LessonStatus.ARCHIVED,
+      availableFrom,
+      availableUntil,
     });
   });
 
@@ -616,6 +839,122 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .set('Authorization', `Bearer ${token}`)
       .expect(HttpStatus.CONFLICT)
       .expect(({ body }) => expect(body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } }));
+  });
+
+  it('supports Quiz PUBLISHED->DRAFT take-offline while preserving publishedAt, questions, options, attempts, and answers', async () => {
+    const { token, tenantId, instructorId } = await createInstructorTenant('quiz-unpublish');
+    const studentId = await createStudent('quiz-unpublish-student');
+    await createTenantStudent(tenantId, studentId);
+    const courseId = await createCourse(tenantId, instructorId, CourseStatus.PUBLISHED);
+    const sectionId = await createSection(tenantId, courseId, SectionStatus.PUBLISHED);
+    const quizId = await createValidQuiz(tenantId, QuizStatus.DRAFT);
+    const lessonId = await createQuizLesson(tenantId, courseId, sectionId, LessonStatus.PUBLISHED, quizId);
+    const enrollmentId = await createEnrollment(tenantId, studentId, courseId, instructorId);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    const publishedAt = (await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).publishedAt;
+    expect(publishedAt).toEqual(NOW);
+    const questionsBefore = await prisma.client.question.findMany({ where: { quizId }, orderBy: { position: 'asc' } });
+    const optionsBefore = await prisma.client.questionOption.findMany({
+      where: { questionId: { in: questionsBefore.map((question) => question.id) } },
+      orderBy: [{ questionId: 'asc' }, { position: 'asc' }],
+    });
+    const attemptId = await createQuizAttempt(tenantId, quizId, lessonId, studentId, enrollmentId);
+    const answerId = await createQuizAttemptAnswer(attemptId, questionsBefore[0].id, optionsBefore[0].id);
+    const attemptBefore = await prisma.client.quizAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+    const answerBefore = await prisma.client.quizAttemptAnswer.findUniqueOrThrow({ where: { id: answerId } });
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ quizId, status: QuizStatus.DRAFT }));
+
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.DRAFT,
+      publishedAt,
+    });
+    await expect(prisma.client.question.findMany({ where: { quizId }, orderBy: { position: 'asc' } })).resolves.toEqual(
+      questionsBefore,
+    );
+    await expect(
+      prisma.client.questionOption.findMany({
+        where: { questionId: { in: questionsBefore.map((question) => question.id) } },
+        orderBy: [{ questionId: 'asc' }, { position: 'asc' }],
+      }),
+    ).resolves.toEqual(optionsBefore);
+    await expect(prisma.client.quizAttempt.findUniqueOrThrow({ where: { id: attemptId } })).resolves.toEqual(attemptBefore);
+    await expect(prisma.client.quizAttemptAnswer.findUniqueOrThrow({ where: { id: answerId } })).resolves.toEqual(answerBefore);
+
+    await request(server)
+      .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Edited after take offline' })
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: QuizStatus.DRAFT, title: 'Edited after take offline' }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK)
+      .expect(({ body }) => expect(body).toMatchObject({ status: QuizStatus.PUBLISHED, publishedAt: publishedAt?.toISOString() }));
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/archive`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.CONFLICT)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ error: { code: 'INVALID_QUIZ_LIFECYCLE_TRANSITION' } }),
+      );
+    await expect(prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } })).resolves.toMatchObject({
+      status: QuizStatus.ARCHIVED,
+      publishedAt,
+    });
+  });
+
+  it('serializes Quiz unpublish with publishability-affecting mutations under the publication-boundary lock', async () => {
+    const { token, tenantId } = await createInstructorTenant('quiz-unpublish-race');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const quizId = await createQuiz(tenantId, QuizStatus.DRAFT);
+      const questionId = await createQuestion(tenantId, quizId, QuestionType.MULTIPLE_CHOICE, QuestionStatus.ACTIVE);
+      const correctOption = await createOption(tenantId, questionId, true, 1);
+      await createOption(tenantId, questionId, false, 2);
+      await request(server)
+        .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(HttpStatus.OK);
+
+      const [unpublishResponse, updateResponse] = await Promise.all([
+        request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/unpublish`).set('Authorization', `Bearer ${token}`),
+        request(server)
+          .patch(`/instructor/tenants/${tenantId}/quizzes/${quizId}/questions/${questionId}/options/${correctOption}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ isCorrect: false }),
+      ]);
+
+      const updateStatus: number = updateResponse.status;
+      expect(unpublishResponse.status).toBe(HttpStatus.OK);
+      expect([HttpStatus.OK, HttpStatus.CONFLICT]).toContain(updateStatus);
+
+      const quiz = await prisma.client.quiz.findUniqueOrThrow({ where: { id: quizId } });
+      const options = await prisma.client.questionOption.findMany({ where: { questionId } });
+      expect(quiz.status).toBe(QuizStatus.DRAFT);
+      if (updateStatus === 200) {
+        expect(options.filter((option) => option.isCorrect)).toHaveLength(0);
+      } else {
+        expect(updateResponse.body).toMatchObject({ error: { code: 'QUIZ_NOT_PUBLISHABLE' } });
+        expect(options.filter((option) => option.isCorrect)).toHaveLength(1);
+      }
+    }
   });
 
   it('lifecycle transitions are race-safe for duplicate publish and publish/archive races', async () => {
@@ -710,6 +1049,56 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
       .set('Authorization', `Bearer ${studentToken}`)
       .set(INSTALLATION_ID_HEADER, installationId)
       .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .get(`/student/courses/${courseId}/lessons/${lessonId}/quiz`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.NOT_FOUND);
+    await request(server).post(`/instructor/tenants/${tenantId}/quizzes/${quizId}/publish`).set('Authorization', `Bearer ${token}`).expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .get(`/student/courses/${courseId}/lessons/${lessonId}/quiz`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.NOT_FOUND);
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .get(`/student/courses/${courseId}`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.OK)
+      .expect((response) =>
+        expect(responseBody<{ sections: unknown[] }>(response).sections).toHaveLength(0),
+      );
+    await request(server).post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/publish`).set('Authorization', `Bearer ${token}`).expect(HttpStatus.OK);
+
+    await request(server)
+      .post(`/instructor/tenants/${tenantId}/courses/${courseId}/unpublish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(HttpStatus.OK);
+    await request(server)
+      .get(`/student/courses/${courseId}`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .set(INSTALLATION_ID_HEADER, installationId)
+      .expect(HttpStatus.NOT_FOUND);
+    await request(server).post(`/instructor/tenants/${tenantId}/courses/${courseId}/publish`).set('Authorization', `Bearer ${token}`).expect(HttpStatus.OK);
 
     await request(server)
       .post(`/instructor/tenants/${tenantId}/courses/${courseId}/sections/${sectionId}/lessons/${lessonId}/archive`)
@@ -971,10 +1360,11 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
     studentUserId: string,
     courseId: string,
     grantedByUserId: string,
-  ): Promise<void> {
+  ): Promise<string> {
+    const id = uuid.create();
     await prisma.client.enrollment.create({
       data: {
-        id: uuid.create(),
+        id,
         tenantId,
         studentUserId,
         courseId,
@@ -982,6 +1372,82 @@ maybeDescribe('instructor content lifecycle HTTP PostgreSQL integration', () => 
         status: EnrollmentStatus.ACTIVE,
       },
     });
+    return id;
+  }
+
+  async function createLessonProgress(
+    tenantId: string,
+    courseId: string,
+    lessonId: string,
+    studentUserId: string,
+    enrollmentId: string,
+  ): Promise<string> {
+    const id = uuid.create();
+    await prisma.client.lessonProgress.create({
+      data: {
+        id,
+        tenantId,
+        courseId,
+        lessonId,
+        studentUserId,
+        enrollmentId,
+        status: LessonProgressStatus.COMPLETED,
+        completedAt: NOW,
+      },
+    });
+    return id;
+  }
+
+  async function createQuizAttempt(
+    tenantId: string,
+    quizId: string,
+    lessonId: string,
+    studentUserId: string,
+    enrollmentId: string,
+  ): Promise<string> {
+    const id = uuid.create();
+    await prisma.client.quizAttempt.create({
+      data: {
+        id,
+        tenantId,
+        quizId,
+        lessonId,
+        studentUserId,
+        enrollmentId,
+        status: QuizAttemptStatus.GRADED,
+        attemptNumber: 1,
+        startedAt: NOW,
+        passingScorePercentSnapshot: null,
+        submittedAt: NOW,
+        gradedAt: NOW,
+        scorePoints: 1,
+        maxPoints: 1,
+        passed: null,
+      },
+    });
+    return id;
+  }
+
+  async function createQuizAttemptAnswer(
+    attemptId: string,
+    questionId: string,
+    selectedOptionId: string,
+  ): Promise<string> {
+    const id = uuid.create();
+    await prisma.client.quizAttemptAnswer.create({
+      data: {
+        id,
+        attemptId,
+        questionId,
+        questionSnapshot: { prompt: 'Question snapshot', type: QuestionType.TRUE_FALSE },
+        optionsSnapshot: [{ optionId: selectedOptionId, text: 'True' }],
+        selectedOptionIdsSnapshot: [selectedOptionId],
+        correctAnswerSnapshot: { correctOptionIds: [selectedOptionId] },
+        pointsAwarded: 1,
+        pointsPossible: 1,
+      },
+    });
+    return id;
   }
 
   async function issueAccessToken(userId: string, platformRole: PlatformRole): Promise<string> {

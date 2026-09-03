@@ -140,10 +140,14 @@ V1 courses should support title, optional description, thumbnail/media reference
 
 Course authoring lifecycle transitions are explicit application-service actions, not generic client
 metadata writes. `Course`, `CourseSection`, `Lesson`, and `Quiz` support `DRAFT -> PUBLISHED`,
-`DRAFT -> ARCHIVED`, and `PUBLISHED -> ARCHIVED`; publishing an already-published resource and
-archiving an already-archived resource are idempotent, while `ARCHIVED` is terminal and cannot be
-published/restored. Publishing never cascades to descendants or ancestors: each Course, Section,
-Lesson, and Quiz must be published explicitly. Archiving likewise does not cascade; ancestor status
+`DRAFT -> ARCHIVED`, `PUBLISHED -> ARCHIVED`, and the reversible explicit take-offline transition
+`PUBLISHED -> DRAFT`; publishing an already-published resource, unpublishing an already-draft
+resource, and archiving an already-archived resource are idempotent, while `ARCHIVED` remains
+terminal until the separate Restore slice lands and cannot be published/unpublished/restored.
+Publishing never cascades to descendants or ancestors: each Course, Section, Lesson, and Quiz must
+be published explicitly. Take Offline/unpublish likewise never cascades and preserves historical
+student data, enrollments, progress, attempts, answers, ordering, content references, and existing
+`publishedAt` timestamps on Course and Quiz. Archiving likewise does not cascade; ancestor status
 already blocks student access while preserving descendant state and historical ordering. For Quiz
 authoring specifically, an `ARCHIVED` parent Quiz rejects ordinary Question and Option mutations,
 including create, metadata/correctness update, and reorder.
@@ -167,12 +171,12 @@ creates a Question first and its Options only through later, separate calls, so 
 Question always starts with zero Options and can never itself satisfy "exactly one correct
 option" — rather than allow that incomplete state to land, even transiently, Question creation on
 a `PUBLISHED` Quiz fails with the same publishability error `publishQuiz()` would produce. This
-mutation-safety check and `publishQuiz()` itself share one PostgreSQL transaction-scoped advisory
-lock keyed on the Quiz ID, so a concurrent publish and a concurrent publishability-affecting
-mutation on the same Quiz always serialize rather than both observing a stale pre-commit status;
-Option mutations additionally keep their existing Question-scoped advisory lock for the
-option-count/correctness invariants, always acquired after the Quiz-level lock, never before, to
-keep lock ordering consistent and deadlock-free. Quiz archive and ordinary Question/Option
+mutation-safety check, `publishQuiz()`, `unpublishQuiz()`, and `archiveQuiz()` share one PostgreSQL
+transaction-scoped advisory lock keyed on the Quiz ID, so lifecycle boundary changes and concurrent
+publishability-affecting mutations on the same Quiz always serialize rather than both observing a
+stale pre-commit status; Option mutations additionally keep their existing Question-scoped advisory
+lock for the option-count/correctness invariants, always acquired after the Quiz-level lock, never
+before, to keep lock ordering consistent and deadlock-free. Quiz archive and ordinary Question/Option
 authoring mutations share the Quiz-level advisory lock, so a child mutation may complete before an
 archive, but cannot observe a mutable parent and then commit after the Quiz has become `ARCHIVED`.
 Setting `QuestionOption.isCorrect` to `true` through the existing Option update route atomically

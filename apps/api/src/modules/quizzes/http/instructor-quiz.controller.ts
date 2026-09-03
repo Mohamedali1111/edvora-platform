@@ -111,6 +111,15 @@ export class InstructorQuizController {
     return this.quizzes.archiveQuiz(principal, params.tenantId, params.quizId);
   }
 
+  @Post(':quizId/unpublish')
+  @HttpCode(HttpStatus.OK)
+  async unpublish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: QuizIdParamDto,
+  ): Promise<QuizSummary> {
+    return this.quizzes.unpublishQuiz(principal, params.tenantId, params.quizId);
+  }
+
   @Get(':quizId/attempts')
   @HttpCode(HttpStatus.OK)
   async attemptsReport(

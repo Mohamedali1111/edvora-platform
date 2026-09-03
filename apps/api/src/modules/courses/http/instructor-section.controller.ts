@@ -81,6 +81,15 @@ export class InstructorSectionController {
     return this.sections.publishSection(principal, params.tenantId, params.courseId, params.sectionId);
   }
 
+  @Post(':sectionId/unpublish')
+  @HttpCode(HttpStatus.OK)
+  async unpublish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: SectionIdParamDto,
+  ): Promise<CourseSectionSummary> {
+    return this.sections.unpublishSection(principal, params.tenantId, params.courseId, params.sectionId);
+  }
+
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
   async reorder(

@@ -214,6 +214,52 @@ export class CourseService {
       return toCourseSummary(course);
     });
   }
+
+  async unpublishCourse(
+    principal: AuthenticatedPrincipal,
+    tenantId: string,
+    courseId: string,
+  ): Promise<CourseSummary> {
+    return this.prismaService.client.$transaction(async (tx) => {
+      await this.authorization.assertInstructorTenantAccess(principal, tenantId, tx);
+
+      const existing = await tx.course.findUnique({
+        where: { id_tenantId: { id: courseId, tenantId } },
+        select: { id: true, status: true },
+      });
+
+      if (!existing) {
+        throw new CourseNotFoundError();
+      }
+
+      if (existing.status === CourseStatus.ARCHIVED) {
+        throw new InvalidCourseLifecycleTransitionError();
+      }
+
+      if (existing.status === CourseStatus.PUBLISHED) {
+        const updated = await tx.course.updateMany({
+          where: { id: courseId, tenantId, status: CourseStatus.PUBLISHED },
+          data: { status: CourseStatus.DRAFT },
+        });
+
+        if (updated.count !== 1) {
+          const current = await tx.course.findUniqueOrThrow({
+            where: { id_tenantId: { id: courseId, tenantId } },
+            select: { status: true },
+          });
+          if (current.status === CourseStatus.ARCHIVED) {
+            throw new InvalidCourseLifecycleTransitionError();
+          }
+        }
+      }
+
+      const course = await tx.course.findUniqueOrThrow({
+        where: { id_tenantId: { id: courseId, tenantId } },
+      });
+
+      return toCourseSummary(course);
+    });
+  }
 }
 
 function toCourseSummary(row: {

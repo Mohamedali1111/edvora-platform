@@ -116,6 +116,21 @@ export class InstructorLessonController {
     );
   }
 
+  @Post(':lessonId/unpublish')
+  @HttpCode(HttpStatus.OK)
+  async unpublish(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: LessonIdParamDto,
+  ): Promise<LessonSummary> {
+    return this.lessons.unpublishLesson(
+      principal,
+      params.tenantId,
+      params.courseId,
+      params.sectionId,
+      params.lessonId,
+    );
+  }
+
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
   async reorder(
