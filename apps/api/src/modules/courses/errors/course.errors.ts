@@ -1,3 +1,5 @@
+import type { ReadinessIssue } from '../types/course-readiness.types';
+
 export type CourseErrorCode =
   | 'COURSE_NOT_FOUND'
   | 'SECTION_NOT_FOUND'
@@ -13,7 +15,9 @@ export type CourseErrorCode =
   | 'INVALID_LESSON_TYPE_REFERENCE'
   | 'LESSON_REFERENCE_NOT_FOUND'
   | 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED'
-  | 'COURSE_DATA_INTEGRITY_VIOLATION';
+  | 'COURSE_DATA_INTEGRITY_VIOLATION'
+  | 'COURSE_ALREADY_PUBLISHED_ONCE'
+  | 'PUBLISH_SELECTION_STALE';
 
 export class CourseError extends Error {
   constructor(
@@ -135,6 +139,41 @@ export class CourseDataIntegrityError extends CourseError {
     super(
       'COURSE_DATA_INTEGRITY_VIOLATION',
       'Course content data is in an unexpected, inconsistent state.',
+    );
+  }
+}
+
+// `POST .../courses/:courseId/publish-selected` is first-publish-only. `Course.publishedAt` is set
+// exactly once, the very first time a Course transitions DRAFT -> PUBLISHED (via the existing granular
+// `publishCourse()`), and is never cleared again by Take Offline (`unpublishCourse`) or Restore
+// (`restoreCourse`) — see `CoursePublishSelectedService`'s doc comment for the full review of every
+// mutation path. So `publishedAt !== null` is a safe, permanent "has been published before" signal,
+// even though a *republish* through the granular `/publish` endpoint after Take Offline does overwrite
+// `publishedAt` with a fresh timestamp. A Course in that state must use the existing granular
+// `/publish` endpoint ("make live again"), never this one.
+export class CourseAlreadyPublishedOnceError extends CourseError {
+  constructor() {
+    super(
+      'COURSE_ALREADY_PUBLISHED_ONCE',
+      'Course has already been published once; use the granular publish endpoint instead.',
+    );
+  }
+}
+
+// The Instructor reviewed one exact Section/Lesson/Quiz selection (from a prior `GET .../readiness`
+// call) and submitted it for first publication. This is thrown when ANY submitted item is no longer a
+// valid publish target by the time the mutation actually runs inside its transaction — already
+// PUBLISHED/ARCHIVED, content that regressed since review, a Draft Quiz that became unpublishable, or
+// a structural-invariant violation (see `evaluateStructuralSelectionBlockers`). The whole selection is
+// rejected atomically; nothing is published. `blockers` reuses the exact `ReadinessIssue` shape/reason
+// codes `GET .../readiness` already returns (see `course-readiness.types.ts`) rather than a second,
+// divergent taxonomy, and is carried through `mapCourseErrorToHttp` as an additional `blockers` field
+// on the standard `{ error: { code, message } }` envelope — see `course-error-mapping.ts`.
+export class PublishSelectionStaleError extends CourseError {
+  constructor(readonly blockers: readonly ReadinessIssue[]) {
+    super(
+      'PUBLISH_SELECTION_STALE',
+      'The reviewed publish selection is no longer valid; re-check readiness and try again.',
     );
   }
 }

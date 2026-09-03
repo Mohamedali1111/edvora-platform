@@ -260,12 +260,12 @@ what has already been explicitly published on its own. This is intentionally bro
 standalone `POST /lessons/:id/publish` gate, which still requires the referenced Quiz to already be
 `PUBLISHED` (`LessonService`'s existing content-readiness check is unchanged).
 
-`readyToPublish` (`sections`/`lessons`/`quizzes`) is the informational candidate set the planned
-`FIRST_PUBLISH` review screen will let an instructor explicitly select from. It is read-only,
-informational data: the future publish-selected endpoint will never trust a client-supplied quizId (or
-any other ID) from this response and will re-resolve every reference from the Course's own Lesson
-relations server-side, exactly as this endpoint does. This slice implements only the `GET`; explicit
-selection and the mutating publish-selected endpoint are not implemented yet.
+`readyToPublish` (`sections`/`lessons`/`quizzes`) is the informational candidate set the
+`POST .../courses/:courseId/publish-selected` review screen lets an instructor explicitly select
+from — see "Course First-Publish Orchestration" below. It is read-only, informational data:
+publish-selected never trusts a client-supplied quizId (or any other ID) from a prior readiness
+response and re-resolves every reference from the Course's own Lesson relations server-side, exactly
+as this endpoint does.
 
 Readiness is read-only and takes no PostgreSQL advisory lock — nothing it reads is mutated, so it does
 not need to serialize against `lockQuizPublicationBoundary`. A Lesson whose declared `type` has no
@@ -273,6 +273,68 @@ matching VideoLesson/DocumentLesson/QuizLesson detail row is provably impossible
 (`LessonService.createLesson` writes both atomically in one transaction); the endpoint fails loudly
 with a `COURSE_DATA_INTEGRITY_VIOLATION` (500) in that case rather than silently reporting a corrupted
 Lesson as ready. No Prisma schema or migration change was needed.
+
+## Course First-Publish Orchestration (publish-selected)
+
+`POST /instructor/tenants/:tenantId/courses/:courseId/publish-selected` is the mutating counterpart to
+`GET .../readiness`: the Instructor reviews the readiness `readyToPublish` candidate set and explicitly
+selects exactly which currently-`DRAFT` Sections and Lessons (`sectionIds`/`lessonIds` — no quizId, no
+asset ID, no readiness flag, no "exclude" list) should become Live as part of this Course's first
+publication. The server publishes exactly that reviewed selection, atomically, deriving and publishing
+any still-`DRAFT` Quiz a selected QUIZ Lesson needs as a server-side side effect — never a quizId
+accepted from the client.
+
+**First-publish only.** Valid only while `Course.publishedAt === null`. `publishedAt` is set exactly
+once, the first time the existing granular `POST .../courses/:courseId/publish` transitions
+`DRAFT -> PUBLISHED`, and is never cleared again by Take Offline (`PUBLISHED -> DRAFT`) or Restore
+(`ARCHIVED -> DRAFT`) — confirmed by reading every Course-mutating method in `CourseService`. So
+`publishedAt !== null` is a permanently safe "has been published before" signal, even though a
+*republish* through the granular `/publish` endpoint after Take Offline does overwrite `publishedAt`
+with a fresh timestamp (pre-existing behavior, deliberately unchanged by this slice). A Course that has
+been published before — currently live, or currently Draft again after Take Offline — rejects
+publish-selected with `COURSE_ALREADY_PUBLISHED_ONCE` (409); the existing granular `/publish` endpoint
+remains the "make live again" path for that case, byte-for-byte unchanged (same route, same service
+method, same response shape, same idempotency).
+
+**Explicit inclusion, never expanded.** Every read in the mutation is bounded by the submitted
+`sectionIds`/`lessonIds`, or by Quiz IDs server-derived from the selected Lessons' own `quizLesson`
+relations — never a "find every Draft/ready row" sweep. An unselected Section/Lesson/Quiz, however
+ready, is never read and therefore never published, no matter how new or how ready it became after the
+Instructor's review. The approved structural invariant is enforced without ever auto-including a
+missing Section: a selected Lesson's Section must either also be in `sectionIds`, or already be
+`PUBLISHED`.
+
+**Server-side revalidation, one source of truth.** Every submitted ID's ownership (tenant + Course) and
+current lifecycle status is re-read inside the transaction — an already-`PUBLISHED` or `ARCHIVED`
+submitted Section/Lesson is a stale selection, not silently dropped or silently accepted. Every selected
+Lesson's content is revalidated via `evaluateLessonContentBlockers`, the exact same evaluator
+`GET .../readiness` uses, and a selected QUIZ Lesson's Quiz is revalidated via the exact same
+`evaluateQuizPublishability` the Course Readiness slice introduced — never a second, divergent
+publishability definition. Any single failure — stale lifecycle state, regressed content, an invalid or
+Archived Quiz, or a structural-invariant violation — rejects the **entire** selection atomically:
+`PUBLISH_SELECTION_STALE` (409), with the current blockers in the exact `ReadinessIssue` shape/taxonomy
+`GET .../readiness` already returns (carried as an additional `blockers` field on the standard
+`{ error: { code, message } }` envelope — no second, custom top-level HTTP shape). Nothing publishes;
+the Course, every Section/Lesson, and every Quiz remain exactly as they were.
+
+**First-publish race.** The Course's `DRAFT -> PUBLISHED` transition is claimed with one conditional
+`UPDATE ... WHERE status = DRAFT AND published_at IS NULL`, checked by affected-row count, as the very
+first write in the transaction — before any Section/Lesson/Quiz is even read. The Postgres row lock
+that `UPDATE` takes is held until the transaction commits or rolls back, so a concurrent
+publish-selected (or `/publish`, `/archive`, `/unpublish`, `/restore`) call against the same Course
+cannot interleave, and a lost race is detected — aborting the whole transaction — before any descendant
+work happens, never discovered only after Sections/Lessons/Quizzes have already been mutated. Multiple
+required Quizzes are locked via the existing `lockQuizPublicationBoundary`, in sorted `quizId` order,
+before any Quiz aggregate is read or mutated — the same "acquire Quiz locks in sorted order" convention
+already established for concurrent multi-Quiz operations, so a concurrent Question/Option mutation on
+one of the same Quizzes still cannot race a Quiz into "PUBLISHED + aggregate-invalid". No new advisory
+lock was introduced for Course/Section/Lesson; the existing conditional-update-plus-affected-row-count
+pattern every lifecycle method already uses is sufficient there.
+
+**Progressive authoring is untouched.** publish-selected only ever reads/writes the exact
+`sectionIds`/`lessonIds` submitted (and Quizzes server-derived from them) — an unrelated, unfinished,
+future Draft Section/Lesson elsewhere in the Course is never read, never validated, and never blocks a
+selected valid Chapter/Lesson from publishing. No Prisma schema or migration change was needed.
 
 ## Video and Document Metadata
 

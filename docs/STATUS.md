@@ -155,9 +155,47 @@ and no IP binding is applied (a deliberate V1 reliability choice for MENA mobile
   application code path, but structurally honored). A Lesson whose declared `type` has no matching
   detail row — provably impossible through `LessonService.createLesson`'s atomic creation — surfaces
   as a new `COURSE_DATA_INTEGRITY_VIOLATION` (500) rather than a silently false-Ready response.
-  Read-only: no PostgreSQL advisory lock is acquired. `readyToPublish` is informational only; the
-  future publish-selected endpoint (not implemented by this slice) will never trust a client-supplied
-  ID from it. No schema or migration change was required.
+  Read-only: no PostgreSQL advisory lock is acquired. `readyToPublish` is informational only;
+  publish-selected (below) never trusts a client-supplied ID from it. No schema or migration change
+  was required.
+- Implemented the Course First-Publish Orchestration Slice: `POST
+  /instructor/tenants/:tenantId/courses/:courseId/publish-selected` publishes exactly the Instructor's
+  explicitly-reviewed selection (`sectionIds`/`lessonIds` — no quizId, no asset ID, no readiness flag,
+  no "exclude" list) for a Course's *first* publication only. Valid only while `Course.publishedAt ===
+  null`; an already-published-before Course (currently live, or Draft again after Take Offline) rejects
+  with a new `COURSE_ALREADY_PUBLISHED_ONCE` (409) and must use the existing granular `/publish`
+  instead — left byte-for-byte unchanged by this slice (verified by a dedicated regression test and the
+  full, unmodified `course-lifecycle-http.postgres-test.ts` suite still passing). A selected Lesson's
+  Section must either also be selected or already be `PUBLISHED` (the server never expands the
+  selection to satisfy this — new `LESSON_SECTION_NOT_INCLUDED` reason code); a submitted Section/Lesson
+  that exists but is not currently `DRAFT` is a stale selection, not silently dropped (new
+  `SECTION_NOT_SELECTABLE`/`LESSON_NOT_SELECTABLE` reason codes). Every submitted ID's ownership and
+  every selected Lesson's content/Quiz aggregate is revalidated from a fresh in-transaction read using
+  the exact same `evaluateLessonContentBlockers`/`evaluateQuizPublishability` evaluators the Course
+  Readiness slice introduced — never a second, divergent publishability definition — and any single
+  stale/invalid item rejects the entire selection atomically: new `PUBLISH_SELECTION_STALE` (409),
+  carrying the current blockers in the existing `ReadinessIssue` shape as an additional `blockers` field
+  on the standard `{ error: { code, message } }` envelope, not a new top-level HTTP shape. A selected
+  QUIZ Lesson's Quiz ID is always resolved from its own live `quizLesson` relation, never accepted from
+  the client; every distinct required Quiz is locked via the existing `lockQuizPublicationBoundary`, in
+  sorted `quizId` order, before any Quiz aggregate is read, matching the established multi-Quiz
+  lock-ordering convention — proven safe against a concurrent publishability-affecting Question/Option
+  mutation by a dedicated race test. The Course's first-publish transition is claimed with one
+  conditional `UPDATE ... WHERE status = DRAFT AND published_at IS NULL`, checked by affected-row count,
+  as the very first write in the transaction — before any Section/Lesson/Quiz is even read — so the
+  Postgres row lock it takes serializes against any concurrent publish-selected/`/publish`/`/archive`/
+  `/unpublish`/`/restore` call on the same Course; a lost race is detected, and the whole transaction
+  aborted, before any descendant work happens, never discovered only after Sections/Lessons/Quizzes have
+  already been mutated (proven by a dedicated two-concurrent-requests test: exactly one succeeds). No
+  new advisory lock was introduced for Course/Section/Lesson — the existing conditional-update pattern
+  every lifecycle method already uses is sufficient there. Every query is bounded by the submitted IDs
+  or Quiz IDs server-derived from the submitted Lessons' own relations — never a course-wide sweep — so
+  an unselected Section/Lesson/Quiz is never read, let alone published, however ready it independently
+  is (proven by a dedicated no-unselected-sweep test). `Course.publishedAt` was confirmed, by reading
+  every Course-mutating method in `CourseService`, to be set exactly once and never cleared by Take
+  Offline or Restore, making `publishedAt !== null` a permanently safe "published before" signal even
+  though a republish through the granular `/publish` endpoint does overwrite it with a fresh timestamp
+  (pre-existing behavior, unchanged). No schema or migration change was required.
 - Implemented Instructor Course Sections/Lessons/Ordering Slice B: authorized CourseSection create/update-metadata/archive/reorder, generic Lesson create (with exactly one type-matching VideoLesson/DocumentLesson/QuizLesson detail row created atomically, referencing an already-existing tenant-scoped VideoAsset/DocumentAsset/Quiz row) alongside Lesson update-metadata/archive/reorder, all nested-resource ownership proved through Prisma composite keys inherited from the already-authorized parent chain (never a bare-ID lookup followed by trusting a client-supplied parent relationship), and a safe two-phase transactional resequence for whole-list reorder that reassigns the existing active-position value set (not literal `1..N`) to avoid colliding with an archived sibling's retained position under the current non-partial `(courseId, position)` / `(sectionId, position)` unique indexes. Fixed a pre-existing latent bug in the shared `isKnownUniqueViolation` Prisma-error-detection utility (used by both the tenancy and courses modules): under Prisma 7 with `@prisma/adapter-pg`, unique-violation detail is reported under `meta.driverAdapterError.cause`, not the historical `meta.target` shape the utility previously checked; it now checks both. A subsequent focused security/data-integrity review of Slice B found and fixed one further narrow defect: whole-list reorder had no handling for a concurrent same-parent reorder race (e.g. a UI double-submit), unlike create; it now uses the same narrow `isKnownUniqueViolation` catch. The review also ran the existing tenancy PostgreSQL suite (7 tests) to confirm the shared-utility fix caused no regression there.
 - Implemented Student Course Authorization/Read Slice C: a new `StudentCourseAccessService` entitlement primitive proving, from current database state only, ACTIVE STUDENT → a currently entitled ACTIVE Enrollment (status plus `startsAt`/`endsAt` time window evaluated against `ClockService.now()`, never mutated as a side effect of the read) → an ACTIVE `TenantStudent` for the course's own tenant (derived from the course, never a client-supplied tenant field) → Course `PUBLISHED` in an ACTIVE tenant. `GET /student/courses` (paginated, bounded, `principal.userId`-scoped) and `GET /student/courses/:courseId` (ordered `PUBLISHED` sections/lessons only, lessons additionally filtered by their `availableFrom`/`availableUntil` window, currently-unavailable lessons omitted entirely rather than exposed as locked metadata) are the first endpoints in this codebase to enforce course-content entitlement. Every rejection reason collapses to the existing `CourseNotFoundError`, so a wrong, foreign, cross-tenant, DRAFT/ARCHIVED, or currently-unentitled course ID is indistinguishable from one that does not exist. Responses use new student-only types, deliberately excluding every instructor-authoring/provider-internal field (asset IDs, provider keys, external references, playback/download URLs, quiz questions/options/answers) the equivalent instructor-facing types expose. No new error types, DTO param shape reuses no client-supplied tenant/student identifiers, and no shared authorization primitives outside the courses module were modified.
 - Implemented Minimal Lesson Progress Slice D on top of the Slice C entitlement boundary: `StudentCourseAccessService.getCourseStructure` now includes each returned lesson's `progress` (`NOT_STARTED`/`STARTED`/`COMPLETED` plus `completedAt`), read via one additional query scoped to the student's own entitled enrollment and mapped in memory by lesson ID (no N+1, no row ever created merely to serve a read — a missing `LessonProgress` row reads as `NOT_STARTED`). Added `POST /student/courses/:courseId/lessons/:lessonId/complete` to mark a currently-accessible, non-quiz (VIDEO/DOCUMENT) lesson completed, reusing the exact same entitlement chain and the same published-section/published-lesson/availability-window rules the read side applies, so a lesson that would not appear in the student's course structure cannot be completed either. Completion is idempotent and race-safe: it attempts to create a fresh `COMPLETED` row first, and on the unique-constraint conflict (`(studentUserId, lessonId, enrollmentId)`) falls back to an atomic `updateMany` guarded by `status: { not: COMPLETED }`, so a stale NOT_STARTED/STARTED row transitions once, an already-COMPLETED row is returned unchanged without re-stamping `completedAt`, and concurrent duplicate requests converge to exactly one row. A QUIZ lesson cannot be manually completed (new `QuizLessonCompletionNotAllowedError`, 400); every other rejection (foreign/unavailable/DRAFT/ARCHIVED lesson, lesson in an unentitled or different course) reuses the existing `LessonNotFoundError`/`CourseNotFoundError`, so no new "not found" taxonomy was introduced. `studentUserId` and `enrollmentId` are never accepted from the client — both are always derived from the same server-side entitlement proof. No schema/migration change was needed; the existing `LessonProgress` model and its composite FKs to `Lesson`/`Enrollment` already supported this fully.

@@ -9,9 +9,12 @@ import { TenantIdParamDto } from '../../tenancy/dto/uuid-param.dto';
 import { CourseProgressQueryDto } from '../dto/course-progress-query.dto';
 import { CourseIdParamDto } from '../dto/course-params.dto';
 import { CreateCourseDto, UpdateCourseMetadataDto } from '../dto/course.dto';
+import { PublishSelectedDto } from '../dto/publish-selected.dto';
+import { CoursePublishSelectedService } from '../services/course-publish-selected.service';
 import { CourseProgressService } from '../services/course-progress.service';
 import { CourseReadinessService } from '../services/course-readiness.service';
 import { CourseService } from '../services/course.service';
+import type { PublishSelectedResult } from '../types/course-publish-selected.types';
 import type { CourseReadiness } from '../types/course-readiness.types';
 import type { CourseProgressRow } from '../types/course-progress.types';
 import type { CourseSummary } from '../types/course.types';
@@ -35,6 +38,7 @@ export class InstructorCourseController {
     private readonly courses: CourseService,
     private readonly progress: CourseProgressService,
     private readonly readiness: CourseReadinessService,
+    private readonly publishSelectedService: CoursePublishSelectedService,
   ) {}
 
   @Post()
@@ -157,5 +161,21 @@ export class InstructorCourseController {
     @Param() params: CourseIdParamDto,
   ): Promise<CourseReadiness> {
     return this.readiness.getCourseReadiness(principal, params.tenantId, params.courseId);
+  }
+
+  @Post(':courseId/publish-selected')
+  @HttpCode(HttpStatus.OK)
+  async publishSelected(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+    @Body() body: PublishSelectedDto,
+  ): Promise<PublishSelectedResult> {
+    return this.publishSelectedService.publishSelected({
+      principal,
+      tenantId: params.tenantId,
+      courseId: params.courseId,
+      sectionIds: body.sectionIds,
+      lessonIds: body.lessonIds,
+    });
   }
 }

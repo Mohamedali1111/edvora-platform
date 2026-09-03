@@ -16,6 +16,14 @@ export type ReadinessEntityType = 'SECTION' | 'LESSON' | 'QUIZ' | 'VIDEO_ASSET' 
  * exactly the DRAFT Sections/Lessons a future publish-selected call would transition to PUBLISHED —
  * so surfacing DRAFT itself as a blocker would misrepresent completely normal progressive authoring
  * as a problem. See `evaluateCourseReadiness`'s doc comment for the full candidacy rule.
+ *
+ * The last three codes (`SECTION_NOT_SELECTABLE`, `LESSON_NOT_SELECTABLE`,
+ * `LESSON_SECTION_NOT_INCLUDED`) are never emitted by `GET .../readiness` itself — they exist for
+ * `POST .../courses/:courseId/publish-selected`'s stale-selection rejection, which reuses this same
+ * taxonomy/shape rather than inventing a second, semantically-equivalent one (see
+ * `CoursePublishSelectedService`). They describe "this submitted ID is not currently a valid
+ * publish-selected target", a fact meaningful only in the context of an explicit selection — readiness
+ * has no concept of a submitted selection to judge.
  */
 export type CourseReadinessReasonCode =
   | 'SECTION_EMPTY'
@@ -27,7 +35,10 @@ export type CourseReadinessReasonCode =
   | 'DOCUMENT_FAILED'
   | 'DOCUMENT_ASSET_ARCHIVED'
   | 'QUIZ_ARCHIVED'
-  | QuizPublishabilityReasonCode;
+  | QuizPublishabilityReasonCode
+  | 'SECTION_NOT_SELECTABLE'
+  | 'LESSON_NOT_SELECTABLE'
+  | 'LESSON_SECTION_NOT_INCLUDED';
 
 /**
  * One readiness fact about one entity. `title` is the entity's own raw authored title where one

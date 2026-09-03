@@ -197,7 +197,23 @@ export function evaluateCourseReadiness(
   };
 }
 
-function evaluateLessonContentBlockers(lesson: ReadinessLessonRow, sectionId: string): ReadinessIssue[] {
+/**
+ * The exact fields `evaluateLessonContentBlockers` needs — narrower than the full
+ * `ReadinessLessonRow` (it never looks at `status`/`availableFrom`/`availableUntil`) so a caller with
+ * only these fields on hand, such as `CoursePublishSelectedService`'s revalidation read, can reuse
+ * this evaluator directly instead of duplicating its reason-code mapping.
+ */
+export type LessonContentRow = Pick<
+  ReadinessLessonRow,
+  'id' | 'title' | 'type' | 'videoLesson' | 'documentLesson' | 'quizLesson'
+>;
+
+/**
+ * Exported so `CoursePublishSelectedService` can revalidate a selected Lesson's content against the
+ * exact same rules and reason codes `GET .../readiness` reports — one source of truth, not a second,
+ * divergent definition of "is this Lesson's content publishable".
+ */
+export function evaluateLessonContentBlockers(lesson: LessonContentRow, sectionId: string): ReadinessIssue[] {
   if (lesson.type === LessonType.VIDEO) {
     if (!lesson.videoLesson) {
       throw new CourseDataIntegrityError();

@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
-import { CourseError, type CourseErrorCode } from '../errors/course.errors';
+import { CourseError, PublishSelectionStaleError, type CourseErrorCode } from '../errors/course.errors';
+import type { ReadinessIssue } from '../types/course-readiness.types';
 
 const ERROR_STATUS: Record<CourseErrorCode, HttpStatus> = {
   COURSE_NOT_FOUND: HttpStatus.NOT_FOUND,
@@ -17,6 +18,8 @@ const ERROR_STATUS: Record<CourseErrorCode, HttpStatus> = {
   LESSON_REFERENCE_NOT_FOUND: HttpStatus.NOT_FOUND,
   QUIZ_LESSON_COMPLETION_NOT_ALLOWED: HttpStatus.BAD_REQUEST,
   COURSE_DATA_INTEGRITY_VIOLATION: HttpStatus.INTERNAL_SERVER_ERROR,
+  COURSE_ALREADY_PUBLISHED_ONCE: HttpStatus.CONFLICT,
+  PUBLISH_SELECTION_STALE: HttpStatus.CONFLICT,
 };
 
 const ERROR_MESSAGES: Record<CourseErrorCode, string> = {
@@ -35,12 +38,18 @@ const ERROR_MESSAGES: Record<CourseErrorCode, string> = {
   LESSON_REFERENCE_NOT_FOUND: 'Referenced video asset, document asset, or quiz was not found.',
   QUIZ_LESSON_COMPLETION_NOT_ALLOWED: 'Quiz lessons cannot be manually marked completed.',
   COURSE_DATA_INTEGRITY_VIOLATION: 'Course content data is in an unexpected, inconsistent state.',
+  COURSE_ALREADY_PUBLISHED_ONCE: 'Course has already been published once; use the granular publish endpoint instead.',
+  PUBLISH_SELECTION_STALE: 'The reviewed publish selection is no longer valid; re-check readiness and try again.',
 };
 
 type ErrorResponseBody = {
   error: {
     code: string;
     message: string;
+    // Present only for PUBLISH_SELECTION_STALE — the reviewed selection's current, machine-readable
+    // blockers, in the exact `ReadinessIssue` shape `GET .../readiness` already returns. Every other
+    // Course error keeps the plain, unchanged `{ code, message }` envelope.
+    blockers?: readonly ReadinessIssue[];
   };
 };
 
@@ -54,6 +63,7 @@ export function mapCourseErrorToHttp(error: CourseError): {
       error: {
         code: error.code,
         message: ERROR_MESSAGES[error.code],
+        ...(error instanceof PublishSelectionStaleError ? { blockers: error.blockers } : {}),
       },
     },
   };
