@@ -16,6 +16,7 @@ const ERROR_STATUS: Record<CourseErrorCode, HttpStatus> = {
   INVALID_LESSON_TYPE_REFERENCE: HttpStatus.BAD_REQUEST,
   LESSON_REFERENCE_NOT_FOUND: HttpStatus.NOT_FOUND,
   QUIZ_LESSON_COMPLETION_NOT_ALLOWED: HttpStatus.BAD_REQUEST,
+  COURSE_DATA_INTEGRITY_VIOLATION: HttpStatus.INTERNAL_SERVER_ERROR,
 };
 
 const ERROR_MESSAGES: Record<CourseErrorCode, string> = {
@@ -33,6 +34,7 @@ const ERROR_MESSAGES: Record<CourseErrorCode, string> = {
   INVALID_LESSON_TYPE_REFERENCE: 'Lesson type reference does not match the declared lesson type.',
   LESSON_REFERENCE_NOT_FOUND: 'Referenced video asset, document asset, or quiz was not found.',
   QUIZ_LESSON_COMPLETION_NOT_ALLOWED: 'Quiz lessons cannot be manually marked completed.',
+  COURSE_DATA_INTEGRITY_VIOLATION: 'Course content data is in an unexpected, inconsistent state.',
 };
 
 type ErrorResponseBody = {

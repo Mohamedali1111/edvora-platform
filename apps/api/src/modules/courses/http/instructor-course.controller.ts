@@ -10,7 +10,9 @@ import { CourseProgressQueryDto } from '../dto/course-progress-query.dto';
 import { CourseIdParamDto } from '../dto/course-params.dto';
 import { CreateCourseDto, UpdateCourseMetadataDto } from '../dto/course.dto';
 import { CourseProgressService } from '../services/course-progress.service';
+import { CourseReadinessService } from '../services/course-readiness.service';
 import { CourseService } from '../services/course.service';
+import type { CourseReadiness } from '../types/course-readiness.types';
 import type { CourseProgressRow } from '../types/course-progress.types';
 import type { CourseSummary } from '../types/course.types';
 
@@ -32,6 +34,7 @@ export class InstructorCourseController {
   constructor(
     private readonly courses: CourseService,
     private readonly progress: CourseProgressService,
+    private readonly readiness: CourseReadinessService,
   ) {}
 
   @Post()
@@ -145,5 +148,14 @@ export class InstructorCourseController {
       offset,
     });
     return { items, limit, offset, hasMore };
+  }
+
+  @Get(':courseId/readiness')
+  @HttpCode(HttpStatus.OK)
+  async readinessReport(
+    @CurrentAuth() principal: AuthenticatedPrincipal,
+    @Param() params: CourseIdParamDto,
+  ): Promise<CourseReadiness> {
+    return this.readiness.getCourseReadiness(principal, params.tenantId, params.courseId);
   }
 }

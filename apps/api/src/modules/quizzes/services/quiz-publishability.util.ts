@@ -18,20 +18,55 @@ export type QuizPublishabilityRow = {
   }>;
 };
 
-export function assertQuizPublishable(quiz: QuizPublishabilityRow): void {
+/**
+ * The stable, machine-readable reason codes behind an unpublishable Quiz aggregate. Deliberately
+ * only three codes, not one per individual predicate below: `QUIZ_NOT_PUBLISHABLE_INVALID_POINTS`
+ * is a consolidated "invalid points/configuration" bucket covering every quiz-aggregate-shape
+ * violation that isn't "no questions" or "not exactly one correct option" — invalid
+ * `attemptLimit`/`passingScorePercent`, non-positive per-question or total points, and a
+ * per-question-type option-count violation (`TRUE_FALSE` needs exactly 2, `MULTIPLE_CHOICE` needs
+ * at least 2). `attemptLimit`/`passingScorePercent` are already range-constrained at the DTO layer
+ * (see `QuizService.updateQuizMetadata`'s comment), so in practice only direct data manipulation can
+ * reach those two branches — they stay here so this evaluator remains a complete, honest mirror of
+ * every predicate `assertQuizPublishable` has always checked, not a narrowed reimplementation.
+ */
+export type QuizPublishabilityReasonCode =
+  | 'QUIZ_NOT_PUBLISHABLE_NO_QUESTIONS'
+  | 'QUIZ_NOT_PUBLISHABLE_MISSING_CORRECT_OPTION'
+  | 'QUIZ_NOT_PUBLISHABLE_INVALID_POINTS';
+
+/**
+ * Pure, side-effect-free evaluation of the exact same Quiz-aggregate publishability rules
+ * `assertQuizPublishable` enforces, returning every distinct violation found instead of throwing on
+ * the first one. This is the single source of truth both `assertQuizPublishable` (existing
+ * publish/mutation-safety call sites, unchanged behavior) and the Course Readiness endpoint (which
+ * needs structured reason codes, not a thrown exception) evaluate against — see
+ * `CourseReadinessService`/`evaluateCourseReadiness`.
+ *
+ * Only ACTIVE questions are expected on `quiz.questions` (callers select with the same
+ * `quizPublishabilitySelect` this file exports, which already filters to `QuestionStatus.ACTIVE`),
+ * matching student delivery/attempt-snapshot behavior — archived questions never count for or
+ * against publishability.
+ */
+export function evaluateQuizPublishability(quiz: QuizPublishabilityRow): QuizPublishabilityReasonCode[] {
+  const reasons = new Set<QuizPublishabilityReasonCode>();
+
   if (quiz.attemptLimit !== null && quiz.attemptLimit < 1) {
-    throw new QuizNotPublishableError();
+    reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
   }
 
   if (quiz.passingScorePercent !== null) {
     const threshold = quiz.passingScorePercent.toNumber();
     if (threshold < 0 || threshold > 100) {
-      throw new QuizNotPublishableError();
+      reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
     }
   }
 
   if (quiz.questions.length === 0) {
-    throw new QuizNotPublishableError();
+    // No per-question checks are meaningful with zero questions — matches the original
+    // short-circuiting `assertQuizPublishable`, which never reached the per-question loop either.
+    reasons.add('QUIZ_NOT_PUBLISHABLE_NO_QUESTIONS');
+    return Array.from(reasons);
   }
 
   let totalPoints = 0;
@@ -39,26 +74,37 @@ export function assertQuizPublishable(quiz: QuizPublishabilityRow): void {
   for (const question of quiz.questions) {
     const points = question.points.toNumber();
     if (points <= 0) {
-      throw new QuizNotPublishableError();
+      reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
+    } else {
+      totalPoints += points;
     }
-
-    totalPoints += points;
 
     const correctCount = question.options.filter((option) => option.isCorrect).length;
     if (correctCount !== 1) {
-      throw new QuizNotPublishableError();
+      reasons.add('QUIZ_NOT_PUBLISHABLE_MISSING_CORRECT_OPTION');
     }
 
     if (question.type === QuestionType.TRUE_FALSE && question.options.length !== 2) {
-      throw new QuizNotPublishableError();
+      reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
     }
 
     if (question.type === QuestionType.MULTIPLE_CHOICE && question.options.length < 2) {
-      throw new QuizNotPublishableError();
+      reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
     }
   }
 
+  // Reachable only when every question's own points were <= 0 (each of which already added
+  // INVALID_POINTS above) — kept for exact parity with the original predicate rather than assumed
+  // dead code, since `Set` dedupes the resulting no-op re-add either way.
   if (totalPoints <= 0) {
+    reasons.add('QUIZ_NOT_PUBLISHABLE_INVALID_POINTS');
+  }
+
+  return Array.from(reasons);
+}
+
+export function assertQuizPublishable(quiz: QuizPublishabilityRow): void {
+  if (evaluateQuizPublishability(quiz).length > 0) {
     throw new QuizNotPublishableError();
   }
 }

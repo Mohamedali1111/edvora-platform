@@ -12,7 +12,8 @@ export type CourseErrorCode =
   | 'INVALID_LESSON_REORDER'
   | 'INVALID_LESSON_TYPE_REFERENCE'
   | 'LESSON_REFERENCE_NOT_FOUND'
-  | 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED';
+  | 'QUIZ_LESSON_COMPLETION_NOT_ALLOWED'
+  | 'COURSE_DATA_INTEGRITY_VIOLATION';
 
 export class CourseError extends Error {
   constructor(
@@ -119,6 +120,21 @@ export class QuizLessonCompletionNotAllowedError extends CourseError {
     super(
       'QUIZ_LESSON_COMPLETION_NOT_ALLOWED',
       'Quiz lessons cannot be manually marked completed.',
+    );
+  }
+}
+
+// Reached only when a Lesson's declared `type` has no matching VideoLesson/DocumentLesson/QuizLesson
+// detail row — provably impossible through this API (`LessonService.createLesson` writes the Lesson
+// and its one type-matching detail row atomically in the same transaction, see
+// `assertSingleTypeReference`), so this signals genuine underlying data corruption, not a normal
+// user-facing readiness gap. Course Readiness must fail loudly here rather than silently reporting a
+// corrupted Lesson as ready or simply omitting it — see `evaluateCourseReadiness`.
+export class CourseDataIntegrityError extends CourseError {
+  constructor() {
+    super(
+      'COURSE_DATA_INTEGRITY_VIOLATION',
+      'Course content data is in an unexpected, inconsistent state.',
     );
   }
 }

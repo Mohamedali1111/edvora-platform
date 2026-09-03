@@ -186,6 +186,94 @@ Setting `QuestionOption.isCorrect` to `true` through the existing Option update 
 selects that Option as the sole correct Option for its Question by clearing sibling correctness in
 the same transaction before re-validating any already-`PUBLISHED` Quiz aggregate.
 
+## Course Readiness Derivation
+
+`GET /instructor/tenants/:tenantId/courses/:courseId/readiness` is the single authoritative,
+server-side source of truth for "what in this Course could be published right now" — it replaces an
+earlier Instructor Web client-side derivation that resolved Lesson content state against one
+paginated page of the tenant's Media list (`MEDIA_PAGE_SIZE = 20`) and silently treated any
+referenced asset outside that page as unknown/not-ready. The endpoint instead reads only the exact
+Section/Lesson/VideoAsset/DocumentAsset/Quiz records this Course's own Lesson relations reference —
+one bounded, nested Prisma read scaled to the Course's own structure, never a tenant-wide list — so
+correctness no longer depends on how many other media assets or quizzes the tenant happens to have.
+
+The response is a machine-readable readiness fact sheet, never translated/localized product copy:
+stable `reasonCode`s (`VIDEO_PREPARING`/`VIDEO_FAILED`/`VIDEO_ASSET_ARCHIVED`,
+`DOCUMENT_PREPARING`/`DOCUMENT_FAILED`/`DOCUMENT_ASSET_ARCHIVED`, `QUIZ_ARCHIVED`, the three
+`QUIZ_NOT_PUBLISHABLE_*` codes, and the advisory-only `SECTION_EMPTY`/
+`LESSON_AVAILABILITY_WINDOW_ELAPSED`) plus each entity's own raw authored title, which the Instructor
+Web maps to localized UI copy. There is deliberately no "Section/Lesson is DRAFT" reason code — see
+below. `VIDEO_ASSET_ARCHIVED`/`DOCUMENT_ASSET_ARCHIVED` are represented through the existing
+`AssetProcessingStatus.ARCHIVED` enum value already in the schema — no new media field or migration
+was added; no application code currently transitions an asset into that state, but the readiness
+endpoint honors it structurally regardless, ahead of the still-unimplemented Media Library archive
+lifecycle.
+
+**Lifecycle state and content readiness are different concepts.** `readyToPublish` exists to feed the
+future `POST .../courses/:courseId/publish-selected`, which lets an instructor explicitly select which
+currently-`DRAFT` Sections/Lessons should transition to `PUBLISHED`. A `DRAFT` Section/Lesson is
+therefore the *expected, normal* state of a first-publish candidate, never a blocker by itself: a
+brand-new Course (`Course DRAFT -> Section DRAFT -> Lesson DRAFT -> VideoAsset READY`) must be a valid
+candidate without the instructor first manually publishing the Section and Lesson one click at a time —
+that would recreate exactly the multi-click authoring workflow this endpoint exists to remove.
+Candidacy rules:
+
+- **Lesson**: `status === DRAFT` AND belongs to a non-`ARCHIVED` Section AND its referenced content is
+  "content-ready" (below). An already-`PUBLISHED` Lesson is never a candidate — it is already live and
+  needs no transition — regardless of its parent Section's status (a `DRAFT`, ready Lesson under an
+  already-`PUBLISHED` Section is still a valid candidate needing only itself selected, matching the
+  future publish-selected contract's "a selected Lesson's Section must either be included in selected
+  sectionIds OR already be PUBLISHED" rule).
+- **Section**: `status === DRAFT` AND it contains at least one candidate Lesson. An already-`PUBLISHED`
+  Section is never a candidate (nothing to transition); an empty or all-unready-Lesson `DRAFT` Section
+  is also never a candidate — Section publication has no child-count prerequisite in the real backend,
+  but offering an empty/unready Section for first-publish selection would deliver no actual
+  student-consumable content, so it is excluded here (surfaced instead as the `SECTION_EMPTY`
+  advisory).
+- **Quiz**: listed in `readyToPublish.quizzes` only for a candidate QUIZ Lesson whose Quiz is still
+  `DRAFT` — i.e. exactly the Quiz publish-selected will need to transition to `PUBLISHED` as a
+  server-side side effect of publishing its Lesson. An already-`PUBLISHED` Quiz backing a candidate
+  Lesson needs no such transition and is not listed.
+
+Content-issue blockers (`VIDEO_PREPARING`/`VIDEO_FAILED`/..., `QUIZ_NOT_PUBLISHABLE_*`, `QUIZ_ARCHIVED`)
+are evaluated for every non-`ARCHIVED` Lesson regardless of its own `DRAFT`/`PUBLISHED` status — useful
+diagnostics for already-published Course content too (e.g. a previously-`READY` video that later moved
+to `FAILED`), without ever gating an already-`PUBLISHED` Lesson's candidacy, since it was never a
+candidate to begin with.
+
+V1 supports progressive Course authoring, so `ready` is deliberately **not** "every descendant in the
+Course is ready" — a Course may legitimately carry unfinished, future Draft content indefinitely, and
+`ready` is true iff `readyToPublish.lessons` is non-empty, i.e. at least one Lesson currently has actual,
+student-consumable content that could be published right now. An empty or content-less Section can
+never make `ready` true by itself — the product needs actual publishable content, not merely a
+technically legal empty Section, to justify "ready to publish." `blockers` still lists every
+unfinished or broken piece elsewhere in the Course so the UI can explain it; that never by itself flips
+`ready` to false as long as some valid Lesson candidate exists.
+
+QUIZ Lesson content-readiness reuses the exact same Quiz-aggregate publishability rule
+`QuizService.publishQuiz()` enforces (`evaluateQuizPublishability`, extracted as a pure evaluator so
+existing throw-based `assertQuizPublishable()` call sites are unchanged) — but, deliberately, evaluated
+against the Quiz's *current* aggregate regardless of whether the Quiz itself is already `PUBLISHED` or
+still `DRAFT`. An aggregate-valid `DRAFT` Quiz is content-ready for readiness purposes, because
+readiness describes what *could* be published as part of this Course's future publish flow, not only
+what has already been explicitly published on its own. This is intentionally broader than the
+standalone `POST /lessons/:id/publish` gate, which still requires the referenced Quiz to already be
+`PUBLISHED` (`LessonService`'s existing content-readiness check is unchanged).
+
+`readyToPublish` (`sections`/`lessons`/`quizzes`) is the informational candidate set the planned
+`FIRST_PUBLISH` review screen will let an instructor explicitly select from. It is read-only,
+informational data: the future publish-selected endpoint will never trust a client-supplied quizId (or
+any other ID) from this response and will re-resolve every reference from the Course's own Lesson
+relations server-side, exactly as this endpoint does. This slice implements only the `GET`; explicit
+selection and the mutating publish-selected endpoint are not implemented yet.
+
+Readiness is read-only and takes no PostgreSQL advisory lock — nothing it reads is mutated, so it does
+not need to serialize against `lockQuizPublicationBoundary`. A Lesson whose declared `type` has no
+matching VideoLesson/DocumentLesson/QuizLesson detail row is provably impossible through this API
+(`LessonService.createLesson` writes both atomically in one transaction); the endpoint fails loudly
+with a `COURSE_DATA_INTEGRITY_VIOLATION` (500) in that case rather than silently reporting a corrupted
+Lesson as ready. No Prisma schema or migration change was needed.
+
 ## Video and Document Metadata
 
 Video metadata should be provider-independent: external/provider asset reference, upload/processing/playback readiness state, duration where known, failure reason/state, and storage/object reference where appropriate.
